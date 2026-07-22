@@ -408,8 +408,8 @@ function nodeToSpec(node: Node): Partial<NodeSpec> {
     security,
     // XHTTP 协议不使用 flow（flow=xtls-rprx-vision 仅适用于 TCP+REALITY Vision）
     flow: network === 'xhttp' ? '' : (cfgStr(cfg, 'flow') || ''),
-    host: netHostStr || cfgStr(cfg, 'host') || (cfg as any)?.xhttp?.host || (cfg as any)?.ws?.host || undefined,
-    path: cfgStr(cfg, 'path') || (cfg as any)?.xhttp?.path || (cfg as any)?.ws?.path || cfg.network_settings?.path || undefined,
+    host: netHostStr || cfgStr(cfg, 'host') || (cfg as any)?.xhttp?.host || (cfg as any)?.ws?.host || node.host_header || undefined,
+    path: cfgStr(cfg, 'path') || (cfg as any)?.xhttp?.path || (cfg as any)?.ws?.path || cfg.network_settings?.path || node.path || undefined,
     // gRPC serviceName 回退顺序：config_json.service_name → network_settings.serviceName → node.path（DB 列）
     // 修复 gRPC 节点编辑回显：normalizer 之前会删除 config_json.service_name，需从 node.path 回退
     service_name: cfgStr(cfg, 'service_name') || cfg.network_settings?.serviceName || (network === 'grpc' && node.path ? node.path : undefined),
@@ -912,8 +912,10 @@ function specToNodePayload(spec: NodeSpec, isEdit: boolean): Record<string, unkn
     // gRPC 节点的 ServiceName 存储在 node.Path DB 列（后端 buildTransportConfig 从 n.Path 读取），
     // 必须把 service_name 映射到 payload.path，否则后端渲染时 ServiceName 为空导致 Validate 失败。
     // TCP 传输（Trojan/VLESS+TCP 等）不需要 path，发送空字符串避免后端 path 唯一性校验误报冲突
-    path: spec.transport === 'grpc' ? (spec.service_name || spec.path || '') : (isTcp ? '' : (spec.path || '')),
-    host_header: spec.host || '',
+    // WS/XHTTP 节点：spec.path 为空时发送 undefined（不更新独立列），避免编辑保存时清空已有 path
+    path: spec.transport === 'grpc' ? (spec.service_name || spec.path || '') : (isTcp ? '' : (spec.path || undefined)),
+    // host_header 为空时发送 undefined（不更新独立列），避免编辑保存时清空已有 host_header
+    host_header: spec.host || undefined,
     flow: effectiveFlow || '',
     security_type: spec.security || 'none',
     // 上下行分离（split mode）：顶层 DB 字段
