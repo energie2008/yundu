@@ -156,6 +156,8 @@ interface Node {
   runtime_id?: string
   // DB 列：gRPC serviceName / WS path / XHTTP path（后端 NodeResponse 返回，用于编辑回显 fallback）
   path?: string
+  // DB 列：WS/XHTTP Host header（后端 NodeResponse 返回，用于编辑回显 fallback）
+  host_header?: string
   // DB 列：服务端监听端口（后端 NodeResponse 返回，用于编辑回显，是唯一真相源）
   server_port?: number
   config?: string | NodeConfigData | null
