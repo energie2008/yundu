@@ -1,0 +1,62 @@
+# OpenTelemetry Collector — 接收各服务 trace，转发到 stdout + Loki（通过 OTLP）
+# 内存友好配置：batch + memory_limiter + send_sequence
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+        max_recv_msg_size_mib: 4
+
+processors:
+  # 内存保护：超过 80% 触发拒绝，达到 70% 开始丢弃
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  # 批处理提升吞吐
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 8192
+  # 采样：只保留 10% trace（与 tracer.go 默认采样率一致）
+  probabilistic_sampler:
+    sampling_percentage: 10
+  # 资源增强
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: ${env:APP_ENV:-production}
+        action: upsert
+
+exporters:
+  # 推送到 stdout（仅 debug 用，生产可关闭）
+  debug:
+    verbosity: basic
+    sampling_initial: 100
+    sampling_thereafter: 100
+  # 推送到 Loki（通过 OTLP HTTP，Loki 3.x 原生支持）
+  otlp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+  # 推送到 Prometheus（trace → metric，可选）
+  # otlp/prometheus:
+  #   endpoint: http://prometheus:9090/api/v1/otlp/v1/exemplars
+  #   tls:
+  #     insecure: true
+
+service:
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      address: 0.0.0.0:8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, probabilistic_sampler, resource, batch]
+      exporters: [debug, otlp/loki]
+  extensions: []

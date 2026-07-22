@@ -1,0 +1,350 @@
+syntax = "proto3";
+
+package agent.v1;
+
+option go_package = "github.com/airport-panel/proto/agent/v1;agentv1";
+
+// ============================================================================
+// AgentChannel 是 Agent<->Panel 的双向流通信服务
+// Agent 作为 gRPC Client 主动连接 Panel，建立双向流后：
+//   - Agent 发送: Auth, Heartbeat, ConfigResult, TrafficReport, Ping
+//   - Panel 发送: AuthAck, HeartbeatAck, ConfigPush, Pong, UserBanNotice, CertRenewNotice
+// 所有消息带单调递增 seq 号用于防重放和排序
+// ============================================================================
+service AgentChannel {
+  rpc Stream(stream AgentMessage) returns (stream PanelMessage);
+}
+
+// ============================================================================
+// Channel 健康状态
+// ============================================================================
+enum ChannelState {
+  CHANNEL_STATE_UNKNOWN = 0;
+  CHANNEL_STATE_HEALTHY = 1;
+  CHANNEL_STATE_DEGRADED = 2;
+  CHANNEL_STATE_UNHEALTHY = 3;
+}
+
+message ChannelHealth {
+  ChannelState state = 1;
+  int64 rtt_ms = 2;      // 当前通道RTT(毫秒)
+  string last_error = 3; // 最近错误信息
+}
+
+// ============================================================================
+// 服务器负载指标 (Agent心跳上报)
+// ============================================================================
+message ServerLoad {
+  float cpu_percent = 1;
+  float mem_percent = 2;
+  int64 mem_total_mb = 3;
+  int64 mem_used_mb = 4;
+  float disk_percent = 5;
+  int64 disk_total_gb = 6;
+  int64 disk_used_gb = 7;
+  float network_in_kbps = 8;
+  float network_out_kbps = 9;
+  float load_1 = 10;
+  float load_5 = 11;
+  float load_15 = 12;
+  int64 tcp_connections = 13;
+  int64 active_streams = 14;
+  int64 goroutines = 15;
+  int64 uptime_seconds = 16;
+}
+
+// ============================================================================
+// 内核信息
+// ============================================================================
+enum KernelType {
+  KERNEL_TYPE_UNSPECIFIED = 0;
+  KERNEL_TYPE_XRAY = 1;
+  KERNEL_TYPE_SINGBOX = 2;
+}
+
+message KernelInfo {
+  KernelType type = 1;
+  string version = 2;
+  string config_version = 3;   // 当前生效的配置版本号
+  bool running = 4;
+}
+
+// ============================================================================
+// 节点在线状态 (心跳中上报每个节点的状态)
+// ============================================================================
+message NodeStatus {
+  string node_id = 1;          // UUID
+  bool enabled = 2;
+  int64 online_users = 3;
+  int64 traffic_in_bytes = 4;  // 自上次上报累计
+  int64 traffic_out_bytes = 5;
+  int32 listen_port = 6;
+  string last_error = 7;
+}
+
+// ============================================================================
+// 用户流量条目
+// ============================================================================
+message UserTraffic {
+  string user_id = 1;          // 用户UUID
+  int64 upload_bytes = 2;
+  int64 download_bytes = 3;
+  int64 active_connections = 4;
+}
+
+// ============================================================================
+// 认证请求 (Agent 发送的第一条消息)
+// ============================================================================
+message AuthRequest {
+  string machine_token = 1;    // 长效机器令牌(HMAC-SHA256生成)
+  string machine_id = 2;       // 服务器code (如 "sg01")
+  string nonce = 3;            // 随机字符串，每次连接唯一
+  int64 timestamp = 4;         // Unix秒级时间戳
+  string signature = 5;        // HMAC-SHA256(machine_id+nonce+timestamp, machine_token)
+  KernelType preferred_kernel = 6; // Agent偏好的内核类型
+  string agent_version = 7;    // Agent版本号
+  string hostname = 8;         // 主机名
+}
+
+message AuthAck {
+  bool ok = 1;
+  string session_token = 2;    // 会话Token (用于后续HMAC签名，不直接传输密钥)
+  int64 session_expires_at = 3; // 会话过期时间(Unix秒)
+  string server_id = 4;        // 分配的服务器UUID
+  string error = 5;            // 失败原因
+}
+
+// ============================================================================
+// 心跳
+// ============================================================================
+message Heartbeat {
+  int64 config_version = 1;    // Agent当前配置版本
+  ServerLoad load = 2;
+  KernelInfo kernel = 3;
+  repeated NodeStatus nodes = 4;
+  ChannelHealth channel = 5;
+  string public_ip = 6;        // Agent自检测到的公网IP
+}
+
+enum HeartbeatAction {
+  HEARTBEAT_ACTION_NONE = 0;
+  HEARTBEAT_ACTION_RELOAD = 1;     // 需要重新拉取配置
+  HEARTBEAT_ACTION_RESTART = 2;    // 需要重启内核
+  HEARTBEAT_ACTION_MAINTENANCE = 3;// 进入维护模式(停止接受新连接)
+  HEARTBEAT_ACTION_UPGRADE = 4;    // 有新版本Agent可用
+  HEARTBEAT_ACTION_SYNC_EXTERNAL_RESOURCES = 5; // 同步外部资源(nginx vhost/证书等)
+}
+
+message HeartbeatAck {
+  HeartbeatAction action = 1;
+  int64 latest_config_version = 2; // 面板最新配置版本号
+  int64 server_time = 3;           // 面板当前时间(用于时钟同步)
+}
+
+// ============================================================================
+// 配置下发
+// ============================================================================
+message NodeSpec {
+  string node_id = 1;
+  string code = 2;
+  string name = 3;
+  string protocol = 4;            // vless/trojan/vmess/shadowsocks/hysteria2/tuic/anytls
+  string address = 5;             // 显示给用户的地址
+  int32 public_port = 6;          // 连接端口(用户连接的端口)
+  int32 listen_port = 7;          // 监听端口(实际监听端口)
+  bool enabled = 8;
+  bool allow_udp = 9;
+
+  // 传输层
+  string transport_type = 10;     // tcp/ws/grpc/http2/quic/kcp/httpupgrade
+  bytes transport_settings = 11;  // 传输层配置JSON
+  string path = 12;               // ws/grpc路径
+  string host_header = 13;        // HTTP Host
+
+  // 安全层
+  string security_type = 14;      // none/tls/reality
+  string sni = 15;
+  repeated string alpn = 16;
+  string fingerprint = 17;        // uTLS指纹
+  bytes security_settings = 18;   // TLS/Reality 详细配置JSON
+
+  // 协议凭证
+  bytes credentials = 19;         // 凭证JSON (uuid/password/keypair等)
+
+  // 流量控制
+  int32 speed_limit_mbps = 20;
+  int32 device_limit = 21;
+  double traffic_rate = 22;
+  string flow = 23;               // xtls-rprx-vision等
+
+  // 路由
+  repeated string tags = 24;
+  string route_group = 25;
+  bytes custom_outbounds = 26;    // 自定义Outbounds JSON
+  bytes custom_routes = 27;       // 自定义Routes JSON
+
+  // 父节点(链式代理)
+  string parent_node_id = 28;
+}
+
+message ConfigPush {
+  int64 version = 1;
+  string config_hash = 2;         // SHA256(所有NodeSpec的规范序列化)
+  repeated NodeSpec nodes = 3;
+  bytes global_config = 4;        // 全局配置 (DNS/Log/API等)
+  bool full_replace = 5;          // true=全量替换; false=增量更新
+}
+
+// ConfigResult 是 Agent 应用配置后上报结果
+message ConfigResult {
+  int64 version = 1;
+  string config_hash = 2;
+  bool success = 3;
+  string error = 4;
+  int64 apply_duration_ms = 5;    // 配置应用耗时
+  string kernel_type = 6;         // 应用配置的内核类型
+}
+
+// ============================================================================
+// 流量上报
+// ============================================================================
+message TrafficReport {
+  int64 seq = 1;                  // 单调递增序列号
+  int64 timestamp = 2;
+  repeated UserTraffic entries = 3;
+  int64 total_online_users = 4;
+}
+
+// ============================================================================
+// 用户封禁通知
+// ============================================================================
+message UserBanNotice {
+  repeated string user_ids = 1;
+  string reason = 2;
+  int64 timestamp = 3;
+}
+
+// ============================================================================
+// 证书续签通知
+// ============================================================================
+message CertRenewNotice {
+  string node_id = 1;
+  string cert_type = 2;           // tls/ech
+  string cert_path = 3;
+  string key_path = 4;
+  bytes cert_data = 5;            // 证书数据(PEM格式)
+  bytes key_data = 6;             // 密钥数据(PEM格式)
+  int64 expires_at = 7;
+}
+
+// ============================================================================
+// Ping/Pong (通道健康检测)
+// ============================================================================
+message Ping {
+  int64 timestamp = 1;
+  bytes payload = 2;              // 可选随机数据用于RTT测量
+}
+
+message Pong {
+  int64 timestamp = 1;
+  int64 ping_timestamp = 2;       // 对应Ping的timestamp
+}
+
+// ============================================================================
+// 维护模式指令
+// ============================================================================
+message MaintenanceCommand {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_DRAIN = 1;             // 优雅关闭:停止接受新连接，等待现有连接结束
+    ACTION_RESUME = 2;            // 恢复服务
+    ACTION_RESTART = 3;           // 立即重启内核
+    ACTION_STOP = 4;              // 停止内核
+  }
+  Action action = 1;
+  string reason = 2;
+  int64 drain_timeout_seconds = 3;
+}
+
+// ============================================================================
+// Delta Sync 增量同步（P2 支柱：替代全量 Manifest 下发）
+// 面板在用户增删/套餐变更时推送轻量 Delta，Agent 零断流热更
+// ============================================================================
+message DeltaUserChange {
+  string email = 1;
+  string uuid = 2;
+  string inbound_tag = 3;
+  int32 level = 4;
+  string password = 5;           // Hy2/TUIC 密码
+  map<string, string> extra = 6; // 协议专有字段(flow/method等)
+}
+
+message DeltaSync {
+  string node_id = 1;            // 目标节点ID(UUID)
+  string server_code = 2;        // 目标服务器code
+  KernelType kernel = 3;         // 目标内核(xray/sing-box)
+  repeated DeltaUserChange add_users = 4;  // 新增/修改的用户
+  repeated string del_users = 5;           // 待删除用户email
+  int64 config_version = 6;      // 目标配置版本号
+  string config_hash = 7;        // 预期配置hash(一致性校验)
+}
+
+message DeltaAck {
+  int64 config_version = 1;
+  bool success = 2;
+  string error = 3;
+  int64 apply_duration_ms = 4;
+}
+
+// ============================================================================
+// 日志流（Agent→Panel，用于AI诊断采集内核日志）
+// ============================================================================
+message LogEntry {
+  int64 timestamp = 1;           // 日志时间Unix毫秒
+  string source = 2;             // xray/sing-box/agent/warp
+  string level = 3;              // info/warn/error/debug
+  string message = 4;            // 日志内容
+  map<string, string> labels = 5; // 附加标签(node_id/connection_id等)
+}
+
+message LogChunk {
+  repeated LogEntry entries = 1;
+  string machine_id = 2;         // 冗余字段，服务端也可从stream auth获取
+}
+
+// ============================================================================
+// Agent 发送的消息信封
+// ============================================================================
+message AgentMessage {
+  int64 seq = 1;                  // 单调递增，从1开始
+  int64 timestamp = 2;            // 发送时间Unix毫秒
+
+  oneof payload {
+    AuthRequest auth = 3;
+    Heartbeat heartbeat = 4;
+    ConfigResult config_result = 5;
+    TrafficReport traffic_report = 6;
+    Ping ping = 7;
+    LogChunk log_chunk = 8;       // 日志块（批量发送，减少帧数量）
+    DeltaAck delta_ack = 9;       // Delta Sync 确认
+  }
+}
+
+// ============================================================================
+// Panel 发送的消息信封
+// ============================================================================
+message PanelMessage {
+  int64 seq = 1;
+  int64 timestamp = 2;
+
+  oneof payload {
+    AuthAck auth_ack = 3;
+    HeartbeatAck heartbeat_ack = 4;
+    ConfigPush config_push = 5;
+    UserBanNotice user_ban = 6;
+    CertRenewNotice cert_renew = 7;
+    Pong pong = 8;
+    MaintenanceCommand maintenance = 9;
+    DeltaSync delta_sync = 10;    // Delta Sync 增量用户变更
+  }
+}

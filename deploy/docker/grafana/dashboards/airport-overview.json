@@ -1,0 +1,67 @@
+{
+  "title": "Airport Panel Overview",
+  "uid": "airport-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP Requests Rate (req/s)",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[1m])) by (service)",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "P99 Latency by Service",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))",
+          "legendFormat": "{{service}} p99",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "In-Flight Requests",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum(http_requests_in_flight)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Panics Recovered",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 },
+      "targets": [
+        { "expr": "sum(http_panics_recovered_total)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Error Rate (5xx) by Service",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m])) by (service)",
+          "legendFormat": "{{service}} 5xx",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

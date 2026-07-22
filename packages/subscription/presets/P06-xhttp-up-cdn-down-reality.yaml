@@ -1,0 +1,62 @@
+id: P06-xhttp-up-cdn-down-reality
+name: "XHTTP 上行CDN | 下行REALITY (异SNI)"
+badge: 主推
+description: "XHTTP split模式：上行走CDN(明文stream-up)，下行直连REALITY，异SNI隔离。抗封锁能力最强"
+protocol: vless
+transport: xhttp
+security: tls
+min_xray_version: "26.3.27"
+client_support:
+  - v2rayNG
+  - Xray
+kernel_compat: xray_only
+deployment_profile: hybrid
+forbidden_combos:
+  cf_saas: "hybrid 模式下行必须直连，无法整体套CDN"
+  cf_argo: "同上"
+enhancement:
+  utls: mandatory
+  ech: optional
+  multiplex: recommended
+ui_warning: "此配置会暴露落地VPS真实IP，仅推荐用于高级用户自选线路"
+base_spec:
+  protocol: vless
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: xhttp
+    xhttp:
+      path: "/xh"
+      host: ""
+      mode: stream-up
+      no_grpc_header: true
+      download_settings:
+        address: ""
+        port: 8443
+        network: xhttp
+        security: reality
+        path: "/dl"
+        host: ""
+        mode: stream-down
+        reality:
+          sni: ""
+          public_key: ""
+          short_id: ""
+  security: tls
+  tls:
+    sni: ""
+    fingerprint: chrome
+  credentials:
+    uuid: ""
+    flow: ""
+recommendations:
+  - "上行经CDN加速，下行直连REALITY保护，兼顾速度与抗封锁"
+  - "nginx需配置grpc_pass反代上行，ssl_preread分流下行"
+  - "CDN域名需开启小黄云(Proxied)"
+warnings:
+  - "需nginx同时配置443(http2+grpc_pass)和8443(stream ssl_preread)两个端口"
+  - "上行和下行使用不同SNI，必须配置正确"
+  - "仅 Xray 内核支持，Sing-box 不支持 xhttp"
+updated_from_upstream: 2026-07-13T00:00:00Z

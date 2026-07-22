@@ -1,0 +1,139 @@
+# Caddy — 统一 HTTPS 反向代理（自动 Let's Encrypt 证书）
+# 部署前请设置 .env 中的 CADDY_DOMAIN_ADMIN/USER/API 为真实域名
+{
+	email {$ACME_EMAIL}
+	# staging 模式（避免开发期消耗配额）：取消注释启用
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+	# 启用 OTel 推送到 otel-collector（需 Caddy v2.8+）
+	# otel_traces {
+	# 	endpoint otel-collector:4317
+	# 	insecure
+	# 	sample_rate 0.1
+	# }
+	# 全局日志
+	log {
+		output file /data/caddy-access.log {
+			roll_size 100mb
+			roll_keep 3
+		}
+		level warn
+	}
+	# 限制最大 body（防止大文件上传滥用）
+	max_request_size 50MB
+}
+
+# ---- Admin 后台 ----
+# 域名通过环境变量注入：{$CADDY_DOMAIN_ADMIN}
+:80 {
+	# 同时支持 IP 访问（开发用）— 返回健康检查
+	respond /healthz "ok"
+	respond /robots.txt "User-agent: *\nDisallow: /"
+}
+
+{$CADDY_DOMAIN_ADMIN} {
+	encode gzip zstd
+	# 安全头
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		# CORS（仅允许 API 域）
+		Access-Control-Allow-Origin "{$CADDY_DOMAIN_API}"
+		Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type, X-Request-Id"
+		Access-Control-Allow-Credentials "true"
+		-access_token
+		-refresh_token
+		# 隐藏服务器标识
+		-Server
+	}
+	# 反代到 admin-web 容器
+	reverse_proxy admin-web:80 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+	log {
+		output file /data/admin-access.log {
+			roll_size 50mb
+			roll_keep 3
+		}
+		format json
+	}
+}
+
+# ---- User 用户面板 ----
+{$CADDY_DOMAIN_USER} {
+	encode gzip zstd
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	reverse_proxy user-web:80 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+	log {
+		output file /data/user-access.log {
+			roll_size 50mb
+			roll_keep 3
+		}
+		format json
+	}
+}
+
+# ---- API 网关 ----
+{$CADDY_DOMAIN_API} {
+	encode gzip zstd
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		# API CORS
+		Access-Control-Allow-Origin "{$CADDY_DOMAIN_ADMIN}, {$CADDY_DOMAIN_USER}"
+		Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type, X-Request-Id, X-Trace-Id"
+		Access-Control-Allow-Credentials "true"
+		Access-Control-Max-Age "86400"
+		-Server
+	}
+	# /healthz 直接返回 ok（不查后端，便于 LB 探活）
+	respond /healthz "ok"
+	respond /robots.txt "User-agent: *\nDisallow: /"
+	# 反代到 api-gateway
+	reverse_proxy api-gateway:8080 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		# 健康检查（仅对 LB pool 有效）
+		# health_uri /healthz
+		# health_interval 10s
+		# health_timeout 3s
+		# 流控：失败熔断
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 30s
+			expect_continue_timeout 5s
+		}
+	}
+	# WebSocket 支持（订阅服务实时推送）
+	@api_ws {
+		path /api/v1/ws/*
+	}
+	reverse_proxy @api_ws api-gateway:8080
+	log {
+		output file /data/api-access.log {
+			roll_size 100mb
+			roll_keep 3
+		}
+		format json
+	}
+}

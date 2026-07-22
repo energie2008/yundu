@@ -1,0 +1,40 @@
+id: P05-anytls
+name: "AnyTLS"
+badge: 新协议
+description: "AnyTLS 新协议，基于 TLS 握手伪装，抗审查能力强，sing-box 原生支持"
+protocol: anytls
+transport: tcp
+security: tls
+min_singbox_version: "1.10.0"
+client_support:
+  - sing-box
+  - Hiddify
+  - Nekoray
+kernel_compat: singbox_only
+deployment_profile: direct
+enhancement:
+  utls: optional
+  ech: optional
+  multiplex: not_applicable
+base_spec:
+  protocol: anytls
+  port: 443
+  allow_udp: false
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: tcp
+  security: tls
+  tls:
+    sni: ""
+    fingerprint: chrome
+    cert_mode: acme
+  credentials:
+    password: ""
+recommendations:
+  - "AnyTLS 为新协议，需 sing-box 1.10+ 客户端"
+  - "抗主动探测能力强，适合高审查环境"
+warnings:
+  - "协议较新，部分老客户端不支持"
+  - "Xray 内核暂不支持，仅 Sing-box 可用"
+updated_from_upstream: 2026-07-13T00:00:00Z

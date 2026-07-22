@@ -1,0 +1,49 @@
+id: P08-xhttp-tls-cdn
+name: "XHTTP + TLS + CDN (纯CDN)"
+badge: CDN友好
+description: "VLESS+XHTTP+TLS 纯CDN模式，packet-up上行，适合 VPS IP 已被墙的兜底方案"
+protocol: vless
+transport: xhttp
+security: tls
+min_xray_version: "26.3.27"
+min_singbox_version: "1.10.0"
+client_support:
+  - v2rayNG
+  - Shadowrocket
+  - sing-box
+  - Xray
+kernel_compat: both
+deployment_profile: cf_saas
+enhancement:
+  utls: optional
+  ech: recommended
+  multiplex: recommended
+base_spec:
+  protocol: vless
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: xhttp
+    xhttp:
+      path: "/xhttp"
+      host: ""
+      mode: packet-up
+      no_grpc_header: true
+  security: tls
+  tls:
+    sni: ""
+    fingerprint: chrome
+  credentials:
+    uuid: ""
+    flow: ""
+recommendations:
+  - "VPS IP 被墙时的最终兜底方案，牺牲部分速度换绝对连通"
+  - "强制 packet-up 模式，禁止 auto（会导致连接不稳定）"
+  - "nginx 需关闭 proxy_buffering，CF 需关闭 http2_to_origin"
+warnings:
+  - "禁止使用 auto 模式，会导致连接不稳定"
+  - "nginx 必须配置 proxy_buffering off"
+  - "CF 后台需关闭 HTTP/2 to Origin"
+updated_from_upstream: 2026-07-13T00:00:00Z

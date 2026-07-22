@@ -1,0 +1,134 @@
+# ============================================================
+# YunDu 可观测性栈 - VPS190 生产配置
+# 包含：Prometheus + Grafana + Loki + Promtail + OTel Collector
+# 严格内存限制（适配 VPS190 ~700MB 可用内存）
+# ============================================================
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: yundu-prometheus
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+      - "--web.listen-address=:9090"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.vps190.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data/prometheus:/prometheus
+    networks:
+      - yundu-obs
+    mem_limit: 128m
+    memswap_limit: 128m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: yundu-loki
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./data/loki:/loki
+    networks:
+      - yundu-obs
+    mem_limit: 128m
+    memswap_limit: 128m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: yundu-promtail
+    restart: unless-stopped
+    volumes:
+      - ./promtail/promtail-vps190.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./data/promtail:/tmp
+    command: ["-config.file=/etc/promtail/config.yml"]
+    networks:
+      - yundu-obs
+    depends_on:
+      - loki
+    mem_limit: 48m
+    memswap_limit: 48m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2m"
+        max-file: "2"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    container_name: yundu-otel
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yml"]
+    volumes:
+      - ./otel-collector/otel-collector-vps190.yml:/etc/otelcol/config.yml:ro
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    networks:
+      - yundu-obs
+    depends_on:
+      - loki
+    mem_limit: 64m
+    memswap_limit: 64m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2m"
+        max-file: "2"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: yundu-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_HTTP_PORT=3000
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      # 资源优化
+      - GF_METRICS_ENABLED=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
+    networks:
+      - yundu-obs
+    depends_on:
+      - prometheus
+      - loki
+    mem_limit: 96m
+    memswap_limit: 96m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "3m"
+        max-file: "2"
+
+networks:
+  yundu-obs:
+    driver: bridge

@@ -1,0 +1,49 @@
+id: P03-vless-ws-tls
+name: "VLESS + WebSocket + TLS (CDN)"
+badge: CDN友好
+description: "VLESS+WS+TLS 经典CDN组合，兼容性最好，支持所有主流客户端，可隐藏VPS真实IP"
+protocol: vless
+transport: ws
+security: tls
+min_xray_version: "1.8.0"
+min_singbox_version: "1.8.0"
+client_support:
+  - v2rayNG
+  - Shadowrocket
+  - Clash Meta
+  - sing-box
+  - Nekoray
+  - Hiddify
+kernel_compat: both
+deployment_profile: cf_saas
+enhancement:
+  utls: optional
+  ech: recommended
+  multiplex: recommended
+base_spec:
+  protocol: vless
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: ws
+    ws:
+      path: "/ws"
+      host: ""
+  security: tls
+  tls:
+    sni: ""
+    fingerprint: chrome
+  credentials:
+    uuid: ""
+    flow: ""
+recommendations:
+  - "兼容性最好的CDN组合，支持所有客户端"
+  - "CDN域名需开启小黄云(Proxied)"
+  - "WS路径建议使用随机字符串增强隐蔽性"
+  - "nginx需配置WebSocket升级头(Upgrade/Connection)"
+warnings:
+  - "WS不支持多路复用，并发性能不如gRPC/XHTTP"
+  - "CDN模式下UDP转发不可用"
+updated_from_upstream: 2026-07-13T00:00:00Z

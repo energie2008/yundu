@@ -1,0 +1,44 @@
+id: P14-vless-ws-tls-ss2022
+name: "VLESS + WS + TLS + SS2022 (混合鉴权)"
+badge: 实验性
+description: "VLESS+WS+TLS+SS2022 混合鉴权，xray 新特性，VLESS 套件外层加 SS2022 混淆"
+protocol: vless
+transport: ws
+security: tls
+min_xray_version: "26.3.0"
+client_support:
+  - v2rayNG
+  - Xray
+kernel_compat: xray_only
+deployment_profile: cf_saas
+enhancement:
+  utls: optional
+  ech: recommended
+  multiplex: recommended
+base_spec:
+  protocol: vless
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: ws
+    ws:
+      path: "/ss2022"
+      host: ""
+  security: tls
+  tls:
+    sni: ""
+    fingerprint: chrome
+  credentials:
+    uuid: ""
+    flow: ""
+recommendations:
+  - "VLESS 套 SS2022 混淆，增强抗审查能力"
+  - "ss2022_key 用 openssl rand -base64 32 生成"
+  - "CDN域名需开启小黄云(Proxied)"
+warnings:
+  - "实验性组合，Sing-box 需额外插件支持"
+  - "Xray 原生支持更稳定，建议优先 Xray"
+  - "ss2022_key 必须是 base64 编码的 32 字节"
+updated_from_upstream: 2026-07-13T00:00:00Z

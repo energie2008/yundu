@@ -1,0 +1,48 @@
+id: P01-vless-reality-vision
+name: "VLESS + TCP + REALITY + Vision"
+badge: 主推
+description: "VLESS+TCP+REALITY+Vision 直连抗封锁最佳方案，REALITY伪装+Vision流控，无需域名证书"
+protocol: vless
+transport: tcp
+security: reality
+min_xray_version: "1.8.0"
+min_singbox_version: "1.8.0"
+client_support:
+  - v2rayNG
+  - Shadowrocket
+  - Clash Meta
+  - sing-box
+  - Nekoray
+kernel_compat: both
+deployment_profile: direct
+forbidden_combos:
+  cf_saas: "REALITY需完整TLS握手，CF会终结TLS破坏协议"
+  cf_argo: "同上"
+enhancement:
+  utls: mandatory
+  ech: not_applicable
+  multiplex: optional
+base_spec:
+  protocol: vless
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: tcp
+  security: reality
+  reality:
+    sni: ""
+    fingerprint: chrome
+    public_key: ""
+    short_id: ""
+  credentials:
+    uuid: ""
+    flow: xtls-rprx-vision
+recommendations:
+  - "REALITY无需域名和证书，dest域名建议选TLS1.3+H2+同ASN的大站"
+  - "short_id建议用openssl rand -hex 4生成"
+  - "Vision流控需客户端和服务端同时支持"
+warnings:
+  - "REALITY dest 域名必须与 SNI 一致，否则握手失败"
+updated_from_upstream: 2026-07-13T00:00:00Z

@@ -1,0 +1,111 @@
+# 公共错误响应片段 — 可被各服务 OpenAPI 通过 $ref 复用
+# 用法：
+#   $ref: '../../openapi/common-errors.yaml#/Unauthorized'
+#   $ref: '../../openapi/common-errors.yaml#/ErrorResponse'
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          description: 业务错误码（非 0 即错误）
+          example: 40001
+        message:
+          type: string
+          description: 人类可读的错误消息
+          example: 参数错误: email 为必填项
+        data:
+          description: 错误响应中 data 为 null
+          nullable: true
+        request_id:
+          type: string
+          description: X-Request-ID 回传，用于全链路排查
+          example: a1b2c3d4e5f6
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 40001
+            message: 参数错误: email 为必填项
+            data: null
+            request_id: req-abc123
+
+    Unauthorized:
+      description: 未认证 / Token 无效或过期
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 40101
+            message: token 无效或已过期
+            data: null
+            request_id: req-abc123
+
+    Forbidden:
+      description: 已认证但无权限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 40301
+            message: admin access required
+            data: null
+            request_id: req-abc123
+
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 40401
+            message: 节点不存在
+            data: null
+            request_id: req-abc123
+
+    Conflict:
+      description: 资源冲突（如邮箱已注册、编码重复）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 40901
+            message: 邮箱已被注册
+            data: null
+            request_id: req-abc123
+
+    TooManyRequests:
+      description: 请求限流
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 42901
+            message: 请求过于频繁，请稍后重试
+            data: null
+            request_id: req-abc123
+
+    InternalServerError:
+      description: 服务内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 50000
+            message: 内部错误，请稍后重试
+            data: null
+            request_id: req-abc123

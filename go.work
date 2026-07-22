@@ -1,0 +1,17 @@
+go 1.26
+
+use (
+	./apps/api-gateway
+	./apps/identity-service
+	./apps/node-agent
+	./apps/node-service
+	./apps/subscription-service
+	./apps/traffic-service
+	./apps/yunductl
+	./cmd/genkey
+	./cmd/migrate
+	./packages/config
+	./packages/proto
+	./packages/subscription
+	./tools/preset_freshness_checker
+)

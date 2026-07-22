@@ -1,0 +1,46 @@
+id: P15-reality-ss2022
+name: "REALITY + Shadowsocks-2022"
+badge: 实验性
+description: "Shadowsocks-2022 + REALITY 安全层组合，实验性，需 Xray 最新版本"
+protocol: shadowsocks
+transport: tcp
+security: reality
+min_xray_version: "26.3.0"
+client_support:
+  - v2rayNG
+  - Xray
+kernel_compat: experimental
+deployment_profile: direct
+forbidden_combos:
+  cf_saas: "REALITY需完整TLS握手，CF会终结TLS破坏协议"
+  cf_argo: "同上"
+enhancement:
+  utls: mandatory
+  ech: not_applicable
+  multiplex: optional
+base_spec:
+  protocol: shadowsocks
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: tcp
+  security: reality
+  reality:
+    sni: ""
+    fingerprint: chrome
+    public_key: ""
+    short_id: ""
+  credentials:
+    password: ""
+    method: 2022-blake3-aes-256-gcm
+recommendations:
+  - "SS2022 method: 2022-blake3-aes-256-gcm"
+  - "REALITY 保护 SS 流量，增强抗审查"
+  - "ss2022_key 用 openssl rand -base64 32 生成"
+warnings:
+  - "实验性组合，Xray-core 需最新版本"
+  - "Sing-box 暂不支持 SS+REALITY 组合"
+  - "生产环境谨慎使用"
+updated_from_upstream: 2026-07-13T00:00:00Z

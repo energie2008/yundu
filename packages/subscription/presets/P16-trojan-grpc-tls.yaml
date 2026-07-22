@@ -1,0 +1,49 @@
+id: P16-trojan-grpc-tls
+name: "Trojan + gRPC + TLS (hybrid)"
+badge: 均衡
+description: "Trojan+gRPC+TLS 混合部署，gRPC 多路复用适合高并发，可走 CDN 也可直连"
+protocol: trojan
+transport: grpc
+security: tls
+min_xray_version: "1.8.0"
+min_singbox_version: "1.8.0"
+client_support:
+  - v2rayNG
+  - Shadowrocket
+  - Clash Meta
+  - sing-box
+  - Nekoray
+kernel_compat: both
+deployment_profile: hybrid
+enhancement:
+  utls: optional
+  ech: recommended
+  multiplex: not_applicable
+base_spec:
+  protocol: trojan
+  port: 443
+  allow_udp: false
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: grpc
+    grpc:
+      service_name: "trojan-grpc"
+      idle_timeout: 60
+      health_check: true
+  security: tls
+  tls:
+    sni: ""
+    fingerprint: chrome
+    cert_mode: acme
+  credentials:
+    password: ""
+recommendations:
+  - "gRPC 多路复用，适合高并发场景"
+  - "grpc_service_name 建议用随机字符串"
+  - "可走 CDN 也可直连，hybrid 模式灵活"
+warnings:
+  - "CF 与源站间 HTTP/2 支持不完整，历史上出现过间歇性连接失败"
+  - "CF 走 gRPC 不推荐生产使用"
+  - "Xray 与 Sing-box 的 gRPC 实现细节有差异，跨内核订阅需分别测试"
+updated_from_upstream: 2026-07-13T00:00:00Z

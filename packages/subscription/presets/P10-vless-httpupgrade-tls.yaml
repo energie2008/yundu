@@ -1,0 +1,47 @@
+id: P10-vless-httpupgrade-tls
+name: "VLESS + HTTPUpgrade + TLS (CDN)"
+badge: 新协议
+description: "VLESS+HTTPUpgrade+TLS CDN组合，sing-box原生支持的新传输，比WS更高效(CDN下性能更好)"
+protocol: vless
+transport: httpupgrade
+security: tls
+min_xray_version: "1.8.24"
+min_singbox_version: "1.10.0"
+client_support:
+  - sing-box
+  - Hiddify
+  - v2rayNG
+  - Xray
+kernel_compat: both
+deployment_profile: cf_saas
+enhancement:
+  utls: optional
+  ech: recommended
+  multiplex: optional
+base_spec:
+  protocol: vless
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: httpupgrade
+    httpupgrade:
+      path: "/h2u"
+      host: ""
+      mode: ""
+  security: tls
+  tls:
+    sni: ""
+    fingerprint: chrome
+  credentials:
+    uuid: ""
+    flow: ""
+recommendations:
+  - "HTTPUpgrade 比 WS 更高效，CDN 下性能更好"
+  - "sing-box 原生支持，无需额外插件"
+  - "CDN域名需开启小黄云(Proxied)"
+warnings:
+  - "部分老客户端不支持 HTTPUpgrade"
+  - "需 sing-box 1.10+ 或 Xray 1.8.24+"
+updated_from_upstream: 2026-07-13T00:00:00Z

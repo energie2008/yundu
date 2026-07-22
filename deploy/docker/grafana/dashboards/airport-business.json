@@ -1,0 +1,210 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 3 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "13.1.0",
+      "targets": [{ "expr": "nodeservice_grpc_agent_connections", "legendFormat": "Active", "refId": "A" }],
+      "title": "gRPC Agent 连接数",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisLabel": "", "fillOpacity": 10, "lineWidth": 1, "pointSize": 5, "showPoints": "auto" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 5, "w": 10, "x": 4, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "calcs": ["mean"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [
+        { "expr": "sum(rate(nodeservice_grpc_messages_received_total[1m])) by (message_type)", "legendFormat": "recv: {{message_type}}", "refId": "A" },
+        { "expr": "sum(rate(nodeservice_grpc_messages_pushed_total[1m])) by (message_type)", "legendFormat": "push: {{message_type}}", "refId": "B" }
+      ],
+      "title": "gRPC 消息收发速率 (msg/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 2 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 14, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [{ "expr": "sum(nodeservice_doctor_checks_total) by (result)", "legendFormat": "{{result}}", "refId": "A" }],
+      "title": "Doctor 检查累计",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisLabel": "", "fillOpacity": 30, "lineWidth": 1, "stacking": { "mode": "normal" } },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 5 },
+      "id": 4,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [
+        { "expr": "sum(rate(nodeservice_doctor_checks_total{result=\"pass\"}[5m])) by (result)", "legendFormat": "pass", "refId": "A" },
+        { "expr": "sum(rate(nodeservice_doctor_checks_total{result=\"warn\"}[5m])) by (result)", "legendFormat": "warn", "refId": "B" },
+        { "expr": "sum(rate(nodeservice_doctor_checks_total{result=\"fail\"}[5m])) by (result)", "legendFormat": "fail", "refId": "C" }
+      ],
+      "title": "Doctor 检查速率 (按结果)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisLabel": "", "fillOpacity": 10, "lineWidth": 1, "pointSize": 5, "showPoints": "auto" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 5 },
+      "id": 5,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [{ "expr": "sum(nodeservice_doctor_autofix_dispatched_total) by (action, status)", "legendFormat": "{{action}} / {{status}}", "refId": "A" }],
+      "title": "Doctor Autofix 派发累计 (按动作/状态)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "mappings": [
+            { "options": { "1": { "text": "Healthy", "color": "green" }, "0": { "text": "Degraded", "color": "yellow" }, "-1": { "text": "Unhealthy", "color": "red" } }, "type": "value" }
+          ],
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 12 },
+      "id": 6,
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+      "targets": [{ "expr": "nodeservice_channel_health_state", "format": "table", "instant": true, "legendFormat": "{{server_id}}", "refId": "A" }],
+      "title": "Channel Health 状态",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisLabel": "", "fillOpacity": 10, "lineWidth": 1, "pointSize": 5, "showPoints": "auto" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 12 },
+      "id": 7,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [{ "expr": "sum(nodeservice_diagnosis_sessions_total) by (category)", "legendFormat": "{{category}}", "refId": "A" }],
+      "title": "AI 诊断会话累计 (按根因类别)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisLabel": "", "fillOpacity": 20, "lineWidth": 1, "stacking": { "mode": "normal" } },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 18 },
+      "id": 8,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [{ "expr": "sum(nodeservice_diagnosis_autofix_total) by (action, status)", "legendFormat": "{{action}} / {{status}}", "refId": "A" }],
+      "title": "AI 诊断 Autofix 累计 (按动作/状态)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 18 },
+      "id": 9,
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [{ "expr": "sum(nodeservice_exposure_applies_total) by (status)", "legendFormat": "{{status}}", "refId": "A" }],
+      "title": "Exposure Apply 累计 (applied / failed)",
+      "type": "stat"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 40,
+  "tags": ["airport", "node-service", "business"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Node Service Business Metrics",
+  "uid": "node-service-business",
+  "version": 0,
+  "weekStart": ""
+}

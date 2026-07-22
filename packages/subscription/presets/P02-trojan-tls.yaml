@@ -1,0 +1,47 @@
+id: P02-trojan-tls
+name: "Trojan + TLS"
+badge: 均衡
+description: "Trojan+TCP+TLS 标准直连协议，模拟 HTTPS 流量，简单稳定"
+protocol: trojan
+transport: tcp
+security: tls
+min_xray_version: "1.8.0"
+min_singbox_version: "1.8.0"
+client_support:
+  - v2rayNG
+  - Shadowrocket
+  - Clash Meta
+  - sing-box
+  - Nekoray
+  - Hiddify
+kernel_compat: both
+deployment_profile: direct
+forbidden_combos:
+  cf_saas: "标准Trojan为TCP直连，非HTTP语义，CF无法转发"
+enhancement:
+  utls: optional
+  ech: recommended
+  multiplex: optional
+base_spec:
+  protocol: trojan
+  port: 443
+  allow_udp: false
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: tcp
+  security: tls
+  tls:
+    sni: ""
+    alpn:
+      - http/1.1
+    fingerprint: chrome
+    cert_mode: acme
+  credentials:
+    password: ""
+recommendations:
+  - "alpn 建议只用 http/1.1，避免 h2 特征暴露"
+  - "需配置真实证书（ACME 或 CF Origin CA）"
+warnings:
+  - "Trojan 为 TCP 直连，VPS IP 会暴露"
+updated_from_upstream: 2026-07-13T00:00:00Z

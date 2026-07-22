@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: api-gateway
+    static_configs:
+      - targets: ['api-gateway:8080']
+    metrics_path: /metrics
+
+  - job_name: identity-service
+    static_configs:
+      - targets: ['identity-service:8081']
+    metrics_path: /metrics
+
+  - job_name: node-service
+    static_configs:
+      - targets: ['node-service:8082']
+    metrics_path: /metrics
+
+  - job_name: subscription-service
+    static_configs:
+      - targets: ['subscription-service:8083']
+    metrics_path: /metrics
+
+  - job_name: traffic-service
+    static_configs:
+      - targets: ['traffic-service:8084']
+    metrics_path: /metrics

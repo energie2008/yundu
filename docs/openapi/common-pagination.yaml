@@ -1,0 +1,106 @@
+# 公共分页片段 — 可被各服务 OpenAPI 通过 $ref 复用
+# 用法：
+#   $ref: '../../openapi/common-pagination.yaml#/PageQuery'
+#   $ref: '../../openapi/common-pagination.yaml#/PageResponse'
+
+components:
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: 页码，从 1 开始
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      description: 每页条数，最大 100
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Sort:
+      name: sort
+      in: query
+      description: 排序字段（如 created_at, name）
+      required: false
+      schema:
+        type: string
+    Order:
+      name: order
+      in: query
+      description: 排序方向
+      required: false
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: desc
+
+  schemas:
+    PageQuery:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+        sort:
+          type: string
+          description: 排序字段
+        order:
+          type: string
+          enum: [asc, desc]
+          default: desc
+
+    PageMeta:
+      type: object
+      required: [total, page, page_size, total_pages]
+      properties:
+        total:
+          type: integer
+          description: 总记录数
+          example: 123
+        page:
+          type: integer
+          description: 当前页码
+          example: 1
+        page_size:
+          type: integer
+          description: 每页条数
+          example: 20
+        total_pages:
+          type: integer
+          description: 总页数
+          example: 7
+
+    PageResponse:
+      type: object
+      description: 分页响应包装（items 为具体资源数组）
+      required: [items, total, page, page_size, total_pages]
+      properties:
+        items:
+          type: array
+          description: 当前页的资源数组
+          items: {}
+        total:
+          type: integer
+          example: 123
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+        total_pages:
+          type: integer
+          example: 7

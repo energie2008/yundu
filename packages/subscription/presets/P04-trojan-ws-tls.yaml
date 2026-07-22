@@ -1,0 +1,46 @@
+id: P04-trojan-ws-tls
+name: "Trojan + WebSocket + TLS (CDN)"
+badge: CDN友好
+description: "Trojan+WS+TLS CDN组合，相比 VLESS+WS 鉴权方式不同，CDN 兼容性好"
+protocol: trojan
+transport: ws
+security: tls
+min_xray_version: "1.8.0"
+min_singbox_version: "1.8.0"
+client_support:
+  - v2rayNG
+  - Shadowrocket
+  - Clash Meta
+  - sing-box
+  - Nekoray
+  - Hiddify
+kernel_compat: both
+deployment_profile: cf_saas
+enhancement:
+  utls: optional
+  ech: recommended
+  multiplex: recommended
+base_spec:
+  protocol: trojan
+  port: 443
+  allow_udp: false
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: ws
+    ws:
+      path: "/trojan-ws"
+      host: ""
+  security: tls
+  tls:
+    sni: ""
+    fingerprint: chrome
+  credentials:
+    password: ""
+recommendations:
+  - "Trojan+WS 相比 VLESS+WS 鉴权用 password 而非 UUID"
+  - "CDN域名需开启小黄云(Proxied)"
+warnings:
+  - "WS 路径必须与服务端一致"
+  - "CDN模式下UDP转发不可用"
+updated_from_upstream: 2026-07-13T00:00:00Z

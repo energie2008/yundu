@@ -1,0 +1,11 @@
+{
+  "extends": "@airport/tsconfig/react.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@airport/ui/*": ["../../packages/ui/src/*"]
+    }
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,71 @@
+id: P09-xhttp-stream-up-reality-xmux
+name: "XHTTP stream-up + REALITY + XMUX (天花板)"
+badge: 实验性
+description: "XHTTP STREAM-UP+REALITY+v4/v6分离+XMUX 多路复用，追求极致速度的天花板配置，IP完全暴露"
+protocol: vless
+transport: xhttp
+security: reality
+min_xray_version: "26.3.27"
+client_support:
+  - v2rayNG
+  - Xray
+kernel_compat: experimental
+deployment_profile: direct
+forbidden_combos:
+  cf_saas: "stream-up+REALITY架构下行必须直连，无法整体套CDN"
+  cf_argo: "同上"
+enhancement:
+  utls: mandatory
+  ech: not_applicable
+  multiplex: recommended
+ui_warning: "IP完全暴露，仅用于VPS来源清洁、追求极致速度的高级直连线路"
+base_spec:
+  protocol: vless
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: xhttp
+    xhttp:
+      path: "/su"
+      host: ""
+      mode: stream-up
+      no_grpc_header: true
+      headers:
+        Referer: "https://www.google.com/"
+    mux:
+      enabled: true
+      protocol: xmux
+      max_streams: 32
+      max_concurrency: "16-32"
+      c_max_reuse_times: "64-128"
+      h_max_request_times: "128-256"
+      h_max_reusable_secs: "10-30"
+      padding: true
+      keep_alive_period: 30
+    sockopt:
+      tcp_fast_open: true
+      tcp_multipath: true
+      congestion: bbr
+      tcp_keep_alive: 60
+  security: reality
+  reality:
+    sni: "mesu.apple.com"
+    fingerprint: chrome
+    public_key: ""
+    short_id: ""
+  credentials:
+    uuid: ""
+    flow: ""
+recommendations:
+  - "STREAM-UP 为 Xray 26.3+ 独有能力，Sing-box 暂不支持"
+  - "XMUX max_concurrency/c_max_reuse_times 必须用范围如 16-32，禁止填固定值"
+  - "sockopt.tcp_fast_open + tcp_multipath + bbr 拉满直连性能"
+  - "Referer 伪装 Header 用于流量伪装，可被中间设备识别为正常 HTTPS"
+  - "download_v6_address 暴露 VPS 真实 IPv6"
+warnings:
+  - "IP完全暴露，仅推荐追求极致速度的高级直连线路"
+  - "STREAM-UP 为实验性模式，目前仅 v2rayNG 验证通过"
+  - "Sing-box 不支持 stream-up 模式"
+updated_from_upstream: 2026-07-13T00:00:00Z

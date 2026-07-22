@@ -1,0 +1,63 @@
+id: P17-xhttp-stream-up-reality-xmux-v4v6
+name: "XHTTP stream-up + REALITY + XMUX + v4/v6双栈 (终极天花板)"
+badge: 主推
+description: "XHTTP STREAM-UP+REALITY+v4/v6双栈分离+XMUX多路复用，追求极致速度的终极天花板配置，IPv4/IPv6智能分流"
+protocol: vless
+transport: xhttp
+security: reality
+min_xray_version: "26.3.27"
+client_support:
+  - v2rayNG
+  - Xray
+  - Clash.Meta
+kernel_compat: xray_only
+deployment_profile: direct
+forbidden_combos:
+  cf_saas: "stream-up+REALITY架构下行必须直连，无法整体套CDN"
+  cf_argo: "同上"
+enhancement:
+  utls: mandatory
+  ech: not_applicable
+  multiplex: recommended
+ui_warning: "IP完全暴露，仅用于VPS来源清洁、追求极致速度的高级直连线路；需服务器同时具备IPv4和IPv6地址"
+base_spec:
+  protocol: vless
+  port: 443
+  address_ipv6: ""
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: xhttp
+    xhttp:
+      path: "/su"
+      host: ""
+      mode: stream-up
+      no_grpc_header: true
+    mux:
+      enabled: true
+      protocol: xmux
+      max_streams: 32
+      max_concurrency: "16-32"
+      padding: true
+      keep_alive_period: 30
+  security: reality
+  reality:
+    sni: "mesu.apple.com"
+    fingerprint: chrome
+    public_key: ""
+    short_id: ""
+  credentials:
+    uuid: ""
+    flow: ""
+recommendations:
+  - "STREAM-UP 为 Xray 26.3+ 独有能力，Sing-box 暂不支持"
+  - "XMUX max_concurrency 推荐使用范围如 16-32，获得最佳多路复用效果"
+  - "address_ipv6 填写 VPS 真实 IPv6 地址，实现 v4/v6 智能分流"
+  - "dual-stack 环境下客户端自动选择最优协议栈，连接成功率提升"
+warnings:
+  - "IP完全暴露，仅推荐追求极致速度的高级直连线路"
+  - "STREAM-UP 为实验性模式，目前仅 v2rayNG 和最新 Xray 核心验证通过"
+  - "Sing-box 不支持 stream-up 模式和 xmux 协议"
+  - "需服务器同时具备 IPv4 和 IPv6 公网地址，否则 v4/v6 分离无意义"
+updated_from_upstream: 2026-07-13T00:00:00Z

@@ -1,0 +1,48 @@
+id: P12-tuic-v5
+name: "TUIC v5"
+badge: 主推
+description: "TUIC v5 基于 QUIC 的高速协议，支持 0-RTT，强制 BBR 拥塞控制，生产环境禁用 0-RTT"
+protocol: tuic
+transport: quic
+security: tls
+min_singbox_version: "1.8.0"
+client_support:
+  - sing-box
+  - Hiddify
+  - Nekoray
+  - Clash Meta
+kernel_compat: both
+deployment_profile: direct
+forbidden_combos:
+  cf_saas: "基于QUIC/UDP，CF传统代理不支持UDP转发"
+  cf_argo: "同上"
+enhancement:
+  utls: not_applicable
+  ech: requires_sing_box
+  multiplex: not_applicable
+base_spec:
+  protocol: tuic
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: quic
+  security: tls
+  tls:
+    sni: ""
+    alpn:
+      - h3
+    cert_mode: acme
+  credentials:
+    uuid: ""
+    password: ""
+recommendations:
+  - "congestion_control 强制 bbr"
+  - "zero_rtt_handshake 强制 false（生产环境禁用 0-RTT）"
+  - "需配置真实证书（ACME）"
+warnings:
+  - "基于 UDP，部分网络可能限制 UDP 流量"
+  - "需开放 UDP 443 端口"
+  - "0-RTT 在生产环境禁用以避免重放攻击"
+updated_from_upstream: 2026-07-13T00:00:00Z

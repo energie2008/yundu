@@ -1,0 +1,362 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* YunDu xboard-style light theme (default) */
+:root {
+  --background: #f5f7fb;
+  --foreground: #1e293b;
+  --card: #ffffff;
+  --card-foreground: #1e293b;
+  --popover: #ffffff;
+  --popover-foreground: #1e293b;
+  --primary: #7c5cfc;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #334155;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #f1f5f9;
+  --accent-foreground: #334155;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #7c5cfc;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e2e8f0;
+  --header-bg: #ffffff;
+  --radius: 0.5rem;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #0f172a;
+  --foreground: #e2e8f0;
+  --card: #1e293b;
+  --card-foreground: #e2e8f0;
+  --popover: #1e293b;
+  --popover-foreground: #e2e8f0;
+  --primary: #7c5cfc;
+  --primary-foreground: #ffffff;
+  --secondary: #334155;
+  --secondary-foreground: #e2e8f0;
+  --muted: #334155;
+  --muted-foreground: #94a3b8;
+  --accent: #334155;
+  --accent-foreground: #e2e8f0;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #334155;
+  --input: #334155;
+  --ring: #7c5cfc;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --sidebar-bg: #1e293b;
+  --sidebar-border: #334155;
+  --header-bg: #1e293b;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --color-sidebar-ring: var(--ring);
+  --color-sidebar-primary-foreground: var(--primary-foreground);
+  --color-sidebar-primary: var(--primary);
+  --color-sidebar-accent-foreground: var(--accent-foreground);
+  --color-sidebar-accent: var(--accent);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar: var(--sidebar-bg);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Base styles */
+* {
+  border-color: var(--border);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* Custom utility classes */
+.bg-card { background-color: var(--card); }
+.bg-sidebar { background-color: var(--sidebar-bg); }
+.bg-header { background-color: var(--header-bg); }
+.text-muted-fg { color: var(--muted-foreground); }
+.border-sidebar { border-color: var(--sidebar-border); }
+.bg-primary-purple { background-color: var(--primary); }
+.text-primary-purple { color: var(--primary); }
+.border-primary-purple { border-color: var(--primary); }
+
+/* xboard-style card */
+.xboard-card {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+/* Green dot for online status */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-dot.online { background-color: #22c55e; }
+.status-dot.offline { background-color: #ef4444; }
+
+/* Protocol tag style */
+.proto-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(124, 92, 252, 0.1);
+  color: #7c5cfc;
+  margin-left: 4px;
+}
+
+/* Multiplier badge */
+.mult-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+/* Available badge */
+.available-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* Animation */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeIn 0.2s ease; }
+.animate-slide-up { animation: slideUp 0.3s ease; }
+
+/* Override @airport/ui dark hardcoded colors for light theme */
+/* Buttons - primary stays indigo/purple which matches our primary */
+/* Outline button */
+button.border-zinc-800 {
+  border-color: var(--border) !important;
+  background: transparent !important;
+  color: var(--foreground) !important;
+}
+button.border-zinc-800:hover {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+/* Secondary/ghost buttons */
+button.bg-zinc-800 {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+button.bg-zinc-800:hover {
+  background: var(--border) !important;
+}
+/* Focus ring offset color */
+*:focus-visible {
+  --tw-ring-color: var(--primary) !important;
+}
+
+/* Dialog */
+[role="dialog"].border-zinc-800,
+div.border-zinc-800.bg-zinc-900 {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+/* Dialog backdrop */
+.fixed.inset-0.bg-black {
+  background: rgba(0,0,0,0.5) !important;
+}
+/* Dialog title */
+h2.text-zinc-100 {
+  color: var(--foreground) !important;
+}
+/* Dialog description */
+p.text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+/* Dialog close button */
+button .text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+
+/* Tabs */
+div.rounded-lg.bg-zinc-800 {
+  background: var(--muted) !important;
+}
+div.rounded-lg .bg-zinc-800 {
+  background: var(--muted) !important;
+}
+button.bg-zinc-900 {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08) !important;
+}
+.text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+.hover\:text-zinc-100:hover {
+  color: var(--foreground) !important;
+}
+
+/* Badge - if any zinc-based badges */
+.bg-zinc-800.text-zinc-200 {
+  background: var(--muted) !important;
+  color: var(--muted-foreground) !important;
+}
+
+/* Input fields from @airport/ui */
+input.border-zinc-800,
+textarea.border-zinc-800,
+select.border-zinc-800 {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+input.border-zinc-800::placeholder,
+textarea.border-zinc-800::placeholder {
+  color: var(--muted-foreground) !important;
+  opacity: 1;
+}
+input.border-zinc-800:focus,
+textarea.border-zinc-800:focus,
+select.border-zinc-800:focus {
+  border-color: var(--primary) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(124,92,252,0.2) !important;
+}
+
+/* Badge variants */
+.badge-secondary,
+div.bg-zinc-800.text-zinc-100 {
+  background: var(--muted) !important;
+  color: var(--muted-foreground) !important;
+}
+div.border-zinc-700.text-zinc-100 {
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+
+/* Spinner */
+svg.text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+
+/* Table styles */
+table .border-zinc-800 {
+  border-color: var(--border) !important;
+}
+table th, table td {
+  color: var(--foreground) !important;
+}
+table thead {
+  background: var(--muted) !important;
+}
+
+/* Select dropdown */
+[role="listbox"].bg-zinc-900 {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+
+/* Label text */
+label.text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+
+/* Separator */
+hr.bg-zinc-800 {
+  background: var(--border) !important;
+}
+
+/* Skeleton */
+.bg-zinc-800.animate-pulse {
+  background: var(--muted) !important;
+}
+
+/* Switch */
+button[data-state="checked"].bg-zinc-800 {
+  background: var(--primary) !important;
+}
+button[data-state="unchecked"].bg-zinc-800 {
+  background: var(--muted) !important;
+}

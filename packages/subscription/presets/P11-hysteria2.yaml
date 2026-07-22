@@ -1,0 +1,48 @@
+id: P11-hysteria2
+name: "Hysteria2"
+badge: 主推
+description: "Hysteria2 基于 QUIC 的高速协议，UDP 直连，速度极快，适合高丢包网络环境"
+protocol: hysteria2
+transport: quic
+security: tls
+min_singbox_version: "1.8.0"
+client_support:
+  - sing-box
+  - Hiddify
+  - Nekoray
+  - Clash Meta
+kernel_compat: singbox_only
+deployment_profile: direct
+forbidden_combos:
+  cf_saas: "基于QUIC/UDP，CF传统代理不支持UDP转发"
+  cf_argo: "同上"
+enhancement:
+  utls: not_applicable
+  ech: requires_sing_box
+  multiplex: not_applicable
+base_spec:
+  protocol: hysteria2
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: quic
+  security: tls
+  tls:
+    sni: ""
+    alpn:
+      - h3
+    fingerprint: chrome
+    cert_mode: acme
+  credentials:
+    password: ""
+recommendations:
+  - "基于 QUIC，速度极快，适合高丢包网络"
+  - "需配置真实证书（ACME）"
+  - "masquerade_url 建议配置可达的真实网站"
+warnings:
+  - "基于 UDP，部分网络可能限制 UDP 流量"
+  - "Xray 内核不支持 Hysteria2，仅 Sing-box 可用"
+  - "需开放 UDP 443 端口"
+updated_from_upstream: 2026-07-13T00:00:00Z

@@ -1,0 +1,528 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: airport-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-airport}
+      TZ: Asia/Shanghai
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-airport}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: airport-redis
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2-alpine
+    container_name: airport-nats
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "${NATS_PORT:-4222}:4222"
+      - "8222:8222"
+    volumes:
+      - ./data/nats:/data
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: airport-minio
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      TZ: Asia/Shanghai
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9002}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - ./data/minio:/data
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.go
+      args:
+        BUILD_TYPE: migrate
+    container_name: airport-migrate
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_DSN=postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-airport}?sslmode=disable
+      - MIGRATIONS_DIR=/app/migrations
+    networks:
+      - airport-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["/app/migrate"]
+
+  identity-service:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.go
+      args:
+        SERVICE: identity-service
+    container_name: airport-identity
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${IDENTITY_SERVICE_PORT:-8081}:8081"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-info}
+      - IDENTITY_SERVICE_PORT=8081
+      - GRPC_PORT=${IDENTITY_GRPC_PORT:-9001}
+      - POSTGRES_DSN=postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-airport}?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - JWT_SECRET=${JWT_SECRET:-change-me}
+      - JWT_ACCESS_TTL_SECONDS=${JWT_ACCESS_TTL_SECONDS:-900}
+      - JWT_REFRESH_TTL_SECONDS=${JWT_REFRESH_TTL_SECONDS:-604800}
+      - ARGON2_SALT=${ARGON2_SALT:-change-me-argon2}
+      - AGENT_API_TOKEN_SALT=${AGENT_API_TOKEN_SALT:-change-me-agent}
+      - NATS_URL=nats://nats:4222
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+      - MINIO_BUCKET=${MINIO_BUCKET:-airport}
+      - MIGRATE_ON_START=false
+      # OpenTelemetry
+      - OTEL_EXPORTER=${OTEL_EXPORTER:-none}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-otel-collector:4317}
+      - OTEL_SERVICE_NAME=identity-service
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  node-service:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.go
+      args:
+        SERVICE: node-service
+    container_name: airport-node
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${NODE_SERVICE_PORT:-8082}:8082"
+      - "127.0.0.1:9000:9000"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-info}
+      - NODE_SERVICE_PORT=8082
+      - GRPC_PORT=9000
+      - POSTGRES_DSN=postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-airport}?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - AGENT_API_TOKEN_SALT=${AGENT_API_TOKEN_SALT:-change-me-agent}
+      - HMAC_SECRET=${HMAC_SECRET:-change-me-hmac}
+      - NATS_URL=nats://nats:4222
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+      - MINIO_BUCKET=${MINIO_BUCKET:-airport}
+      - MIGRATE_ON_START=false
+      # OpenTelemetry
+      - OTEL_EXPORTER=${OTEL_EXPORTER:-none}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-otel-collector:4317}
+      - OTEL_SERVICE_NAME=node-service
+      # ACME
+      - ACME_EMAIL=${ACME_EMAIL:-}
+      - ACME_DIR_URL=${ACME_DIR_URL:-https://acme-staging-v02.api.letsencrypt.org/directory}
+      - ACME_CHALLENGE_TYPE=${ACME_CHALLENGE_TYPE:-http-01}
+      - ACME_DNS_PROVIDER=${ACME_DNS_PROVIDER:-}
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  subscription-service:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.go
+      args:
+        SERVICE: subscription-service
+    container_name: airport-subscription
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${SUBSCRIPTION_SERVICE_PORT:-8083}:8083"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-info}
+      - SUBSCRIPTION_SERVICE_PORT=8083
+      - GRPC_PORT=${SUBSCRIPTION_GRPC_PORT:-9003}
+      - POSTGRES_DSN=postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-airport}?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - AGENT_API_TOKEN_SALT=${AGENT_API_TOKEN_SALT:-change-me-agent}
+      - NATS_URL=nats://nats:4222
+      - SUB_BASE_URL=${SUB_BASE_URL:-http://localhost:8080}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+      - MINIO_BUCKET=${MINIO_BUCKET:-airport}
+      - MIGRATE_ON_START=false
+      # OpenTelemetry
+      - OTEL_EXPORTER=${OTEL_EXPORTER:-none}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-otel-collector:4317}
+      - OTEL_SERVICE_NAME=subscription-service
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  traffic-service:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.go
+      args:
+        SERVICE: traffic-service
+    container_name: airport-traffic
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${TRAFFIC_SERVICE_PORT:-8084}:8084"
+      - "${TRAFFIC_GRPC_PORT:-9004}:9004"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-info}
+      - TRAFFIC_SERVICE_PORT=8084
+      - GRPC_PORT=${TRAFFIC_GRPC_PORT:-9004}
+      - POSTGRES_DSN=postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-airport}?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - AGENT_API_TOKEN_SALT=${AGENT_API_TOKEN_SALT:-change-me-agent}
+      - HMAC_SECRET=${HMAC_SECRET:-change-me-hmac}
+      - NATS_URL=nats://nats:4222
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+      - MINIO_BUCKET=${MINIO_BUCKET:-airport}
+      - MIGRATE_ON_START=false
+      # OpenTelemetry
+      - OTEL_EXPORTER=${OTEL_EXPORTER:-none}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-otel-collector:4317}
+      - OTEL_SERVICE_NAME=traffic-service
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.go
+      args:
+        SERVICE: api-gateway
+    container_name: airport-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      identity-service:
+        condition: service_healthy
+      node-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+      traffic-service:
+        condition: service_healthy
+    ports:
+      - "${API_GATEWAY_PORT:-8080}:8080"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-info}
+      - API_GATEWAY_PORT=8080
+      - IDENTITY_SERVICE_ADDR=identity-service:8081
+      - NODE_SERVICE_ADDR=node-service:8082
+      - SUBSCRIPTION_SERVICE_ADDR=subscription-service:8083
+      - TRAFFIC_SERVICE_ADDR=traffic-service:8084
+      - NODE_SERVICE_GRPC_ADDR=node-service:9000
+      - JWT_SECRET=${JWT_SECRET:-change-me}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-*}
+      - NATS_URL=nats://nats:4222
+      - MIGRATE_ON_START=false
+      # OpenTelemetry
+      - OTEL_EXPORTER=${OTEL_EXPORTER:-none}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-otel-collector:4317}
+      - OTEL_SERVICE_NAME=api-gateway
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  admin-web:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.admin-web
+    container_name: airport-admin-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    ports:
+      - "${ADMIN_WEB_PORT:-5173}:80"
+    networks:
+      - airport-network
+
+  user-web:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.user-web
+    container_name: airport-user-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    ports:
+      - "${USER_WEB_PORT:-5174}:80"
+    networks:
+      - airport-network
+
+  # ===== Observability (Prometheus + Grafana) =====
+  # 全量部署默认启用可观测性栈（无 profile 限制）
+  # 抓取目标通过 docker DNS 解析（prometheus.full.yml 使用 service-name:port）
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: airport-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.full.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data/prometheus:/prometheus
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: airport-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/airport-overview.json
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
+    networks:
+      - airport-network
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+
+  # ===== Logs (Loki + Promtail) =====
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: airport-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./data/loki:/loki
+    networks:
+      - airport-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: airport-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    networks:
+      - airport-network
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  # ===== Tracing (OTel Collector) =====
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.105.0
+    container_name: airport-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yml"]
+    ports:
+      - "${OTEL_COLLECTOR_PORT:-4317}:4317"   # OTLP gRPC
+      - "4318:4318"                              # OTLP HTTP
+      - "8888:8888"                              # 自身 metrics
+    volumes:
+      - ./otel-collector/otel-collector-config.yml:/etc/otelcol/config.yml:ro
+    networks:
+      - airport-network
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  # ===== HTTPS Ingress (Caddy) =====
+  # 自动 TLS（Let's Encrypt）+ 反向代理
+  # 部署前请在 .env 设置 CADDY_DOMAIN_ADMIN/USER/API 为真实域名
+  caddy:
+    image: caddy:2-alpine
+    container_name: airport-caddy
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443/tcp"
+      - "${CADDY_HTTPS_PORT:-443}:443/udp"   # HTTP/3
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+    networks:
+      - airport-network
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      admin-web:
+        condition: service_started
+      user-web:
+        condition: service_started
+
+networks:
+  airport-network:
+    driver: bridge
+
+volumes: {}

@@ -1,0 +1,67 @@
+# YunDu 基础设施栈（VPS190 生产）
+# 仅含 PostgreSQL + Redis + NATS，不含可观测性栈（省内存）
+# Go 微服务以 systemd 方式运行（不在 Docker 内）
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: yundu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-YunDuProd2026Secure}
+      POSTGRES_DB: airport
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:5433:5432"  # 不对公网暴露，用 5433 避免与宝塔 mysqld 3306 冲突概念
+    volumes:
+      - /opt/yundu/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d airport"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 256m
+    memswap_limit: 384m
+    networks:
+      - yundu
+
+  redis:
+    image: redis:7-alpine
+    container_name: yundu-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:6380:6379"  # 不对公网暴露
+    volumes:
+      - /opt/yundu/data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 96m
+    networks:
+      - yundu
+
+  nats:
+    image: nats:2-alpine
+    container_name: yundu-nats
+    restart: unless-stopped
+    command: ["-js", "-sd", "/data", "-m", "8222", "--max_mem_store", "64MB", "--max_file_store", "512MB"]
+    ports:
+      - "127.0.0.1:4223:4222"  # 不对公网暴露
+      - "127.0.0.1:8223:8222"  # 监控端口
+    volumes:
+      - /opt/yundu/data/nats:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 96m
+    networks:
+      - yundu
+
+networks:
+  yundu:
+    driver: bridge

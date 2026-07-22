@@ -1,0 +1,148 @@
+# YunDu 一键编译发布 CI/CD
+# 触发: push tag v* 自动编译所有组件并发布 GitHub Release
+# 产出: node-agent / node-service / api-gateway / identity-service / subscription-service / traffic-service / migrate
+# 平台: linux amd64 + arm64，CGO_ENABLED=0 纯静态二进制（无 GLIBC 依赖）
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.3.0)'
+        required: true
+        default: 'v0.3.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false
+
+      - name: Build all binaries
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          GOPROXY: 'https://goproxy.cn,direct'
+        run: |
+          set -e
+          mkdir -p dist
+          GOARCH_FILTER="${{ matrix.goarch }}"
+          # node-agent 需要 with_quic/with_wireguard/with_utls 构建 Hysteria2/Tuic/WireGuard
+          echo "::group::Build node-agent"
+          ( cd apps/node-agent && go build -tags "with_quic,with_wireguard,with_utls" -o ../../dist/node-agent-${GOARCH} ./cmd/agent/ )
+          echo "::endgroup::"
+
+          echo "::group::Build node-service"
+          ( cd apps/node-service && go build -o ../../dist/node-service-${GOARCH} ./cmd/api/ )
+          echo "::endgroup::"
+
+          echo "::group::Build api-gateway"
+          ( cd apps/api-gateway && go build -o ../../dist/api-gateway-${GOARCH} ./cmd/api/ )
+          echo "::endgroup::"
+
+          echo "::group::Build identity-service"
+          ( cd apps/identity-service && go build -o ../../dist/identity-service-${GOARCH} ./cmd/api/ )
+          echo "::endgroup::"
+
+          echo "::group::Build subscription-service"
+          ( cd apps/subscription-service && go build -o ../../dist/subscription-service-${GOARCH} ./cmd/api/ )
+          echo "::endgroup::"
+
+          echo "::group::Build traffic-service"
+          ( cd apps/traffic-service && go build -o ../../dist/traffic-service-${GOARCH} ./cmd/api/ )
+          echo "::endgroup::"
+
+          echo "::group::Build migrate"
+          ( cd cmd/migrate && go build -o ../../dist/migrate-${GOARCH} . )
+          echo "::endgroup::"
+
+          ls -la dist/
+
+      - name: Verify static linking
+        run: |
+          file dist/node-agent-${{ matrix.goarch }}
+          file dist/node-service-${{ matrix.goarch }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goarch }}
+          path: dist/*
+          retention-days: 7
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release/
+          merge-multiple: true
+
+      - name: List release files
+        run: ls -la release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: YunDu ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          files: release/*
+          body: |
+            ## YunDu ${{ steps.tag.outputs.name }}
+
+            ### 安装方式
+
+            **一键安装 node-agent（节点端）**:
+            ```bash
+            curl -fsSL https://github.com/energie2008/yundu/raw/main/install.sh | bash -s -- agent --token=YOUR_TOKEN --endpoint=https://your-panel.com
+            ```
+
+            **一键安装面板（控制端）**:
+            ```bash
+            curl -fsSL https://github.com/energie2008/yundu/raw/main/install.sh | bash -s -- panel
+            ```
+
+            ### 二进制清单
+            - `node-agent-{amd64,arm64}` — 节点代理（含 xray + sing-box 双内核）
+            - `node-service-{amd64,arm64}` — 节点服务（配置渲染/下发）
+            - `api-gateway-{amd64,arm64}` — API 网关
+            - `identity-service-{amd64,arm64}` — 认证/用户/订单
+            - `subscription-service-{amd64,arm64}` — 订阅生成
+            - `traffic-service-{amd64,arm64}` — 流量统计
+            - `migrate-{amd64,arm64}` — 数据库迁移

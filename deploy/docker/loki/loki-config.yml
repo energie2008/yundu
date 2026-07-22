@@ -1,0 +1,68 @@
+# Loki 配置 — 单节点模式（boltdb-shipper + filesystem）
+# 适用于中小规模机场部署；日志持久化到本地卷
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# 索引采用 tsdb（推荐，支持结构化元数据，比 boltdb 更省内存）
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+ingester:
+  chunk_idle_period: 30m
+  chunk_target_size: 1572864
+  max_chunk_age: 1h
+  wal:
+    enabled: true
+    dir: /loki/wal
+
+limits_config:
+  retention_period: 168h            # 日志保留 7 天
+  max_query_series: 1000
+  max_query_parallelism: 8
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 4
+  ingestion_burst_size_mb: 8
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+  rule_path: /loki/rules-temp
+  alertmanager_url: ""
+  ring:
+    kvstore:
+      store: inmemory
+  enable_api: true
+
+analytics:
+  reporting_enabled: false

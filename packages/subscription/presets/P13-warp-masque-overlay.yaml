@@ -1,0 +1,39 @@
+id: P13-warp-masque-overlay
+name: "任意协议 + WARP MASQUE 出口 (叠加层)"
+badge: 均衡
+description: "WARP MASQUE 出口叠加层，挂在任意协议 outbound 之上，实现出口 IP 隐蔽，解锁 Netflix/ChatGPT 等"
+protocol: vless
+transport: tcp
+security: none
+min_singbox_version: "1.8.0"
+client_support:
+  - sing-box
+  - Hiddify
+kernel_compat: singbox_only
+deployment_profile: overlay
+enhancement:
+  utls: optional
+  ech: optional
+  multiplex: optional
+ui_warning: "这是叠加层协议，不是独立协议，需挂在其他协议 outbound 之上"
+base_spec:
+  protocol: vless
+  port: 443
+  allow_udp: true
+  traffic_rate: 1.0
+  is_visible: true
+  transport:
+    type: tcp
+  security: none
+  credentials:
+    uuid: ""
+    flow: ""
+recommendations:
+  - "叠加层不影响 base_protocol 的 CDN 兼容性判断，独立校验"
+  - "routing_domains 默认 [netflix.com, chatgpt.com, disneyplus.com]"
+  - "warp_private_key 用 wgcf generate 生成"
+warnings:
+  - "这不是独立协议，是叠加在 outbound 之上的出口层"
+  - "仅 Sing-box 内建 wireguard 支持 WARP MASQUE"
+  - "需配置 WARP 账户和 private_key"
+updated_from_upstream: 2026-07-13T00:00:00Z

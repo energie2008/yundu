@@ -1,0 +1,55 @@
+# OTel Collector - VPS190 生产配置
+# 接收 YunDu Go 微服务 trace，转发到 Loki
+# 严格内存限制（64MB 容器）
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+        max_recv_msg_size_mib: 4
+
+processors:
+  # 内存保护：75% 限制，15% spike
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  # 批处理
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+    send_batch_max_size: 2048
+  # 10% 采样（Hard Constraint）
+  probabilistic_sampler:
+    sampling_percentage: 10
+  # 资源增强
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: production
+        action: upsert
+      - key: host.name
+        value: vps190
+        action: upsert
+
+exporters:
+  # 推送到 Loki（OTLP HTTP，Loki 3.x 原生支持）
+  otlp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+service:
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      address: 0.0.0.0:8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, probabilistic_sampler, resource, batch]
+      exporters: [otlp/loki]
