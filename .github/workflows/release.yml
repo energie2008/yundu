@@ -48,6 +48,12 @@ jobs:
         run: |
           set -e
           mkdir -p dist
+          # 先对每个模块执行 go mod download 补全 go.sum（CI 环境无本地模块缓存）
+          for mod in apps/node-agent apps/node-service apps/api-gateway apps/identity-service apps/subscription-service apps/traffic-service cmd/migrate; do
+            echo "::group::go mod download $mod"
+            ( cd "$mod" && go mod download )
+            echo "::endgroup::"
+          done
           # node-agent 需要 with_quic/with_wireguard/with_utls 构建 Hysteria2/Tuic/WireGuard
           echo "::group::Build node-agent"
           ( cd apps/node-agent && go build -tags "with_quic,with_wireguard,with_utls" -o ../../dist/node-agent-${GOARCH} ./cmd/agent/ )
