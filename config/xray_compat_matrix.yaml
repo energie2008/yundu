@@ -1,0 +1,71 @@
+# xray_compat_matrix.yaml — Xray 版本兼容性矩阵
+#
+# 用途：记录每次生产环境验证过的 xray 版本 + 特定功能组合的兼容性结果。
+#      不再维护"已知bug版本黑名单"这种一次性硬编码，改为持续记录机制。
+#
+# 维护规则：
+#   1. 每次升级 xray 版本或新部署 VPS，强制跑 scripts/check_xhttp_download.sh
+#   2. 把测试结果登记到此文件（unverified → pass / fail）
+#   3. 不要靠记忆或道听途说判断某个版本"有bug"，必须实测
+#   4. validator 的 validateXHTTPDownloadSettingsRuntime 会发出 warning 引导跑脚本
+#
+# 字段说明：
+#   version: xray 版本号
+#   feature: 功能组合名称
+#   status: unverified / pass / fail
+#   verified_at: 验证时间（YYYY-MM-DD）
+#   verified_by: 验证人/方式
+#   notes: 备注
+
+compat_records:
+  # ===== downloadSettings + stream-up 组合 =====
+  # 此组合在部分版本存在静默失败（TCP/TLS握手正常但无数据传输）
+  - version: "v26.3.27"
+    feature: "downloadSettings_stream_up"
+    status: "fail"
+    verified_at: "2026-07-04"
+    verified_by: "VPS206 P06/P07/P17 实测，journalctl 无连接记录，客户端 SOCKS accepted 后无上游日志"
+    notes: "P06/P07/P17 已从服务端配置移除 downloadSettings，降级为纯 stream-up+REALITY+XMUX（类似 P09）。等 xray 上游修复后重新启用"
+
+  - version: "v26.3.27"
+    feature: "stream_up_no_downloadSettings"
+    status: "pass"
+    verified_at: "2026-07-04"
+    verified_by: "VPS206 P09 节点正常运行，P06/P07/P17 降级后正常"
+    notes: "纯 stream-up+REALITY+XMUX 组合稳定，P09 是天花板配置"
+
+  - version: "v26.3.27"
+    feature: "xhttp_packet_up_cdn"
+    status: "pass"
+    verified_at: "2026-07-04"
+    verified_by: "VPS206 P08 XHTTP+TLS+CDN 节点正常运行"
+    notes: "packet-up 模式与 CDN 兼容，CF Dashboard HTTP/2 to Origin 必须关闭"
+
+  - version: "v26.3.27"
+    feature: "reality_vision_tcp"
+    status: "pass"
+    verified_at: "2026-07-04"
+    verified_by: "VPS206/VPS190 P01 VLESS+REALITY+Vision 节点正常运行"
+    notes: "REALITY 密钥对固定值，不可更改"
+
+  # ===== SS2022 相关 =====
+  - version: "v26.3.27"
+    feature: "ss2022_reality"
+    status: "pass"
+    verified_at: "2026-07-05"
+    verified_by: "P15 节点 key 修复后渲染通过（32字节 base64 key 匹配 2022-blake3-aes-256-gcm）"
+    notes: "key 长度必须精确匹配 cipher 要求：128-gcm=16字节，256-gcm/chacha20=32字节。validator validateSS2022Key 已上线拦截"
+
+  # ===== 待验证项 =====
+  - version: "v26.3.27"
+    feature: "downloadSettings_packet_up"
+    status: "unverified"
+    verified_at: null
+    verified_by: null
+    notes: "downloadSettings+packet-up 组合尚未实测，理论上 packet-up 模式下 downloadSettings 行为可能与 stream-up 不同"
+
+# 版本升级检查清单（每次升级 xray 时必做）：
+# 1. 跑 scripts/check_xhttp_download.sh 验证 downloadSettings+stream-up
+# 2. 验证所有现有协议节点回归（WS/gRPC/TCP/VMess/Trojan/Hysteria2/TUIC）
+# 3. 把结果登记到上方 compat_records
+# 4. 如果 downloadSettings_stream_up 从 fail 变为 pass，可重新启用 P06/P07/P17 的分离模式

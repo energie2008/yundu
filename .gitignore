@@ -1,46 +1,9 @@
 # ============================================
-# YunDu .gitignore — 白名单策略
-# 默认排除所有，仅显式允许源码/配置/文档/CI
+# YunDu .gitignore（物理隔离后的简化版）
+# 目录已干净，仅需排除编译产物和敏感配置
 # ============================================
 
-# --- 默认排除根目录所有内容（白名单模式）---
-/*
-/*/
-
-# --- 显式允许的根目录和文件 ---
-!/apps/
-!/packages/
-!/cmd/
-!/migrations/
-!/docs/
-!/.github/
-!/deploy/
-!/install.sh
-!/README.md
-!/.editorconfig
-!/.gitignore
-!/go.work
-!/go.work.sum
-!/package.json
-!/pnpm-lock.yaml
-!/pnpm-workspace.yaml
-!/Makefile
-
-# ============================================
-# 在允许的目录内排除垃圾文件
-# ============================================
-
-# --- 安全：密钥/证书（绝不上传）---
-*.pem
-*.key
-*.crt
-*.p12
-**/key/
-*_key*
-*key*.pem
-*key*.key
-
-# --- 二进制文件（编译产物）---
+# --- 二进制文件 ---
 *.exe
 *.dll
 *.so
@@ -49,40 +12,35 @@
 *.zip
 *.tar.gz
 *.rar
-*.tar
 *.7z
 
-# --- 无扩展名的二进制文件（按文件名排除）---
-**/node-agent
-**/node-agent-*
-**/node-service
-**/node-service-*
-**/api-gateway
-**/api-gateway-*
-**/identity-service
-**/identity-service-*
-**/subscription-service
-**/subscription-service-*
-**/traffic-service
-**/traffic-service-*
-**/migrate
-**/migrate.exe
-**/resetadmin
-**/genkey
-**/genkey.exe
-**/statsprobe
+# --- 无扩展名二进制（按文件名排除）---
+/node-agent
+/node-agent-*
+/node-service
+/node-service-*
+/api-gateway
+/api-gateway-*
+/identity-service
+/identity-service-*
+/subscription-service
+/subscription-service-*
+/traffic-service
+/traffic-service-*
+/migrate
+/genkey
+/statsprobe
+/yunductl
 
 # --- 编译产物目录 ---
 **/bin/
 **/dist/
-**/dist.tar.gz
 **/target/
 **/build/
 **/out/
-**/yundu-bin/
 **/node_modules/
 
-# --- 环境配置（含敏感信息）---
+# --- 敏感配置 ---
 .env
 .env.*
 !.env.example
@@ -91,115 +49,32 @@
 *.log
 **/logs/
 
-# --- 临时目录 ---
+# --- 临时文件 ---
 **/tmp/
-**/tmp-bin/
-**/temp/
 *.tmp
 *.bak
 *.pid
 *.seed
 
-# ============================================
-# 排除散落在各 app 目录下的调试文件
-# （这些是开发过程中的临时文件，不是源码）
-# ============================================
-
-# --- node-agent 调试文件 ---
-apps/node-agent/*.json
-apps/node-agent/*.sql
-apps/node-agent/*.py
-apps/node-agent/check_*
-apps/node-agent/query_*
-apps/node-agent/verify_*
-apps/node-agent/fix_*
-apps/node-agent/find_*
-
-# --- identity-service 调试文件 ---
-apps/identity-service/*.json
-apps/identity-service/*.sql
-apps/identity-service/*.py
-apps/identity-service/*.exe
-
-# --- 其他 app 二进制残留 ---
-apps/api-gateway/api-gateway-linux
-apps/node-service/node-service
-apps/node-service/node-service-*
-apps/subscription-service/api
-apps/subscription-service/api.exe
-apps/subscription-service/subscription-service
-apps/traffic-service/traffic-service-*
-
 # --- 前端构建产物 ---
-apps/admin-web/dist/
-apps/admin-web/dist.tar.gz
-apps/admin-web/.env.local
-apps/admin-web/tsconfig.tsbuildinfo
-apps/user-web/dist/
-apps/user-web/tsconfig.tsbuildinfo
-apps/user-web/.env.local
+*.tsbuildinfo
 
-# --- tmp-bin 目录（apps 下）---
-apps/tmp-bin/
-
-# ============================================
-# 排除 deploy 目录下的敏感和临时文件
-# 仅保留 docker/、scripts/、helm/，排除开发期临时调试脚本
-# ============================================
-deploy/.env
-deploy/.env.*
-deploy/docker/.env
-deploy/docker/.env.*
-deploy/check_*
-deploy/debug_*
-deploy/deploy_*
-deploy/deploy1.sh
-deploy/do_migrate.sh
-deploy/final_*
-deploy/find_agent.sh
-deploy/fix_*
-deploy/pack_frontends.sh
-deploy/repack.sh
-deploy/restart_services.sh
-deploy/run_migrate.sh
-deploy/start_agent190.sh
-deploy/test_*
-deploy/update_*
-deploy/verify*
-
-# ============================================
-# 排除 docs 目录下的开发过程文档
-# 仅保留 adr/、openapi/、runbooks/、architecture.md、grpc-cdn-compat.md
-# ============================================
-docs/sessions/
-docs/worklog-*
-docs/YunDu-*
-
-# ============================================
-# IDE / OS
-# ============================================
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.vs/
-.DS_Store
-Thumbs.db
-Desktop.ini
-
-# ============================================
-# Go
-# ============================================
+# --- Go ---
 vendor/
 *.test
 *.out
 
-# ============================================
-# Coverage
-# ============================================
+# --- Coverage ---
 coverage/
 *.lcov
 .nyc_output/
-coverage.html
-coverage.out
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
