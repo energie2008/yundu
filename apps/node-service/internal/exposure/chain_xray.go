@@ -127,9 +127,16 @@ func BuildXrayOutboundFromNodeSpec(ns *nodespec.NodeSpec, tag, proxyTag string) 
 		return nil, err
 	}
 
+	// xray 协议名：shadowsocks 用 "shadowsocks"（非 "ss"），与 chain_singbox.go 对称。
+	// normalizeChainProtocol 把 "shadowsocks" 降级成 "ss"（用于 converter 分发和内部 switch），
+	// 但 xray JSON 的 protocol 字段必须是 "shadowsocks"，否则报 "unknown config id: ss"。
+	proto := f.Protocol
+	if proto == "ss" {
+		proto = "shadowsocks"
+	}
 	ob := map[string]interface{}{
 		"tag":      tag,
-		"protocol": f.Protocol,
+		"protocol": proto,
 	}
 
 	settings, err := buildXrayChainSettings(f)
