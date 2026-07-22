@@ -43,10 +43,11 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
           GOPROXY: 'https://goproxy.cn,direct'
+          # go.work 会把所有模块拉进来，CI 中需关闭 workspace 模式，让每个 app 用自己的 go.mod 独立编译
+          GOWORK: 'off'
         run: |
           set -e
           mkdir -p dist
-          GOARCH_FILTER="${{ matrix.goarch }}"
           # node-agent 需要 with_quic/with_wireguard/with_utls 构建 Hysteria2/Tuic/WireGuard
           echo "::group::Build node-agent"
           ( cd apps/node-agent && go build -tags "with_quic,with_wireguard,with_utls" -o ../../dist/node-agent-${GOARCH} ./cmd/agent/ )
