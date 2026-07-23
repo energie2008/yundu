@@ -329,9 +329,35 @@ func (s *UserService) activateAndGrantFreePlan(ctx context.Context, user *model.
 				IPLimit:           plan.IPLimit,
 				Source:            "free_trial",
 			}
+			// 试用时长：读取 billing/try_plan_time（小时），>0 时设置到期时间
+			if trialHours := s.getTrialPlanHours(ctx); trialHours > 0 {
+				expiresAt := now.Add(time.Duration(trialHours) * time.Hour)
+				sub.ExpiresAt = &expiresAt
+			}
 			_ = s.subs.Create(ctx, sub)
 		}
 	}
+}
+
+// getTrialPlanHours 读取 billing/try_plan_time（试用时长，小时）。默认 0（不过期）。
+func (s *UserService) getTrialPlanHours(ctx context.Context) int {
+	if s.settings == nil {
+		return 0
+	}
+	st, err := s.settings.GetByGroupKey(ctx, "billing", "try_plan_time")
+	if err != nil || st == nil {
+		return 0
+	}
+	var v float64
+	if json.Unmarshal(st.ValueJSON, &v) == nil {
+		return int(v)
+	}
+	// 兼容 int 类型
+	var vi int
+	if json.Unmarshal(st.ValueJSON, &vi) == nil {
+		return vi
+	}
+	return 0
 }
 
 // isEmailVerifyRequired 读取系统设置 register.email_verify_required。

@@ -24,7 +24,15 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		server.InternalError(c, "")
 		return
 	}
-	server.OK(c, settings)
+	// 按 setting_group → setting_key → value 分组返回，匹配前端期望的 {group: {key: value}} 结构
+	grouped := make(map[string]map[string]interface{})
+	for _, st := range settings {
+		if _, ok := grouped[st.SettingGroup]; !ok {
+			grouped[st.SettingGroup] = make(map[string]interface{})
+		}
+		grouped[st.SettingGroup][st.SettingKey] = st.Value
+	}
+	server.OK(c, grouped)
 }
 
 func (h *SettingHandler) UpdateSetting(c *gin.Context) {

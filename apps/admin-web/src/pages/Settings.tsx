@@ -28,10 +28,10 @@ import { EP } from '@/lib/endpoints'
 interface SystemConfig {
   app_name?: string
   app_description?: string
-  app_url?: string
+  frontend_url?: string
   subscribe_url?: string
   is_https?: boolean | number
-  try_plan_plan_id?: number | string
+  default_free_plan_id?: string
   try_plan_time?: number | string
   try_plan_reset_traffic?: boolean | number
   subscribe_path?: string
@@ -319,14 +319,15 @@ export default function Settings() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="app_url" className="text-zinc-300 text-sm">站点地址</Label>
+                <Label htmlFor="frontend_url" className="text-zinc-300 text-sm">站点地址</Label>
                 <Input
-                  id="app_url"
-                  value={settings.app_url || ''}
-                  onChange={(e) => update('app_url', e.target.value)}
-                  placeholder="https://example.com"
+                  id="frontend_url"
+                  value={settings.frontend_url || ''}
+                  onChange={(e) => update('frontend_url', e.target.value)}
+                  placeholder="https://7.tiktokplay.na.am"
                   className="bg-zinc-800 border-zinc-700 text-zinc-100"
                 />
+                <p className="text-xs text-zinc-500">用户前台完整 URL，用于邮件模板中的链接（如验证邮件、密码重置）</p>
               </div>
 
               <div className="space-y-2">
@@ -338,6 +339,7 @@ export default function Settings() {
                   placeholder="https://sub.example.com"
                   className="bg-zinc-800 border-zinc-700 text-zinc-100"
                 />
+                <p className="text-xs text-zinc-500">客户端订阅地址，留空则使用站点地址</p>
               </div>
 
               <Separator className="bg-zinc-800" />
@@ -345,7 +347,7 @@ export default function Settings() {
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-zinc-300 text-sm">启用 HTTPS</Label>
-                  <p className="text-xs text-zinc-500 mt-0.5">强制使用 HTTPS 协议访问</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">强制使用 HTTPS 协议访问站点</p>
                 </div>
                 <Switch
                   checked={toBool(settings.is_https)}
@@ -356,16 +358,15 @@ export default function Settings() {
               <Separator className="bg-zinc-800" />
 
               <div className="space-y-2">
-                <Label htmlFor="try_plan_plan_id" className="text-zinc-300 text-sm">试用套餐 ID</Label>
+                <Label htmlFor="default_free_plan_id" className="text-zinc-300 text-sm">试用套餐 ID</Label>
                 <Input
-                  id="try_plan_plan_id"
-                  type="number"
-                  value={settings.try_plan_plan_id ?? ''}
-                  onChange={(e) => update('try_plan_plan_id', e.target.value)}
-                  placeholder="0"
-                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                  id="default_free_plan_id"
+                  value={settings.default_free_plan_id || ''}
+                  onChange={(e) => update('default_free_plan_id', e.target.value)}
+                  placeholder="d0000000-0000-0000-0000-000000000001"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100 font-mono text-xs"
                 />
-                <p className="text-xs text-zinc-500">新用户注册时自动分配的套餐，0 为不分配</p>
+                <p className="text-xs text-zinc-500">新用户注册时自动分配的套餐 UUID，留空则不分配。可在「套餐管理」中查看套餐 ID</p>
               </div>
 
               <div className="space-y-2">
@@ -393,6 +394,13 @@ export default function Settings() {
             </TabsContent>
 
             <TabsContent value="subscribe" className="p-4 space-y-5 mt-0">
+              <div className="rounded-lg border border-amber-800/50 bg-amber-950/20 p-3">
+                <p className="text-xs text-amber-400">
+                  ⚠️ 订阅设置中部分功能尚未在后端实现（订阅路径/域名/密钥/显示方式/随机订阅）。
+                  「订阅地址」已生效（用于邮件模板），其余配置项将在后续版本中对接 subscription-service。
+                </p>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="sub_url" className="text-zinc-300 text-sm">订阅地址</Label>
                 <Input
