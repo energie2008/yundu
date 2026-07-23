@@ -274,12 +274,11 @@ func (r *AnnouncementRepo) ListPublishedForUser(ctx context.Context, userID uuid
 		a := &model.Announcement{}
 		var summary *string
 		var filter, meta []byte
-		var isRead bool
 		if err := rows.Scan(
 			&a.ID, &a.Title, &a.Content, &summary, &a.Type, &a.Status, &a.TargetAudience,
 			&filter, &a.EffectiveAt, &a.ExpiresAt, &a.Pinned,
 			&a.ViewCount, &a.ReadCount, &a.CreatedBy, &a.PublishedAt, &a.ArchivedAt, &meta,
-			&a.CreatedAt, &a.UpdatedAt, &isRead,
+			&a.CreatedAt, &a.UpdatedAt, &a.IsRead,
 		); err != nil {
 			return nil, 0, err
 		}

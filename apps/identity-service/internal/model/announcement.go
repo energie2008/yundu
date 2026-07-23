@@ -57,8 +57,12 @@ type Announcement struct {
 	ArchivedAt     *time.Time           `json:"archived_at,omitempty" db:"archived_at"`
 	Metadata       json.RawMessage      `json:"metadata" db:"metadata"`
 	CreatedAt      time.Time            `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time            `json:"updated_at" db:"updated_at"`
-	DeletedAt     *time.Time           `json:"deleted_at,omitempty" db:"deleted_at"`
+	UpdatedAt      time.Time            `json:"updated_at" db:"updated_at"`
+	DeletedAt      *time.Time           `json:"deleted_at,omitempty" db:"deleted_at"`
+
+	// IsRead 临时字段：ListPublishedForUser 查询时填充，非数据库列。
+	// 用于在用户端列表中标识当前用户是否已读该公告。
+	IsRead         bool                 `json:"is_read" db:"-"`
 }
 
 // AnnouncementRead 公告已读记录

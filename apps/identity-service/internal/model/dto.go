@@ -286,7 +286,8 @@ type AnnouncementResponse struct {
 	Type           string     `json:"type"`
 	Status         string     `json:"status"`
 	TargetAudience string     `json:"target_audience"`
-	Pinned         bool       `json:"pinned"`
+	IsPinned       bool       `json:"is_pinned"`
+	IsRead         bool       `json:"is_read"`
 	ViewCount      int        `json:"view_count"`
 	ReadCount      int        `json:"read_count"`
 	EffectiveAt    *time.Time `json:"effective_at,omitempty"`
@@ -305,7 +306,8 @@ func NewAnnouncementResponse(a *Announcement) AnnouncementResponse {
 		Type:           string(a.Type),
 		Status:         string(a.Status),
 		TargetAudience: string(a.TargetAudience),
-		Pinned:         a.Pinned,
+		IsPinned:       a.Pinned,
+		IsRead:         a.IsRead,
 		ViewCount:      a.ViewCount,
 		ReadCount:      a.ReadCount,
 		EffectiveAt:    a.EffectiveAt,

@@ -4,6 +4,7 @@ import { useTheme } from '../lib/theme';
 
 const navItems = [
   { to: '/dashboard', icon: '🏠', label: '仪表盘' },
+  { to: '/dashboard/announcements', icon: '📢', label: '系统公告' },
   { to: '/dashboard/plans', icon: '💳', label: '购买订阅' },
   { to: '/dashboard/orders', icon: '📋', label: '我的订单' },
   { to: '/dashboard/tickets', icon: '💬', label: '工单支持' },
