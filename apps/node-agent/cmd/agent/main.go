@@ -110,6 +110,8 @@ type Agent struct {
 	prober *prober.Prober
 	// P1-8: DeviceEnforcer 通过 xray gRPC 执行设备数限制
 	deviceEnforcer *executor.DeviceEnforcer
+	// 子进程模式下通过独立 gRPC 客户端读取 xray 流量统计（native 模式用 runtimePlugin）
+	xrayStatsReader *agentruntime.XrayStatsReader
 	// P0: 流量统计容错基线——非破坏性读取时跟踪上次上报的累计值，
 	// 上报成功后更新，失败时保持不变，下次自动包含未上报流量。
 	// key: credential (email 或 UUID), value: [2]int64{upload, download}
@@ -1581,6 +1583,18 @@ func (a *Agent) runAgent(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to get executor: %w (runtime_type=%s)", err, a.cfg.RuntimeType)
 		}
+		// 子进程模式 + xray runtime：初始化独立流量统计读取器。
+		// 子进程 xray 仍监听 10085 gRPC API（kernelrender 总是渲染 api inbound），
+		// 通过独立 gRPC 客户端读取 StatsService 流量统计，解决子进程模式流量不上报的问题。
+		if a.cfg.RuntimeType == "xray" {
+			apiEndpoint := a.cfg.XrayAPIEndpoint
+			if apiEndpoint == "" {
+				apiEndpoint = os.Getenv("YUNDU_XRAY_API_ENDPOINT")
+			}
+			a.xrayStatsReader = agentruntime.NewXrayStatsReader(apiEndpoint, configFilePath, a.logger)
+			a.logger.Info("xray stats reader initialized for subprocess mode traffic reporting",
+				"api_endpoint", apiEndpoint, "config_path", configFilePath)
+		}
 	}
 
 	warpMgr := warp.NewManager(nil, a.logger)
@@ -1734,14 +1748,15 @@ func (a *Agent) runAgent(ctx context.Context) error {
 	a.currentVersion = currentVersion
 	a.logger.Info("current config version", "version", currentVersion)
 
-	if useNative {
+	if useNative || a.xrayStatsReader != nil {
 		bufferPath := agentruntime.ResolveBufferPath(a.cfg.ConfigDir)
 		a.trafficBuffer = agentruntime.NewTrafficBuffer(bufferPath)
 		a.trafficSaveDeb = agentruntime.NewSaveDebouncer(a.trafficBuffer, 2*time.Second)
 		a.trafficBaselinePath = filepath.Join(filepath.Dir(a.cfg.ConfigDir), "traffic_baseline.json")
 		a.loadTrafficBaseline()
 		a.logger.Info("traffic buffer initialized",
-			"path", bufferPath, "baseline_path", a.trafficBaselinePath)
+			"path", bufferPath, "baseline_path", a.trafficBaselinePath,
+			"mode", map[bool]string{true: "native", false: "subprocess"}[useNative])
 	}
 
 	// 检查残留 deploy.lock
@@ -1977,7 +1992,7 @@ func (a *Agent) gracefulShutdown(ctx context.Context, httpSrv *http.Server, reas
 	defer shutdownCancel()
 
 	// 1. 退出前最后一次流量上报（避免最后一个周期流量丢失）
-	if a.useNative {
+	if a.useNative || a.xrayStatsReader != nil {
 		a.logger.Info("shutdown: flushing final traffic report")
 		flushCtx, flushCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		a.reportTraffic(flushCtx)
@@ -1998,6 +2013,11 @@ func (a *Agent) gracefulShutdown(ctx context.Context, httpSrv *http.Server, reas
 	// 5. 停止 DeviceEnforcer
 	if a.deviceEnforcer != nil {
 		a.deviceEnforcer.Stop()
+	}
+
+	// 5.1 关闭子进程模式流量统计读取器的 gRPC 连接
+	if a.xrayStatsReader != nil {
+		a.xrayStatsReader.Close()
 	}
 
 	// 6. 停止 Runtime（xray/sing-box）

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,12 +61,13 @@ type DeviceEnforcer struct {
 	reloadFn  ReloadFunc
 	logger    *slog.Logger
 
-	mu      sync.Mutex
-	conn    *grpc.ClientConn
-	blocked map[string]bool // 当前被拉黑的 email 集合
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	mu                sync.Mutex
+	conn              *grpc.ClientConn
+	blocked           map[string]bool // 当前被拉黑的 email 集合
+	consecutiveEmpty  int             // GetAllOnlineUsers 连续返回空的次数，防止 gRPC 抖动误清
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
 }
 
 // NewDeviceEnforcer 创建设备限制执行器。
@@ -174,10 +176,52 @@ func (e *DeviceEnforcer) enforceOnce(ctx context.Context) error {
 
 	onlineUsers := onlineResp.GetUsers()
 	if len(onlineUsers) == 0 {
-		// 无在线用户：清除 DeviceLimiter 的本地状态
-		e.provider.DeviceLimiter().ClearLocalDevices()
+		// ⚠️ 关键修复：区分"真无用户"和"查询异常"
+		// GetAllOnlineUsers 返回空有三种可能：
+		//   a) 真的没有在线用户（正常）
+		//   b) gRPC 连到了错误的 xray 实例（如孤儿进程，已由 stopOrphanXray 修复）
+		//   c) xray statsUserOnline 配置未生效（GetAllOnlineUsers 返回空但 QueryStats 有流量）
+		// 用 QueryStats 交叉验证，避免误清在线用户的设备状态
+		e.consecutiveEmpty++
+		userStatCount, pingErr := e.pingStatsService(ctx, conn)
+		if pingErr != nil {
+			// gRPC 通路异常，绝不能 ClearLocalDevices，否则会误清在线用户
+			e.logger.Warn("gRPC endpoint unreachable, skipping ClearLocalDevices",
+				"endpoint", e.cfg.APIEndpoint,
+				"consecutive_empty", e.consecutiveEmpty,
+				"error", pingErr)
+			return fmt.Errorf("pingStatsService: %w", pingErr)
+		}
+
+		if userStatCount > 0 {
+			// QueryStats 有用户流量但 GetAllOnlineUsers 返回空
+			// → statsUserOnline 可能未正确配置，或 GetAllOnlineUsers API 不兼容当前 xray 版本
+			// 不清空 local devices，因为实际有用户在线
+			e.logger.Warn("GetAllOnlineUsers returned 0 but QueryStats found user traffic",
+				"endpoint", e.cfg.APIEndpoint,
+				"user_stat_count", userStatCount,
+				"consecutive_empty", e.consecutiveEmpty,
+				"hint", "check xray policy.levels.*.statsUserOnline and inbound clients email field")
+			return nil
+		}
+
+		// QueryStats 也无用户流量 → 真无在线用户
+		// 连续空 >= 3 次才 ClearLocalDevices，防止 gRPC 抖动导致误清
+		if e.consecutiveEmpty >= 3 {
+			e.logger.Info("cleared local devices after consecutive empty responses",
+				"consecutive_empty", e.consecutiveEmpty)
+			e.provider.DeviceLimiter().ClearLocalDevices()
+			e.consecutiveEmpty = 0
+		} else {
+			e.logger.Debug("GetAllOnlineUsers returned 0 users (likely no active connections)",
+				"endpoint", e.cfg.APIEndpoint,
+				"consecutive_empty", e.consecutiveEmpty)
+		}
 		return nil
 	}
+
+	// 有在线用户，重置连续空计数
+	e.consecutiveEmpty = 0
 
 	deviceLimiter := e.provider.DeviceLimiter()
 	var blockedCleared []string
@@ -265,4 +309,48 @@ func (e *DeviceEnforcer) removeUser(ctx context.Context, conn *grpc.ClientConn, 
 
 	_, err := handlerClient.AlterInbound(ctx, req)
 	return err
+}
+
+// pingStatsService 通过 QueryStats 查询 "user>>>" 前缀的流量统计，
+// 用于在 GetAllOnlineUsers 返回空时交叉验证 gRPC 通路和 xray stats 是否正常工作。
+//
+// 返回值：
+//   - int: 有流量统计记录的用户数（uplink 或 downlink > 0 的用户）
+//   - error: gRPC 调用失败时返回 error
+//
+// 使用场景：GetAllOnlineUsers 返回空时调用此方法，
+// 如果返回的 userStatCount > 0，说明实际有用户在线但 GetAllOnlineUsers API 未返回，
+// 可能是 statsUserOnline 配置问题或 API 版本不兼容，此时不应 ClearLocalDevices。
+func (e *DeviceEnforcer) pingStatsService(ctx context.Context, conn *grpc.ClientConn) (int, error) {
+	statsClient := statsCmd.NewStatsServiceClient(conn)
+
+	// 查询所有 "user>>>" 前缀的统计项（per-user uplink/downlink）
+	// Pattern 匹配会返回所有以 "user>>" 开头的统计项
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	resp, err := statsClient.QueryStats(pingCtx, &statsCmd.QueryStatsRequest{
+		Pattern: "user>>>",
+		Reset_:  false,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("QueryStats(user>>>): %w", err)
+	}
+
+	// 统计有流量记录的不同用户数
+	// QueryStats 返回的 Stat 列表中，每个用户有 uplink 和 downlink 两条记录
+	// 提取不同的 email 并计数
+	userSet := make(map[string]bool)
+	for _, stat := range resp.GetStat() {
+		name := stat.GetName()
+		// name 格式: "user>><email>>>uplink" 或 "user>><email>>>downlink"
+		// 提取 email 部分
+		if rest, ok := strings.CutPrefix(name, statsOnlineIPPrefix); ok {
+			parts := strings.SplitN(rest, ">>>", 2)
+			if len(parts) > 0 && parts[0] != "" {
+				userSet[parts[0]] = true
+			}
+		}
+	}
+	return len(userSet), nil
 }

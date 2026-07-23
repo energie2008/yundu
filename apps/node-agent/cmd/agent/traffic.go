@@ -13,14 +13,19 @@ import (
 // startTrafficReportLoop 启动流量统计上报循环。
 //
 // 60s 定时循环：
-//   - 从原生运行时（NativeXray）的 StatsService 读取 per-user 流量（Reset=true 增量）
+//   - 从运行时读取 per-user 流量统计（非破坏性读取）
 //   - 通过 POST /api/v1/agent/traffic/report 上报到 traffic-service
 //   - 失败仅记录警告，不阻断主流程
 //
-// 仅在 useNative=true 时生效（子进程模式无 StatsService 接口）。
+// 数据来源（二选一）：
+//   - native 模式：a.runtimePlugin.GetTrafficStatsNoReset（内嵌 xray core.Instance 的 gRPC）
+//   - 子进程模式：a.xrayStatsReader.GetTrafficStatsNoReset（独立 gRPC 连接到 xray 子进程的 10085 API）
+//
+// 两种模式均依赖 xray 配置中的 api inbound（tag=api, port=10085），
+// kernelrender 总是渲染该 inbound，因此子进程模式同样可读取流量统计。
 func (a *Agent) startTrafficReportLoop(ctx context.Context) {
-	if !a.useNative {
-		a.logger.Info("traffic report loop disabled (non-native runtime mode)")
+	if a.runtimePlugin == nil && a.xrayStatsReader == nil {
+		a.logger.Info("traffic report loop disabled (no stats reader available)")
 		return
 	}
 	a.goTrack(func() {
@@ -41,7 +46,7 @@ func (a *Agent) startTrafficReportLoop(ctx context.Context) {
 	})
 }
 
-// reportTraffic 从原生运行时读取 per-user 流量并上报到 traffic-service。
+// reportTraffic 从运行时读取 per-user 流量并上报到 traffic-service。
 //
 // P0 容错策略：使用非破坏性读取（GetTrafficStatsNoReset），跟踪基线计算增量。
 //   - 读取当前累计值（不清零计数器）
@@ -49,17 +54,25 @@ func (a *Agent) startTrafficReportLoop(ctx context.Context) {
 //   - 上报成功后更新 baseline = current
 //   - 上报失败时 baseline 不变，下次读取自动包含未上报的流量
 //   - 检测计数器重置（current < baseline）时将 current 作为全量增量
+//
+// 数据来源（二选一）：
+//   - native 模式：a.runtimePlugin.GetTrafficStatsNoReset
+//   - 子进程模式：a.xrayStatsReader.GetTrafficStatsNoReset（独立 gRPC 连接到 xray 10085）
 func (a *Agent) reportTraffic(ctx context.Context) {
 	// T06: 防止 gracefulShutdownAll 与心跳循环并发调用 reportTraffic
 	a.trafficReportMu.Lock()
 	defer a.trafficReportMu.Unlock()
 
-	if a.runtimePlugin == nil {
+	// 读取流量统计：优先 native 模式（runtimePlugin），回退子进程模式（xrayStatsReader）
+	var currentStats map[string]agentruntime.TrafficStat
+	var err error
+	if a.runtimePlugin != nil {
+		currentStats, err = a.runtimePlugin.GetTrafficStatsNoReset(ctx)
+	} else if a.xrayStatsReader != nil {
+		currentStats, err = a.xrayStatsReader.GetTrafficStatsNoReset(ctx)
+	} else {
 		return
 	}
-
-	// 非破坏性读取当前累计值
-	currentStats, err := a.runtimePlugin.GetTrafficStatsNoReset(ctx)
 	if err != nil {
 		a.logger.Warn("failed to get traffic stats (no reset)", "error", err)
 		return

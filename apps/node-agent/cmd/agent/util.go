@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 
 	agentconfig "github.com/airport-panel/node-agent/internal/config"
 )
@@ -57,6 +59,101 @@ func stopLegacyXrayService(logger *slog.Logger) {
 			logger.Info("legacy xray service disabled", "service", svc)
 		}
 	}
+
+	// 兜底：清理非 systemd 管理的孤儿 xray 进程
+	stopOrphanXray(logger)
+}
+
+// stopOrphanXray 清理非 systemd 管理的孤儿 xray 进程。
+//
+// 背景：stopLegacyXrayService 只能停止 systemd unit（yundu-xray.service / xray.service），
+// 但有些 xray 进程可能是：
+//   - 手动启动后变成孤儿（PPid=1）
+//   - 旧版本 node-agent 子进程模式启动后未正确清理
+//   - 测速脚本/xboard 遗留进程
+//
+// 这些孤儿进程会与 native 内嵌 xray 通过 SO_REUSEPORT 抢占 443/9450/10085 端口，
+// 导致流量统计分散、DeviceEnforcer gRPC 查询到错误实例。
+//
+// 本函数用 pgrep 兜底，只清理加载了 yundu 主配置（/etc/yundu/config/xray.json）的孤儿进程，
+// 不影响 xray-cn-transit 等其他独立 xray 进程，也不影响 node-agent 自己的子进程（子进程模式）。
+//
+// 安全性：所有模式下调用均安全——
+//   - native 模式：xray 作为库运行在 node-agent 进程内，pgrep 不会匹配到 node-agent
+//   - 子进程模式：xray 是 node-agent 的子进程，isChildProcess 检查会跳过
+//   - machine 模式：子 Agent 用独立配置路径（/etc/yundu/nodes/node-N/config/xray.json），
+//     pgrep 正则 config/xray\.json 不会匹配子节点配置
+func stopOrphanXray(logger *slog.Logger) {
+	// pgrep -f 匹配完整命令行，正则 "xray.*config/xray\.json" 只匹配主配置，
+	// 不会匹配 xray-cn-transit.json 等其他配置
+	out, err := exec.Command("pgrep", "-f", `xray.*config/xray\.json`).Output()
+	if err != nil {
+		// pgrep 退出码 1 表示无匹配进程，不是错误
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			logger.Debug("no orphan xray process found (pgrep no match)")
+			return
+		}
+		// pgrep 命令本身不存在（非 Linux 或未安装 procps）
+		logger.Debug("pgrep not available or failed, skipping orphan xray cleanup", "error", err)
+		return
+	}
+
+	myPID := os.Getpid()
+	for _, pidStr := range strings.Fields(string(out)) {
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+
+		// 不要杀自己（native 模式下 xray 运行在 node-agent 进程内，pgrep 不会匹配到 node-agent，
+		// 但防御性检查仍然保留）
+		if pid == myPID {
+			continue
+		}
+
+		// 不要杀 node-agent 的子进程（子进程模式下 xray 是 node-agent 的子进程，由 executor 管理）
+		if isChildProcess(pid, myPID) {
+			logger.Debug("skipping child xray process (managed by executor)", "pid", pid)
+			continue
+		}
+
+		// 读取命令行用于日志
+		cmdline, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		cmdlineStr := strings.ReplaceAll(string(cmdline), "\x00", " ")
+
+		logger.Warn("detected orphan xray process, sending SIGTERM",
+			"pid", pid, "cmdline", cmdlineStr)
+
+		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+			logger.Warn("failed to kill orphan xray process",
+				"pid", pid, "error", err)
+		} else {
+			logger.Info("orphan xray process terminated",
+				"pid", pid)
+		}
+	}
+}
+
+// isChildProcess 检查 pid 是否是 parentPID 的直接子进程。
+// 通过读取 /proc/<pid>/status 中的 PPid 字段判断。
+func isChildProcess(pid, parentPID int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "PPid:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				ppid, err := strconv.Atoi(fields[1])
+				if err == nil && ppid == parentPID {
+					return true
+				}
+			}
+			break
+		}
+	}
+	return false
 }
 
 func (a *Agent) nextSeq() int64 {

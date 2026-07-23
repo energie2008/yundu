@@ -168,7 +168,7 @@ function TrafficChart({ data }: { data?: TrafficLog[] }) {
               const hDown = totalGB > 0 ? (downGB / totalGB) * hTotal : 0;
               const hUp = totalGB > 0 ? (upGB / totalGB) * hTotal : 0;
               return (
-                <div key={l.date} className="flex flex-col items-center gap-1" style={{ width: '10%' }}>
+                <div key={l.date} className="flex flex-col items-center gap-1 h-full justify-end" style={{ width: '10%' }}>
                   <div
                     className="w-full flex flex-col justify-end rounded-t overflow-hidden"
                     style={{ height: `${hTotal}%` }}

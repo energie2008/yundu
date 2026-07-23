@@ -308,7 +308,9 @@ func (h *WSHandler) PushToMachine(serverCode string, msg *pb.PanelMessage) error
 	sess, ok := h.sessions[serverCode]
 	h.mu.RUnlock()
 	if !ok {
-		return nil
+		// agent 未连接 WebSocket 时必须返回 error，
+		// 否则 CompositeConfigPusher 会误认为推送成功，导致消息丢失。
+		return fmt.Errorf("machine %s not connected via websocket", serverCode)
 	}
 	if msg.Timestamp == 0 {
 		msg.Timestamp = time.Now().UnixMilli()
