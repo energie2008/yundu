@@ -440,10 +440,6 @@ function nodeToSpec(node: Node): Partial<NodeSpec> {
         : [],
     // 编辑回显：使用后端返回的 chain_ids（UUID 数组，对应 route_groups）
     route_groups: Array.isArray(node.chain_ids) ? node.chain_ids : [],
-    // P1-1: 编辑回显已绑定的套餐（优先使用 plan_ids，回退到 plan_codes）
-    plan_ids: Array.isArray(node.plan_ids) && node.plan_ids.length > 0
-      ? [...node.plan_ids]
-      : Array.isArray(node.plan_codes) ? [...node.plan_codes] : [],
     // P1-3: 编辑回显证书包
     cert_bundle_id: node.cert_bundle_id || '',
     is_visible: !!node.is_visible,
@@ -962,9 +958,6 @@ function specToNodePayload(spec: NodeSpec, isEdit: boolean): Record<string, unkn
   // 始终发送（包括空数组），后端会整体覆盖绑定关系
   payload.chain_ids = (Array.isArray(spec.route_groups) ? spec.route_groups : [])
     .filter((id: unknown): id is string => typeof id === 'string' && UUID_RE.test(id))
-
-  // P1-1: 发送绑定的套餐 ID 列表
-  payload.plan_ids = Array.isArray(spec.plan_ids) ? spec.plan_ids : []
 
   // P1-3: 发送证书包 ID（仅当有值时发送）
   if (spec.cert_bundle_id) {
@@ -1709,13 +1702,6 @@ export default function Nodes() {
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-950/30 text-amber-400 border-amber-800/50">
                               <Zap className="w-2.5 h-2.5 mr-0.5" />{rateVal.toFixed(1)}x
                             </Badge>
-                          )}
-                          {node.plan_codes && node.plan_codes.length > 0 && (
-                            node.plan_codes.map(code => (
-                              <Badge key={code} variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-950/30 text-violet-400 border-violet-800/50">
-                                {code}
-                              </Badge>
-                            ))
                           )}
                           {dispatchCfg && (
                             <Badge

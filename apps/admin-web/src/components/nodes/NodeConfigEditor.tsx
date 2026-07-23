@@ -49,7 +49,6 @@ import {
   AlertTriangle,
   Hash,
   Sparkles,
-  Users,
   Save,
   Trash2,
   Pencil,
@@ -158,8 +157,6 @@ export interface NodeSpec {
   padding_scheme: string
   tags: string[]
   permission_groups: string[]
-  // P1-1: 绑定的套餐 ID 列表
-  plan_ids: string[]
   // P1-3: 绑定的证书包 ID
   cert_bundle_id?: string
   address: string
@@ -309,13 +306,6 @@ interface ParentNodeOption {
   transport: string
 }
 
-// 套餐选项：从后端 GET /admin/plans 拉取
-interface PlanOption {
-  id: string
-  name: string
-  code?: string
-}
-
 // 证书包选项：从后端 GET /admin/cert-bundles 拉取（如果接口存在）
 interface CertBundleOption {
   id: string
@@ -335,7 +325,7 @@ const DEFAULT_ADVANCED: AdvancedConfig = {
 const DEFAULT_SPEC: NodeSpec = {
   numeric_id: 0, id: '', code: '', protocol: 'vless', name: '',
   multiplier: 1.0, traffic_limit: 0, tags: [], permission_groups: [],
-  plan_ids: [], cert_bundle_id: '',
+  cert_bundle_id: '',
   device_limit: 0, speed_limit_mbps: 0, transfer_enable_bytes: 0, transfer_enable_unit: 'GB', padding_scheme: '',
   address: '', port: 443, client_port: 443, server_port: 443,
   transport: 'tcp', security: 'reality', flow: 'xtls-rprx-vision',
@@ -1240,28 +1230,6 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
     return () => { cancelled = true }
   }, [open])
 
-  // P1-1: 从后端加载套餐列表（用于 plan_ids 多选绑定）
-  const [plans, setPlans] = React.useState<PlanOption[]>([])
-  React.useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const data = await api.get<{ items: any[] } | any[]>(EP.PLANS, { params: { page: 1, page_size: 200 } })
-        if (cancelled) return
-        const list: any[] = Array.isArray(data) ? data : (((data as any)?.items) || [])
-        setPlans(list.map((p: any) => ({
-          id: String(p.id || ''),
-          name: p.name || p.code || p.id,
-          code: p.code,
-        })))
-      } catch {
-        if (!cancelled) setPlans([])
-      }
-    })()
-    return () => { cancelled = true }
-  }, [open])
-
   // P1-3: 从后端加载证书包列表（用于 cert_bundle_id 选择，接口可能不存在，静默失败）
   const [certBundles, setCertBundles] = React.useState<CertBundleOption[]>([])
   React.useEffect(() => {
@@ -1519,7 +1487,6 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
     updateSpec('server_bindings', existing ? spec.server_bindings.filter(b => b.id !== serverId) : [...spec.server_bindings, { id: server.id, name: server.name, sid: server.sid, auto_manage: true, runtime_id: server.runtime_id }])
   }, [servers, spec.server_bindings, updateSpec])
   const toggleRouteGroup = React.useCallback((g: string) => updateSpec('route_groups', spec.route_groups.includes(g) ? spec.route_groups.filter(x => x !== g) : [...spec.route_groups, g]), [spec.route_groups, updateSpec])
-  const togglePlan = React.useCallback((planId: string) => updateSpec('plan_ids', spec.plan_ids.includes(planId) ? spec.plan_ids.filter(x => x !== planId) : [...spec.plan_ids, planId]), [spec.plan_ids, updateSpec])
   const [isGeneratingKey, setIsGeneratingKey] = React.useState(false)
   const generateKeyPairAction = React.useCallback(async () => {
     setIsGeneratingKey(true)
@@ -1954,7 +1921,7 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
                   <div className="flex gap-2"><Input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())} placeholder="输入标签按回车添加" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9 flex-1" /><Button type="button" variant="outline" size="sm" onClick={addTag} className="border-zinc-700 text-zinc-300 h-9"><Plus className="w-4 h-4 mr-1" />添加</Button></div>
                   {spec.tags.length > 0 && (<div className="flex flex-wrap gap-1.5 mt-2">{spec.tags.map(tag => (<Badge key={tag} variant="outline" className="gap-1 cursor-pointer border-zinc-700 bg-zinc-800 text-zinc-300 hover:text-red-400 hover:border-red-900 hover:bg-red-950/30" onClick={() => removeTag(tag)}>{tag}<X className="w-3 h-3" /></Badge>))}</div>)}
                 </div>
-                <div className="space-y-2"><Label className="text-zinc-300 text-sm">权限组（哪些套餐可见）</Label>
+                <div className="space-y-2"><Label className="text-zinc-300 text-sm">节点分组（哪些用户分组可见）</Label>
                   {permissionGroups.length === 0 ? (
                     <p className="text-xs text-zinc-500">暂无会员分组，请先在「节点分组」页面创建</p>
                   ) : (
@@ -2219,36 +2186,6 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
                     <div className="flex flex-wrap gap-2">{routeGroups.map(g => (<button key={g.value} type="button" onClick={() => toggleRouteGroup(g.value)} className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${spec.route_groups.includes(g.value) ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300' : 'bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-600'}`}>{g.label}</button>))}</div>
                   )}
                   <p className="text-xs text-zinc-500">路由组决定此节点的分流策略</p>
-                </div>
-                <Separator className="bg-zinc-800" />
-                <div className="space-y-3"><Label className="text-zinc-300 text-sm flex items-center gap-2"><Users className="w-4 h-4 text-zinc-400" />绑定套餐<span className="text-xs text-zinc-500">（不选=所有套餐可用）</span></Label>
-                  {plans.length === 0 ? (
-                    <p className="text-xs text-zinc-500">暂无套餐数据，请先在「套餐管理」页面创建</p>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 bg-zinc-800/50 border border-zinc-700 rounded-lg">
-                      {plans.map(p => {
-                        const checked = spec.plan_ids.includes(p.id)
-                        return (
-                          <label
-                            key={p.id}
-                            className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm transition-colors ${
-                              checked ? 'bg-indigo-900/40 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-700/50'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => togglePlan(p.id)}
-                              className="rounded border-zinc-600 bg-zinc-800"
-                            />
-                            <span className="truncate">{p.name}</span>
-                            {p.code && <span className="text-xs text-zinc-500">({p.code})</span>}
-                          </label>
-                        )
-                      })}
-                    </div>
-                  )}
-                  <p className="text-xs text-zinc-500">选择哪些套餐用户可以看到并使用此节点</p>
                 </div>
                 {certBundles.length > 0 && (
                   <>
