@@ -457,8 +457,37 @@ export default function Users() {
 
   const openDetailDialog = async (user: UserListItem) => {
     try {
-      const data = await api.get<UserDetail>(EP.USER_DETAIL(user.id))
-      setDetailUser(data)
+      const data = await api.get<Record<string, unknown>>(EP.USER_DETAIL(user.id))
+      // API 可能返回嵌套结构 {user, profile, subscription} 或扁平结构 {id, email, profile, subscription}
+      // 扁平结构时需要手动转换为嵌套，否则 detailUser.user.email 会黑屏
+      if (data && typeof data.user === 'object' && data.user !== null) {
+        setDetailUser(data as unknown as UserDetail)
+      } else if (data) {
+        const flat = data as Record<string, unknown>
+        setDetailUser({
+          user: {
+            id: (flat.id as string) || user.id,
+            email: (flat.email as string) || user.email,
+            uuid: (flat.uuid as string) || user.uuid,
+            is_banned: (flat.is_banned as boolean) ?? user.is_banned,
+            is_admin: (flat.is_admin as boolean) ?? user.is_admin,
+            email_verified: (flat.email_verified as boolean) ?? false,
+            status: ((flat.status as string) || user.status) as User['status'],
+            last_login_at: (flat.last_login_at as string | null) ?? null,
+            created_at: (flat.created_at as string) || user.created_at,
+          },
+          profile: (flat.profile as UserProfile) || { avatar_url: null, display_name: null, bio: null },
+          subscription: (flat.subscription as UserSubscription) || user.subscription || {
+            id: '',
+            plan_id: null,
+            status: 'inactive',
+            started_at: null,
+            expires_at: null,
+            traffic_quota_bytes: 0,
+            traffic_used_bytes: 0,
+          },
+        })
+      }
     } catch {
       setDetailUser({
         user,
