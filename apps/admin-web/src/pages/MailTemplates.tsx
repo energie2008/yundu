@@ -55,6 +55,7 @@ const TEMPLATE_NAME_LABELS: Record<string, string> = {
   ticket_reply: '工单回复',
   subscription_expired: '订阅过期',
   traffic_warning: '流量预警',
+  verify_code: '注册验证码',
 }
 
 const PAGE_SIZE = 10

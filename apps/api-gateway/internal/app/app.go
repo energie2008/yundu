@@ -184,6 +184,10 @@ func Run() {
 		adminAPI.Any("/system/settings", identityProxy)
 		adminAPI.Any("/system/settings/*action", identityProxy)
 
+		// 邮件模板与 SMTP 配置管理（转发到 identity-service，RBAC 由 identity-service 处理）
+		adminAPI.Any("/mail", identityProxy)
+		adminAPI.Any("/mail/*action", identityProxy)
+
 		// Phase 6: 工单 / 公告 / 通知（转发到 identity-service）
 		adminAPI.Any("/tickets", gwmiddleware.RequirePermission("tickets.read"), identityProxy)
 		adminAPI.Any("/tickets/*action", gwmiddleware.RequirePermission("tickets.read"), identityProxy)
