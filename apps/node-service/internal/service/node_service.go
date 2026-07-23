@@ -1190,10 +1190,12 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 		}
 	}
 
-	// 7.2 cdn/cdn_saas 专属处理：WS/HTTPUpgrade/XHTTP 传输 ALPN 必须 http/1.1
-	// （nginx 8445 需 HTTP/1.1 支持 WebSocket Upgrade / XHTTP packet-up）
+	// 7.2 cdn/cdn_saas 专属处理：WS/HTTPUpgrade 传输 ALPN 必须 http/1.1
+	// （nginx 8445 需 HTTP/1.1 支持 WebSocket Upgrade）
+	// 注意：XHTTP 不强制覆盖 ALPN，packet-up/stream-up 模式支持 h2+http/1.1 协商，
+	//   强制 http/1.1 会导致部分客户端 TLS 协商失败连不上。保留用户在面板配置的值。
 	if isCDNExposureNode(node) {
-		if strings.EqualFold(node.TransportType, "ws") || strings.EqualFold(node.TransportType, "httpupgrade") || strings.EqualFold(node.TransportType, "xhttp") {
+		if strings.EqualFold(node.TransportType, "ws") || strings.EqualFold(node.TransportType, "httpupgrade") {
 			node.ConfigJSON["alpn"] = []string{"http/1.1"}
 			node.ALPN = []string{"http/1.1"}
 		}
