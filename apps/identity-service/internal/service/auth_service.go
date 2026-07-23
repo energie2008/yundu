@@ -402,6 +402,19 @@ func MapErrorToCode(err error) (config.ErrorCode, string) {
 		return config.CodeBadRequest, err.Error()
 	case errors.Is(err, ErrTicketNotFound):
 		return config.CodeNotFound, err.Error()
+	// ===== 邮箱验证码注册相关（参考 Xboard email_verify）=====
+	case errors.Is(err, ErrEmailVerifyRequired):
+		return config.CodeBadRequest, err.Error()
+	case errors.Is(err, ErrInvalidEmailCode):
+		return config.CodeBadRequest, err.Error()
+	case errors.Is(err, ErrEmailCodeCooldown):
+		return config.CodeConflict, err.Error()
+	case errors.Is(err, ErrEmailCodeDailyLimit):
+		return config.CodeConflict, err.Error()
+	case errors.Is(err, ErrRegisterIPLimit):
+		return config.CodeConflict, err.Error()
+	case errors.Is(err, ErrSMTPNotConfigured):
+		return config.CodeServiceUnavailable, err.Error()
 	default:
 		return config.CodeInternalError, ""
 	}

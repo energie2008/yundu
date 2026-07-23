@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,13 @@ var (
 	ErrTokenNotFound        = errors.New("subscription token not found")
 	ErrPlanNotExist         = errors.New("plan does not exist")
 	ErrImpersonateDisabled  = errors.New("impersonation is disabled")
+	// 邮箱验证码注册相关（参考 Xboard CommController::sendEmailVerify）
+	ErrEmailVerifyRequired = errors.New("email verification code is required")
+	ErrInvalidEmailCode    = errors.New("invalid or expired email code")
+	ErrEmailCodeCooldown   = errors.New("please wait 60s before requesting another code")
+	ErrEmailCodeDailyLimit = errors.New("daily email code request limit exceeded")
+	ErrRegisterIPLimit     = errors.New("too many registrations from this IP, try again later")
+	ErrSMTPNotConfigured   = errors.New("mail service is not configured, registration unavailable")
 )
 
 const (
@@ -44,6 +52,17 @@ const (
 	// 将 rawToken 缓存到 Redis，避免每次 ensure 都生成新 token 导致订阅地址变化。
 	subRawTokenPrefix = "sub:raw_token:"
 	subRawTokenTTL    = 30 * 24 * time.Hour
+
+	// 邮箱验证码注册相关（参考 Xboard CommController::sendEmailVerify）
+	emailCodePrefix    = "email_code:"     // 验证码值，key=email_code:<email>，TTL=emailCodeTTL
+	emailCodeTTL       = 5 * time.Minute
+	emailCodeCDPrefix  = "email_code_cd:"  // 发送冷却标记，TTL=emailCodeCD
+	emailCodeCD        = 60 * time.Second
+	emailCodeCntPrefix = "email_code_cnt:" // 每日发送计数，TTL 到当日结束
+	emailCodeDailyMax  = 5
+	registerIPPrefix   = "register_ip:" // 单 IP 注册计数，TTL=registerIPTTL
+	registerIPTTL      = time.Hour
+	registerIPMax      = 3
 )
 
 // getCachedRawToken 从 Redis 获取缓存的 raw subscription token，并验证其在 DB 中仍有效。
@@ -169,6 +188,11 @@ func (s *UserService) Register(ctx context.Context, req *model.UserRegisterReque
 		return nil, ErrUserAlreadyExists
 	}
 
+	// 单 IP 注册限流（参考 Xboard register_limit_by_ip，默认 3 次/小时）
+	if err := s.checkRegisterIPLimit(ctx, ip); err != nil {
+		return nil, err
+	}
+
 	var inviterID *uuid.UUID
 	if strings.TrimSpace(req.InviteCode) != "" {
 		invCode, err := s.inviteCodes.GetByCode(ctx, strings.TrimSpace(req.InviteCode))
@@ -205,15 +229,46 @@ func (s *UserService) Register(ctx context.Context, req *model.UserRegisterReque
 		user.Username = &username
 	}
 
+	// 系统开关：注册是否强制邮箱验证码（默认开启，参考 Xboard email_verify）
+	emailVerifyRequired := s.isEmailVerifyRequired(ctx)
+
+	if emailVerifyRequired {
+		// 验证码模式：SMTP 必须可用，否则拒绝注册（避免绕过邮箱验证）
+		if s.mailSvc == nil || !s.mailSvc.IsEnabled() {
+			return nil, ErrSMTPNotConfigured
+		}
+		if strings.TrimSpace(req.EmailCode) == "" {
+			return nil, ErrEmailVerifyRequired
+		}
+		if err := s.verifyEmailCode(ctx, user.Email, req.EmailCode); err != nil {
+			return nil, err
+		}
+		// 验证码校验通过 → 创建用户并直接激活（邮箱已验证）
+		if err := s.users.Create(ctx, user); err != nil {
+			return nil, err
+		}
+		profile := &model.UserProfile{UserID: user.ID}
+		_ = s.profiles.Create(ctx, profile)
+		_ = s.createInviteCodesForUser(ctx, user.ID, 1)
+		s.activateAndGrantFreePlan(ctx, user)
+
+		var rawSubToken string
+		_, rawSubToken, _ = s.CreateSubscriptionToken(ctx, user.ID, "default", "")
+		if rawSubToken == "" {
+			_, rawSubToken, _, _ = s.EnsureSubscriptionToken(ctx, user.ID, ip)
+		}
+		s.writeAudit(ctx, model.ActorTypeUser, &user.ID, user.Email, "register", "user", &user.ID, ip, nil, user)
+		return &RegisterResult{User: user, SubscriptionToken: rawSubToken}, nil
+	}
+
+	// 链接验证模式（email_verify_required 关闭时回退，保留向后兼容）
 	if err := s.users.Create(ctx, user); err != nil {
 		return nil, err
 	}
-
 	profile := &model.UserProfile{
 		UserID: user.ID,
 	}
 	_ = s.profiles.Create(ctx, profile)
-
 	_ = s.createInviteCodesForUser(ctx, user.ID, 1)
 
 	verifyToken := pkg.GenerateRandomString(64)
@@ -235,35 +290,8 @@ func (s *UserService) Register(ctx context.Context, req *model.UserRegisterReque
 
 	if !mailSent {
 		s.logger.Warn("mail service unavailable or send failed, auto-activating user", "email", user.Email, "verify_token", verifyToken)
-		now := time.Now()
-		user.Status = model.UserStatusActive
-		user.EmailVerifiedAt = &now
-		if err := s.users.UpdateEmailVerified(ctx, user.ID); err != nil {
-			s.logger.Error("failed to auto-activate user", "error", err)
-		} else {
-			freePlanID, err := s.getDefaultFreePlanID(ctx)
-			if err == nil && freePlanID != uuid.Nil {
-				plan, err := s.plans.GetByID(ctx, freePlanID)
-				if err == nil && plan != nil {
-					sub := &model.UserPlanSubscription{
-						ID:                uuid.New(),
-						UserID:            user.ID,
-						PlanID:            freePlanID,
-						Status:            model.SubscriptionStatusActive,
-						StartedAt:         &now,
-						RenewalMode:       model.RenewalModeManual,
-						TrafficQuotaBytes: plan.TrafficBytes,
-						TrafficUsedBytes:  0,
-						SpeedLimitMbps:    plan.SpeedLimitMbps,
-						DeviceLimit:       plan.DeviceLimit,
-						IPLimit:           plan.IPLimit,
-						Source:            "free_trial",
-					}
-					_ = s.subs.Create(ctx, sub)
-				}
-			}
-			_, rawSubToken, _ = s.CreateSubscriptionToken(ctx, user.ID, "default", "")
-		}
+		s.activateAndGrantFreePlan(ctx, user)
+		_, rawSubToken, _ = s.CreateSubscriptionToken(ctx, user.ID, "default", "")
 	}
 
 	if rawSubToken == "" {
@@ -271,11 +299,148 @@ func (s *UserService) Register(ctx context.Context, req *model.UserRegisterReque
 	}
 
 	s.writeAudit(ctx, model.ActorTypeUser, &user.ID, user.Email, "register", "user", &user.ID, ip, nil, user)
+	return &RegisterResult{User: user, SubscriptionToken: rawSubToken}, nil
+}
 
-	return &RegisterResult{
-		User:              user,
-		SubscriptionToken: rawSubToken,
-	}, nil
+// activateAndGrantFreePlan 激活用户邮箱并赠送免费套餐（抽取自原自动激活逻辑，供两套注册流程复用）。
+func (s *UserService) activateAndGrantFreePlan(ctx context.Context, user *model.User) {
+	now := time.Now()
+	user.Status = model.UserStatusActive
+	user.EmailVerifiedAt = &now
+	if err := s.users.UpdateEmailVerified(ctx, user.ID); err != nil {
+		s.logger.Error("failed to activate user", "error", err)
+		return
+	}
+	freePlanID, err := s.getDefaultFreePlanID(ctx)
+	if err == nil && freePlanID != uuid.Nil {
+		plan, err := s.plans.GetByID(ctx, freePlanID)
+		if err == nil && plan != nil {
+			sub := &model.UserPlanSubscription{
+				ID:                uuid.New(),
+				UserID:            user.ID,
+				PlanID:            freePlanID,
+				Status:            model.SubscriptionStatusActive,
+				StartedAt:         &now,
+				RenewalMode:       model.RenewalModeManual,
+				TrafficQuotaBytes: plan.TrafficBytes,
+				TrafficUsedBytes:  0,
+				SpeedLimitMbps:    plan.SpeedLimitMbps,
+				DeviceLimit:       plan.DeviceLimit,
+				IPLimit:           plan.IPLimit,
+				Source:            "free_trial",
+			}
+			_ = s.subs.Create(ctx, sub)
+		}
+	}
+}
+
+// isEmailVerifyRequired 读取系统设置 register.email_verify_required。
+// 默认 true（强制验证码注册）；设置缺失或读取失败时也返回 true（安全默认）。
+func (s *UserService) isEmailVerifyRequired(ctx context.Context) bool {
+	if s.settings == nil {
+		return true
+	}
+	st, err := s.settings.GetByGroupKey(ctx, "register", "email_verify_required")
+	if err != nil || st == nil {
+		return true
+	}
+	var v bool
+	if json.Unmarshal(st.ValueJSON, &v) == nil {
+		return v
+	}
+	return true
+}
+
+// verifyEmailCode 校验邮箱验证码：从 Redis 取 email_code:<email> 比对，比对后立即删除（一次性，防暴力枚举）。
+func (s *UserService) verifyEmailCode(ctx context.Context, email, code string) error {
+	if s.redisClient == nil {
+		return ErrInvalidEmailCode
+	}
+	key := emailCodePrefix + email
+	stored, err := s.redisClient.Get(ctx, key).Result()
+	if err != nil {
+		return ErrInvalidEmailCode
+	}
+	s.redisClient.Del(ctx, key) // 无论对错都删除
+	if stored != strings.TrimSpace(code) {
+		return ErrInvalidEmailCode
+	}
+	return nil
+}
+
+// SendEmailCode 发送注册验证码到指定邮箱（参考 Xboard CommController::sendEmailVerify）。
+// 防刷：60s 冷却 + 每邮箱每日 5 次上限。SMTP 未启用返回 ErrSMTPNotConfigured。
+// 为防邮箱探测，已注册邮箱静默跳过发送但仍返回 nil（调用方统一返回"已发送"）。
+func (s *UserService) SendEmailCode(ctx context.Context, email, ip string) error {
+	emailLower := strings.ToLower(strings.TrimSpace(email))
+	if s.redisClient == nil {
+		return errors.New("redis not available")
+	}
+	if s.mailSvc == nil || !s.mailSvc.IsEnabled() {
+		return ErrSMTPNotConfigured
+	}
+	// 冷却检查（60s）
+	cdKey := emailCodeCDPrefix + emailLower
+	if exists, _ := s.redisClient.Exists(ctx, cdKey).Result(); exists > 0 {
+		return ErrEmailCodeCooldown
+	}
+	// 每日上限检查（5 次/天）
+	cntKey := emailCodeCntPrefix + emailLower
+	cnt, _ := s.redisClient.Incr(ctx, cntKey).Result()
+	if cnt == 1 {
+		s.redisClient.Expire(ctx, cntKey, untilEndOfDay())
+	}
+	if cnt > int64(emailCodeDailyMax) {
+		return ErrEmailCodeDailyLimit
+	}
+	// 已注册邮箱静默跳过（防探测），但仍占用冷却以保持响应节奏一致
+	if u, _ := s.users.GetByEmail(ctx, emailLower); u != nil {
+		s.redisClient.Set(ctx, cdKey, "1", emailCodeCD)
+		return nil
+	}
+	code := generateEmailCode()
+	if err := s.mailSvc.SendVerifyCode(ctx, emailLower, code); err != nil {
+		s.logger.Warn("failed to send verify code", "email", emailLower, "error", err)
+		return err
+	}
+	s.redisClient.Set(ctx, emailCodePrefix+emailLower, code, emailCodeTTL)
+	s.redisClient.Set(ctx, cdKey, "1", emailCodeCD)
+	s.logger.Info("email verify code sent", "email", emailLower, "ip", ip)
+	return nil
+}
+
+// checkRegisterIPLimit 单 IP 每小时注册上限检查（参考 Xboard register_limit_by_ip）。
+func (s *UserService) checkRegisterIPLimit(ctx context.Context, ip string) error {
+	if s.redisClient == nil || ip == "" {
+		return nil
+	}
+	key := registerIPPrefix + ip
+	cnt, _ := s.redisClient.Incr(ctx, key).Result()
+	if cnt == 1 {
+		s.redisClient.Expire(ctx, key, registerIPTTL)
+	}
+	if cnt > int64(registerIPMax) {
+		return ErrRegisterIPLimit
+	}
+	return nil
+}
+
+// untilEndOfDay 返回到当日 23:59:59 的剩余时长。
+func untilEndOfDay() time.Duration {
+	now := time.Now()
+	end := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
+	for end.Before(now) {
+		end = end.Add(24 * time.Hour)
+	}
+	return end.Sub(now)
+}
+
+// generateEmailCode 生成 6 位数字验证码（使用 crypto/rand）。
+func generateEmailCode() string {
+	b := make([]byte, 4)
+	_, _ = crand.Read(b)
+	v := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	return fmt.Sprintf("%06d", 100000+int(v%900000))
 }
 
 func (s *UserService) GetNotificationPreferences(ctx context.Context, userID uuid.UUID) (*model.NotificationPreferences, error) {
@@ -1248,6 +1413,15 @@ func (s *UserService) GetSMTPConfig(ctx context.Context) (*SMTPConfig, error) {
 		return nil, nil
 	}
 	return ParseSMTPConfigFromJSON(setting.ValueJSON)
+}
+
+// SaveSMTPConfig 保存 SMTP 配置到 system_settings (smtp, config) 作为单个 JSON blob。
+// is_secret=true 以防止通过系统设置 API 泄露密码。
+// 保存后不自动刷新内存配置，调用方需显式调用 RefreshMailConfig。
+func (s *UserService) SaveSMTPConfig(ctx context.Context, cfg *SMTPConfig) error {
+	desc := "SMTP 邮件服务配置"
+	_, err := s.settings.SetByGroupKey(ctx, "smtp", "config", cfg, true, &desc, nil)
+	return err
 }
 
 func ParseSMTPConfigFromJSON(data []byte) (*SMTPConfig, error) {

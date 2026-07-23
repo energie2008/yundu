@@ -11,7 +11,8 @@ interface AuthState {
   isAuthenticated: boolean
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, inviteCode?: string) => Promise<{ requiresVerification: boolean }>
+  register: (email: string, password: string, inviteCode?: string, emailCode?: string) => Promise<{ requiresVerification: boolean }>
+  sendEmailCode: (email: string) => Promise<void>
   logout: () => Promise<void>
   fetchMe: () => Promise<void>
   init: () => void
@@ -52,11 +53,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await get().fetchMe()
   },
 
-  register: async (email: string, password: string, inviteCode?: string) => {
+  register: async (email: string, password: string, inviteCode?: string, emailCode?: string) => {
     const data = await api.post<RegisterResponse>(EP.AUTH_REGISTER, {
       email,
       password,
       invite_code: inviteCode || '',
+      email_code: emailCode || '',
     })
     if (!data.requires_verification) {
       try {
@@ -67,6 +69,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
     return { requiresVerification: true }
+  },
+
+  sendEmailCode: async (email: string) => {
+    await api.post(EP.AUTH_SEND_EMAIL_CODE, { email })
   },
 
   logout: async () => {

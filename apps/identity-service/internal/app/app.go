@@ -139,7 +139,7 @@ func Run() {
 	adminPaymentHandler := handler.NewAdminPaymentHandler(settingRepo, paymentService)
 	adminCommissionHandler := handler.NewAdminCommissionHandler(commissionService)
 	userExtrasHandler := handler.NewUserExtrasHandler(userService, ticketService, notificationService, commissionService)
-	adminMailHandler := handler.NewAdminMailHandler(mailService)
+	adminMailHandler := handler.NewAdminMailHandler(mailService, userService)
 	verifyHandler := handler.NewVerifyHandler(userService)
 
 	opts := server.DefaultOptions(svccfg.ServiceName, cfg.Port)
@@ -166,6 +166,7 @@ func Run() {
 		userAuth := api.Group("/user/auth")
 		{
 			userAuth.POST("/register", userHandler.Register)
+			userAuth.POST("/send-email-code", verifyHandler.SendEmailCode) // 注册验证码（参考 Xboard sendEmailVerify）
 			userAuth.POST("/login", authHandler.Login)
 			userAuth.GET("/verify-email", userHandler.VerifyEmail)
 			userAuth.POST("/forgot-password", userHandler.ForgotPassword)
@@ -176,6 +177,7 @@ func Run() {
 		auth := api.Group("/auth")
 		{
 			auth.POST("/register", userHandler.Register)
+			auth.POST("/send-email-code", verifyHandler.SendEmailCode) // 注册验证码
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/refresh", authHandler.Refresh)
 			// 邮箱验证相关（POST 接口，使用邮件模板系统）
@@ -352,6 +354,9 @@ func Run() {
 				adminMail.POST("/templates/reload", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.ReloadCache)
 				adminMail.POST("/test", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendTestMail)
 				adminMail.POST("/send", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendMail)
+				// SMTP 配置管理（保存后即时刷新内存，无需重启）
+				adminMail.GET("/smtp-config", rbacMiddleware.RequirePermission("system.read"), adminMailHandler.GetSMTPConfig)
+				adminMail.PUT("/smtp-config", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.UpdateSMTPConfig)
 			}
 		}
 

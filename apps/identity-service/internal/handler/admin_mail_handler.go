@@ -12,11 +12,12 @@ import (
 // AdminMailHandler 邮件模板管理 Handler（管理员）
 type AdminMailHandler struct {
 	mailSvc *service.MailService
+	userSvc *service.UserService
 }
 
 // NewAdminMailHandler 构造 AdminMailHandler
-func NewAdminMailHandler(mailSvc *service.MailService) *AdminMailHandler {
-	return &AdminMailHandler{mailSvc: mailSvc}
+func NewAdminMailHandler(mailSvc *service.MailService, userSvc *service.UserService) *AdminMailHandler {
+	return &AdminMailHandler{mailSvc: mailSvc, userSvc: userSvc}
 }
 
 // ListTemplates GET /api/v1/admin/mail/templates - 列出所有模板
@@ -126,4 +127,86 @@ func (h *AdminMailHandler) ReloadCache(c *gin.Context) {
 		return
 	}
 	server.OK(c, gin.H{"reloaded": true})
+}
+
+// GetSMTPConfig GET /api/v1/admin/mail/smtp-config - 获取 SMTP 配置（密码不明文返回）
+func (h *AdminMailHandler) GetSMTPConfig(c *gin.Context) {
+	cfg, err := h.userSvc.GetSMTPConfig(c.Request.Context())
+	if err != nil {
+		server.InternalError(c, "")
+		return
+	}
+	if cfg == nil {
+		server.OK(c, gin.H{
+			"enabled":            false,
+			"host":               "",
+			"port":               465,
+			"username":           "",
+			"from":               "",
+			"password_configured": false,
+		})
+		return
+	}
+	server.OK(c, gin.H{
+		"enabled":             cfg.Enabled,
+		"host":                cfg.Host,
+		"port":                cfg.Port,
+		"username":            cfg.Username,
+		"from":                cfg.From,
+		"password_configured": cfg.Password != "",
+	})
+}
+
+// UpdateSMTPConfigRequest 更新 SMTP 配置请求
+type UpdateSMTPConfigRequest struct {
+	Enabled  bool   `json:"enabled"`
+	Host     string `json:"host" binding:"required"`
+	Port     int    `json:"port" binding:"required"`
+	Username string `json:"username"`
+	Password string `json:"password"` // 留空则保持现有密码不变
+	From     string `json:"from"`
+}
+
+// UpdateSMTPConfig PUT /api/v1/admin/mail/smtp-config - 更新 SMTP 配置并即时刷新内存
+func (h *AdminMailHandler) UpdateSMTPConfig(c *gin.Context) {
+	var req UpdateSMTPConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		server.ValidationError(c, err.Error())
+		return
+	}
+
+	// 密码留空时保留现有密码（避免前端回显明文密码）
+	password := req.Password
+	if password == "" {
+		existing, _ := h.userSvc.GetSMTPConfig(c.Request.Context())
+		if existing != nil {
+			password = existing.Password
+		}
+	}
+
+	cfg := &service.SMTPConfig{
+		Enabled:  req.Enabled,
+		Host:     req.Host,
+		Port:     req.Port,
+		Username: req.Username,
+		Password: password,
+		From:     req.From,
+	}
+
+	if err := h.userSvc.SaveSMTPConfig(c.Request.Context(), cfg); err != nil {
+		server.InternalError(c, "")
+		return
+	}
+
+	// 即时刷新内存中的 SMTP 配置（无需重启服务）
+	h.userSvc.RefreshMailConfig(c.Request.Context())
+
+	server.OK(c, gin.H{
+		"enabled":             cfg.Enabled,
+		"host":                cfg.Host,
+		"port":                cfg.Port,
+		"username":            cfg.Username,
+		"from":                cfg.From,
+		"password_configured": cfg.Password != "",
+	})
 }

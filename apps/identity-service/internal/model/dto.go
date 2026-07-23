@@ -471,6 +471,12 @@ type UserRegisterRequest struct {
 	Password   string `json:"password" binding:"required,min=8,max=128"`
 	Username   string `json:"username"`
 	InviteCode string `json:"invite_code,omitempty"`
+	EmailCode  string `json:"email_code,omitempty"` // 邮箱验证码（email_verify_required 开启时必填）
+}
+
+// SendEmailCodeRequest 发送注册验证码请求
+type SendEmailCodeRequest struct {
+	Email string `json:"email" binding:"required,email"`
 }
 
 type ForgotPasswordRequest struct {

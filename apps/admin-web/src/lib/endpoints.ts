@@ -144,6 +144,8 @@ export const EP = {
   MAIL_TEMPLATES_RELOAD: '/admin/mail/templates/reload',
   // 测试发送：POST /admin/mail/test，body={ to, subject, body }
   MAIL_TEST_SEND: '/admin/mail/test',
+  // SMTP 配置管理：GET 返回（密码不明文），PUT 保存后即时刷新内存
+  MAIL_SMTP_CONFIG: '/admin/mail/smtp-config',
 
   // ===== 订阅访问统计 (subscription-service) =====
   SUB_ACCESS_OVERVIEW: '/admin/subscription/access-overview',

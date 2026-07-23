@@ -22,7 +22,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@airport/ui'
-import { api, xbAdminApi } from '@/lib/api'
+import { api } from '@/lib/api'
 import { EP } from '@/lib/endpoints'
 
 interface SystemConfig {
@@ -53,6 +53,23 @@ interface SystemConfig {
   [key: string]: unknown
 }
 
+// SMTP 配置通过专用接口 /admin/mail/smtp-config 管理（与扁平系统设置分离）
+interface SmtpConfig {
+  enabled: boolean
+  host: string
+  port: number
+  username: string
+  password: string
+  from: string
+  password_configured: boolean
+}
+
+// 旧的 SMTP 扁平键（从 system_settings 加载时跳过，改由专用接口管理）
+const SMTP_LEGACY_KEYS = [
+  'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password',
+  'smtp_encryption', 'email_from_name', 'email_from_address', 'email_driver',
+]
+
 function toBool(v: unknown): boolean {
   if (typeof v === 'boolean') return v
   if (typeof v === 'number') return v === 1
@@ -82,6 +99,12 @@ export default function Settings() {
   const [testMailTo, setTestMailTo] = useState('')
   const [testMailSending, setTestMailSending] = useState(false)
 
+  // SMTP 配置独立状态（不混入扁平 system_settings）
+  const [smtpConfig, setSmtpConfig] = useState<SmtpConfig>({
+    enabled: false, host: '', port: 465, username: '', password: '', from: '', password_configured: false,
+  })
+  const [savingSmtp, setSavingSmtp] = useState(false)
+
   useEffect(() => {
     loadSettings()
   }, [])
@@ -95,6 +118,8 @@ export default function Settings() {
       for (const [group, groupSettings] of Object.entries(data || {})) {
         if (groupSettings && typeof groupSettings === 'object') {
           for (const [key, value] of Object.entries(groupSettings)) {
+            // 跳过旧的 SMTP 扁平键，改由专用接口 /admin/mail/smtp-config 管理
+            if (SMTP_LEGACY_KEYS.includes(key)) continue
             flat[key as keyof SystemConfig] = value as SystemConfig[keyof SystemConfig]
             groupMap[key] = group
           }
@@ -103,6 +128,14 @@ export default function Settings() {
       setSettings(flat)
       originalSettings.current = { ...flat }
       keyToGroup.current = groupMap
+
+      // SMTP 配置通过专用接口加载（与扁平系统设置分离）
+      try {
+        const smtpResp = await api.get<SmtpConfig>(EP.MAIL_SMTP_CONFIG)
+        setSmtpConfig(smtpResp)
+      } catch {
+        // SMTP 配置未初始化，使用默认值
+      }
     } catch (err) {
       toast({
         title: '加载失败',
@@ -155,6 +188,31 @@ export default function Settings() {
     toast({ title: '已生成新密钥', description: '请记得保存配置以生效', variant: 'default' })
   }
 
+  // SMTP 配置独立保存（通过专用接口，保存后即时刷新内存，无需重启服务）
+  const handleSaveSmtp = async () => {
+    setSavingSmtp(true)
+    try {
+      const resp = await api.put<SmtpConfig>(EP.MAIL_SMTP_CONFIG, {
+        enabled: smtpConfig.enabled,
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        username: smtpConfig.username,
+        password: smtpConfig.password, // 留空则后端保持现有密码不变
+        from: smtpConfig.from,
+      })
+      setSmtpConfig(resp)
+      toast({ title: '保存成功', description: 'SMTP 配置已更新并即时生效', variant: 'success' })
+    } catch (err) {
+      toast({
+        title: '保存失败',
+        description: err instanceof Error ? err.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    } finally {
+      setSavingSmtp(false)
+    }
+  }
+
   const handleTestMail = async () => {
     if (!testMailTo.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testMailTo)) {
       toast({ title: '校验失败', description: '请输入有效的邮箱地址', variant: 'destructive' })
@@ -162,14 +220,18 @@ export default function Settings() {
     }
     setTestMailSending(true)
     try {
-      await xbAdminApi.post('/config/testSendMail', { to_email: testMailTo.trim() })
+      await api.post(EP.MAIL_TEST_SEND, {
+        to: testMailTo.trim(),
+        subject: 'YunDu 测试邮件',
+        body: '<p>这是一封来自 YunDu 系统的测试邮件，收到此邮件说明 SMTP 配置正常。</p>',
+      })
       toast({ title: '发送成功', description: `测试邮件已发送至 ${testMailTo}`, variant: 'success' })
       setTestMailOpen(false)
       setTestMailTo('')
     } catch (err) {
       toast({
         title: '发送失败',
-        description: err instanceof Error ? err.message : '请检查邮件配置',
+        description: err instanceof Error ? err.message : '请检查 SMTP 配置是否正确',
         variant: 'destructive',
       })
     } finally {
@@ -454,113 +516,116 @@ export default function Settings() {
             </TabsContent>
 
             <TabsContent value="email" className="p-4 space-y-5 mt-0">
+              {/* 启用/禁用开关 */}
               <div className="flex items-center justify-between">
-                <div className="space-y-2 flex-1">
-                  <Label className="text-zinc-300 text-sm">邮件驱动</Label>
-                  <Select
-                    value={settings.email_driver || 'smtp'}
-                    onChange={(e) => update('email_driver', e.target.value)}
-                    className="bg-zinc-800 border-zinc-700 text-zinc-100 w-full"
-                  >
-                    <option value="smtp">SMTP</option>
-                    <option value="sendgrid">SendGrid</option>
-                  </Select>
+                <div>
+                  <Label className="text-zinc-300 text-sm">启用邮件服务</Label>
+                  <p className="text-xs text-zinc-500 mt-0.5">开启后注册验证码、密码重置等邮件功能将可用</p>
                 </div>
+                <Switch
+                  checked={smtpConfig.enabled}
+                  onChange={(e) => setSmtpConfig((prev) => ({ ...prev, enabled: e.target.checked }))}
+                />
+              </div>
+
+              <Separator className="bg-zinc-800" />
+
+              {/* SMTP 服务器 */}
+              <div className="space-y-2">
+                <Label htmlFor="smtp_host" className="text-zinc-300 text-sm">SMTP 服务器</Label>
+                <Input
+                  id="smtp_host"
+                  value={smtpConfig.host}
+                  onChange={(e) => setSmtpConfig((prev) => ({ ...prev, host: e.target.value }))}
+                  placeholder="smtp.example.com"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                />
+              </div>
+
+              {/* 端口 + 加密方式提示 */}
+              <div className="space-y-2">
+                <Label htmlFor="smtp_port" className="text-zinc-300 text-sm">SMTP 端口</Label>
+                <Input
+                  id="smtp_port"
+                  type="number"
+                  value={smtpConfig.port}
+                  onChange={(e) => setSmtpConfig((prev) => ({ ...prev, port: parseInt(e.target.value) || 0 }))}
+                  placeholder="465"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                />
+                <p className="text-xs text-zinc-500">
+                  465 = SSL（隐式 TLS）&nbsp;|&nbsp;587 = STARTTLS&nbsp;|&nbsp;25 = 无加密（不推荐）
+                </p>
+              </div>
+
+              {/* 用户名 */}
+              <div className="space-y-2">
+                <Label htmlFor="smtp_username" className="text-zinc-300 text-sm">SMTP 用户名</Label>
+                <Input
+                  id="smtp_username"
+                  value={smtpConfig.username}
+                  onChange={(e) => setSmtpConfig((prev) => ({ ...prev, username: e.target.value }))}
+                  placeholder="noreply@example.com"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                />
+              </div>
+
+              {/* 密码 */}
+              <div className="space-y-2">
+                <Label htmlFor="smtp_password" className="text-zinc-300 text-sm">SMTP 密码</Label>
+                <Input
+                  id="smtp_password"
+                  type="password"
+                  value={smtpConfig.password}
+                  onChange={(e) => setSmtpConfig((prev) => ({ ...prev, password: e.target.value }))}
+                  placeholder={smtpConfig.password_configured ? '已设置（留空保持不变）' : '请输入密码'}
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                />
+                {smtpConfig.password_configured && (
+                  <p className="text-xs text-zinc-500">密码已配置，留空保存将保持现有密码不变</p>
+                )}
+              </div>
+
+              <Separator className="bg-zinc-800" />
+
+              {/* 发件人地址 */}
+              <div className="space-y-2">
+                <Label htmlFor="email_from" className="text-zinc-300 text-sm">发件人地址</Label>
+                <Input
+                  id="email_from"
+                  value={smtpConfig.from}
+                  onChange={(e) => setSmtpConfig((prev) => ({ ...prev, from: e.target.value }))}
+                  placeholder="noreply@example.com"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                />
+                <p className="text-xs text-zinc-500">邮件显示的发件人地址，留空则使用 SMTP 用户名</p>
+              </div>
+
+              {/* 操作按钮 */}
+              <div className="flex items-center gap-3 pt-2">
+                <Button
+                  size="sm"
+                  className="bg-indigo-600 hover:bg-indigo-500"
+                  onClick={handleSaveSmtp}
+                  disabled={savingSmtp}
+                  isLoading={savingSmtp}
+                >
+                  <Save className="w-4 h-4 mr-1" />
+                  保存邮件配置
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 ml-3 mt-6 shrink-0"
+                  className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
                   onClick={() => setTestMailOpen(true)}
                 >
                   <Mail className="w-4 h-4 mr-1" />
                   发送测试邮件
                 </Button>
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="smtp_host" className="text-zinc-300 text-sm">SMTP 服务器</Label>
-                <Input
-                  id="smtp_host"
-                  value={settings.smtp_host || ''}
-                  onChange={(e) => update('smtp_host', e.target.value)}
-                  placeholder="smtp.example.com"
-                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="smtp_port" className="text-zinc-300 text-sm">SMTP 端口</Label>
-                  <Input
-                    id="smtp_port"
-                    type="number"
-                    value={settings.smtp_port ?? ''}
-                    onChange={(e) => update('smtp_port', e.target.value)}
-                    placeholder="465"
-                    className="bg-zinc-800 border-zinc-700 text-zinc-100"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="smtp_encryption" className="text-zinc-300 text-sm">加密方式</Label>
-                  <Select
-                    value={settings.smtp_encryption || 'ssl'}
-                    onChange={(e) => update('smtp_encryption', e.target.value)}
-                    className="bg-zinc-800 border-zinc-700 text-zinc-100"
-                  >
-                    <option value="ssl">SSL</option>
-                    <option value="tls">TLS</option>
-                    <option value="none">无</option>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="smtp_username" className="text-zinc-300 text-sm">SMTP 用户名</Label>
-                <Input
-                  id="smtp_username"
-                  value={settings.smtp_username || ''}
-                  onChange={(e) => update('smtp_username', e.target.value)}
-                  placeholder="noreply@example.com"
-                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="smtp_password" className="text-zinc-300 text-sm">SMTP 密码</Label>
-                <Input
-                  id="smtp_password"
-                  type="password"
-                  value={settings.smtp_password || ''}
-                  onChange={(e) => update('smtp_password', e.target.value)}
-                  placeholder="••••••••"
-                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
-                />
-              </div>
-
-              <Separator className="bg-zinc-800" />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="email_from_name" className="text-zinc-300 text-sm">发件人名称</Label>
-                  <Input
-                    id="email_from_name"
-                    value={settings.email_from_name || ''}
-                    onChange={(e) => update('email_from_name', e.target.value)}
-                    placeholder="XBoard"
-                    className="bg-zinc-800 border-zinc-700 text-zinc-100"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email_from_address" className="text-zinc-300 text-sm">发件人地址</Label>
-                  <Input
-                    id="email_from_address"
-                    value={settings.email_from_address || ''}
-                    onChange={(e) => update('email_from_address', e.target.value)}
-                    placeholder="noreply@example.com"
-                    className="bg-zinc-800 border-zinc-700 text-zinc-100"
-                  />
-                </div>
-              </div>
+              <p className="text-xs text-zinc-500">
+                提示：邮件配置独立保存，保存后即时生效无需重启服务。顶部「保存设置」按钮仅保存其他系统配置。
+              </p>
             </TabsContent>
 
             <TabsContent value="payment" className="p-4 space-y-5 mt-0">

@@ -13,5 +13,4 @@ use (
 	./packages/config
 	./packages/proto
 	./packages/subscription
-	./tools/preset_freshness_checker
 )

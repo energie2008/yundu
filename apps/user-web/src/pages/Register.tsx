@@ -10,6 +10,7 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const registerSchema = z
   .object({
     email: z.string().regex(emailRegex, '请输入有效的邮箱地址'),
+    emailCode: z.string().min(6, '请输入邮箱验证码').max(6, '验证码为6位数字'),
     password: z.string().min(6, '密码至少 6 个字符'),
     confirmPassword: z.string().min(6, '请确认密码'),
     inviteCode: z.string().optional(),
@@ -67,22 +68,57 @@ function Button({
 export function Register() {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const { register: registerUser, isAuthenticated, isLoading, init } = useAuthStore()
+  const { register: registerUser, sendEmailCode, isAuthenticated, isLoading, init } = useAuthStore()
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [countdown, setCountdown] = useState(0)
+  const [sendingCode, setSendingCode] = useState(false)
 
   useEffect(() => {
     init()
   }, [init])
 
+  // 验证码发送冷却倒计时（60s，参考 Xboard email_verify）
+  useEffect(() => {
+    if (countdown <= 0) return
+    const timer = setInterval(() => {
+      setCountdown((prev) => prev - 1)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [countdown])
+
   const {
     register,
     handleSubmit,
     setError,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormData>({
-    defaultValues: { email: '', password: '', confirmPassword: '', inviteCode: '', agreeTerms: false },
+    defaultValues: { email: '', emailCode: '', password: '', confirmPassword: '', inviteCode: '', agreeTerms: false },
   })
+
+  // 发送注册验证码：先校验邮箱格式，再调用后端 send-email-code 接口
+  const handleSendCode = async () => {
+    const email = getValues('email')
+    if (!email || !emailRegex.test(email)) {
+      setError('email', { type: 'manual', message: '请先输入有效的邮箱地址' })
+      return
+    }
+    try {
+      setSendingCode(true)
+      await sendEmailCode(email)
+      setCountdown(60)
+      toast({ title: '验证码已发送', description: '请查收邮箱', variant: 'success' })
+    } catch (err) {
+      toast({
+        title: '发送失败',
+        description: err instanceof Error ? err.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    } finally {
+      setSendingCode(false)
+    }
+  }
 
   const onSubmit = async (data: RegisterFormData) => {
     const result = registerSchema.safeParse(data)
@@ -97,7 +133,7 @@ export function Register() {
     }
 
     try {
-      const res = await registerUser(data.email, data.password, data.inviteCode)
+      const res = await registerUser(data.email, data.password, data.inviteCode, data.emailCode)
       if (res.requiresVerification) {
         toast({
           title: '注册成功',
@@ -166,6 +202,40 @@ export function Register() {
                 />
               </div>
               {errors.email && <p className="text-sm" style={{ color: 'var(--destructive)' }}>{errors.email.message}</p>}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>邮箱验证码</label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: 'var(--muted-foreground)' }} />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="请输入6位验证码"
+                    className="w-full h-11 pl-10 pr-3 rounded-lg text-sm outline-none transition-colors"
+                    style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                    {...register('emailCode', { required: '请输入验证码' })}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSendCode}
+                  disabled={countdown > 0 || sendingCode}
+                  className="h-11 px-4 rounded-lg text-sm font-medium whitespace-nowrap transition-opacity"
+                  style={{
+                    background: countdown > 0 || sendingCode ? 'var(--muted)' : 'var(--primary)',
+                    color: '#fff',
+                    border: '1px solid var(--border)',
+                    cursor: countdown > 0 || sendingCode ? 'not-allowed' : 'pointer',
+                    opacity: countdown > 0 || sendingCode ? 0.6 : 1,
+                  }}
+                >
+                  {sendingCode ? '发送中...' : countdown > 0 ? `${countdown}s 后重发` : '获取验证码'}
+                </button>
+              </div>
+              {errors.emailCode && <p className="text-sm" style={{ color: 'var(--destructive)' }}>{errors.emailCode.message}</p>}
             </div>
 
             <div className="space-y-1.5">

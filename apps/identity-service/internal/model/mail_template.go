@@ -79,4 +79,5 @@ const (
 	MailTemplateTicketReply          = "ticket_reply"
 	MailTemplateSubscriptionExpired  = "subscription_expired"
 	MailTemplateTrafficWarning       = "traffic_warning"
+	MailTemplateVerifyCode           = "verify_code"
 )

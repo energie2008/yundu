@@ -390,6 +390,24 @@ func (s *MailService) SendTrafficWarning(ctx context.Context, to, userName, traf
 	return s.SendMail(ctx, to, model.MailTemplateTrafficWarning, data)
 }
 
+// SendVerifyCode 发送注册验证码邮件。
+// 与其它提醒类邮件不同：此处 SMTP 未启用时返回 ErrMailNotConfigured（而非静默跳过），
+// 因为注册验证码是强校验流程，发不出验证码就必须让上层拒绝注册。
+func (s *MailService) SendVerifyCode(ctx context.Context, to, code string) error {
+	cfg := s.getSMTPConfig()
+	if !cfg.Enabled {
+		return ErrMailNotConfigured
+	}
+	siteName, siteURL := s.getSiteInfo()
+	data := map[string]interface{}{
+		"UserName": to,
+		"Code":     code,
+		"SiteName": siteName,
+		"SiteURL":  siteURL,
+	}
+	return s.SendMail(ctx, to, model.MailTemplateVerifyCode, data)
+}
+
 // SendTestMail 发送测试邮件（管理员使用）
 func (s *MailService) SendTestMail(ctx context.Context, to, subject, body string) error {
 	cfg := s.getSMTPConfig()

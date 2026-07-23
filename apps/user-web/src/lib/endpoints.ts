@@ -1,5 +1,6 @@
 export const EP = {
   AUTH_REGISTER: '/api/v1/user/auth/register',
+  AUTH_SEND_EMAIL_CODE: '/api/v1/user/auth/send-email-code',
   AUTH_LOGIN: '/api/v1/user/auth/login',
   AUTH_LOGOUT: '/api/v1/user/auth/logout',
   AUTH_REFRESH: '/api/v1/user/auth/refresh',

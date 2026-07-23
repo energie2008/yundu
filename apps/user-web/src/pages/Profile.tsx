@@ -354,14 +354,14 @@ export default function Profile() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>流量不足提醒</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>流量剩余不足时发送提醒</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>流量剩余不足时发送站内信提醒</p>
                 </div>
                 <Toggle checked={notifyTraffic} onChange={setNotifyTraffic} />
               </div>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>工单回复提醒</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>收到工单回复时发送提醒</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>收到工单回复时发送站内信提醒</p>
                 </div>
                 <Toggle checked={notifyTicketReply} onChange={setNotifyTicketReply} />
               </div>

@@ -287,10 +287,15 @@ func (s *TicketService) AddReply(ctx context.Context, ticketID, authorID uuid.UU
 
 	// 管理员回复（且非内部备注）时，异步通知工单用户
 	if authorType == model.AuthorTypeAdmin && !req.IsInternal && s.notifySvc != nil {
-		s.notifySvc.NotifyUserAsync(t.UserID, "ticket_replied", map[string]interface{}{
-			"ticket_id":      t.ID.String(),
-			"ticket_subject": t.Subject,
-		})
+		// 尊重用户通知偏好：关闭"工单回复提醒"则跳过（与到期/流量提醒保持一致）
+		// 取用户信息失败时也跳过，避免给已关闭偏好的用户误发
+		u, err := s.userRepo.GetByID(ctx, t.UserID)
+		if err == nil && u != nil && u.NotifyTicketReply {
+			s.notifySvc.NotifyUserAsync(t.UserID, "ticket_replied", map[string]interface{}{
+				"ticket_id":      t.ID.String(),
+				"ticket_subject": t.Subject,
+			})
+		}
 	}
 
 	return rp, nil
