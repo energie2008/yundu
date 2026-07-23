@@ -53,17 +53,25 @@ function TicketDetailView({ ticketId, onBack }: { ticketId: string; onBack: () =
   const queryClient = useQueryClient()
   const [replyContent, setReplyContent] = useState('')
 
-  const { data: ticket, isLoading: ticketLoading } = useQuery<TicketResponse>({
+  const { data: ticket, isLoading: ticketLoading, isError: ticketError } = useQuery<TicketResponse>({
     queryKey: ['ticket-detail', ticketId],
     queryFn: () => api.get<TicketResponse>(EP.TICKET_DETAIL(ticketId)),
     enabled: !!ticketId,
+    retry: 1,
   })
 
-  const { data: replies = [], isLoading: repliesLoading } = useQuery<TicketReplyResponse[]>({
+  const { data: repliesData, isLoading: repliesLoading } = useQuery<TicketReplyResponse[]>({
     queryKey: ['ticket-replies', ticketId],
-    queryFn: () => api.get<TicketReplyResponse[]>(EP.TICKET_REPLIES(ticketId)),
+    queryFn: async () => {
+      const raw = await api.get<unknown>(EP.TICKET_REPLIES(ticketId))
+      // API 可能返回数组或 {items: [...]} 分页对象，统一提取为数组
+      if (Array.isArray(raw)) return raw as TicketReplyResponse[]
+      if (raw && typeof raw === 'object' && 'items' in raw) return (raw as any).items as TicketReplyResponse[]
+      return []
+    },
     enabled: !!ticketId,
   })
+  const replies = Array.isArray(repliesData) ? repliesData : []
 
   const replyMutation = useMutation({
     mutationFn: (content: string) =>
@@ -85,7 +93,7 @@ function TicketDetailView({ ticketId, onBack }: { ticketId: string; onBack: () =
     replyMutation.mutate(replyContent.trim())
   }
 
-  if (ticketLoading || !ticket) {
+  if (ticketLoading) {
     return (
       <div className="space-y-6">
         <button onClick={onBack} className="flex items-center gap-2 transition-colors" style={{ color: 'var(--muted-foreground)' }}
@@ -97,6 +105,26 @@ function TicketDetailView({ ticketId, onBack }: { ticketId: string; onBack: () =
         <div className="xboard-card">
           <div className="p-8 text-center">
             <Loader2 className="w-8 h-8 mx-auto animate-spin" style={{ color: 'var(--muted-foreground)' }} />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // 加载完成但数据为空或出错时，不渲染详情（防止访问 undefined 字段导致黑屏）
+  if (!ticket || ticketError) {
+    return (
+      <div className="space-y-6">
+        <button onClick={onBack} className="flex items-center gap-2 transition-colors" style={{ color: 'var(--muted-foreground)' }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'var(--primary)')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted-foreground)')}>
+          <ArrowLeft className="w-4 h-4" />
+          <span className="text-sm">返回工单列表</span>
+        </button>
+        <div className="xboard-card">
+          <div className="p-8 text-center">
+            <AlertCircle className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--muted-foreground)' }} />
+            <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>工单内容加载失败，请返回重试</p>
           </div>
         </div>
       </div>
@@ -233,8 +261,10 @@ export default function Tickets() {
   const { data: ticketsPage, isLoading } = useQuery<PaginatedResponse<TicketResponse>>({
     queryKey: ['tickets'],
     queryFn: async () => {
-      const raw = await api.get<PaginatedResponse<TicketResponse>>(EP.TICKETS, { params: { page: 1, page_size: 50 } })
-      return raw
+      const raw = await api.get<unknown>(EP.TICKETS, { params: { page: 1, page_size: 50 } })
+      // 兼容分页对象 {items:[...]} 和直接数组 [...]
+      if (Array.isArray(raw)) return { items: raw } as PaginatedResponse<TicketResponse>
+      return raw as PaginatedResponse<TicketResponse>
     },
   })
 
@@ -249,7 +279,10 @@ export default function Tickets() {
       setNewMessage('')
       queryClient.invalidateQueries({ queryKey: ['tickets'] })
       toast({ title: '工单已创建', variant: 'success' })
-      setSelectedTicketId(newTicket.id)
+      // 防御：API 可能返回 null 或缺少 id 字段，避免 newTicket.id 崩溃
+      if (newTicket?.id) {
+        setSelectedTicketId(newTicket.id)
+      }
     },
     onError: (e: any) => {
       toast({ title: '创建失败', description: e.message, variant: 'destructive' })

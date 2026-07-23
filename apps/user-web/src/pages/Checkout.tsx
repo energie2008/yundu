@@ -57,11 +57,13 @@ export function Checkout() {
 
   const orderMut = useMutation({
     mutationFn: async () => {
-      if (!plan || !selectedMethod) return null;
+      // 金额为0（全额优惠）时不要求选择支付方式，直接创建免费订单
+      if (!plan) return null;
+      if (totalPrice > 0 && !selectedMethod) return null;
       return api.post<OrderResponse>(EP.ORDER_CREATE, {
         plan_id: planId,
         period_code: selectedPeriod,
-        payment_method: selectedMethod,
+        payment_method: totalPrice === 0 ? 'free' : selectedMethod,
         coupon_code: couponResult?.valid ? couponCode.trim() : undefined,
       });
     },
@@ -264,13 +266,13 @@ export function Checkout() {
                   style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--foreground)' }}
                 />
                 <button
-                  onClick={() => couponMut.mutate()}
-                  disabled={couponMut.isPending || !couponCode.trim()}
-                  className="px-4 py-2 rounded-lg text-sm font-medium border whitespace-nowrap transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                  style={{ borderColor: 'var(--primary)', color: 'var(--primary)', background: 'transparent', minWidth: '64px' }}
-                >
-                  {couponMut.isPending ? '验证中...' : '验证'}
-                </button>
+                onClick={() => couponMut.mutate()}
+                disabled={couponMut.isPending || !couponCode.trim()}
+                className="px-4 py-2 rounded-lg text-sm font-medium border whitespace-nowrap transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 text-center"
+                style={{ borderColor: 'var(--primary)', color: 'var(--primary)', background: 'transparent', minWidth: '72px' }}
+              >
+                {couponMut.isPending ? '验证中...' : '验证'}
+              </button>
               </div>
               <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>输入优惠码可获得订单折扣</p>
               {couponResult && (
@@ -296,11 +298,11 @@ export function Checkout() {
               </div>
               <button
                 onClick={() => orderMut.mutate()}
-                disabled={orderMut.isPending || !selectedMethod}
+                disabled={orderMut.isPending || (totalPrice > 0 && !selectedMethod)}
                 className="w-full mt-4 py-2.5 rounded-lg text-sm font-medium text-white transition-colors shadow-sm disabled:opacity-50"
                 style={{ background: 'var(--primary)' }}
               >
-                {orderMut.isPending ? '处理中...' : '去结算'}
+                {orderMut.isPending ? '处理中...' : totalPrice === 0 ? '免费获取' : '去结算'}
               </button>
             </div>
           </div>

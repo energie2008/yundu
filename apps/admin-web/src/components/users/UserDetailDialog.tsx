@@ -90,7 +90,7 @@ export function UserDetailDialog({ userId, onOpenChange }: UserDetailDialogProps
   const [noteText, setNoteText] = useState('')
   const [activeTab, setActiveTab] = useState('overview')
 
-  const { data: user, isLoading } = useUser(userId || '', {
+  const { data: user, isLoading, isError } = useUser(userId || '', {
     enabled: !!userId,
   })
 
@@ -104,11 +104,17 @@ export function UserDetailDialog({ userId, onOpenChange }: UserDetailDialogProps
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-100 max-w-3xl max-h-[90vh] overflow-hidden p-0 flex flex-col">
-        {isLoading || !user ? (
+        {isLoading ? (
           <div className="p-6 space-y-4">
             <Skeleton className="h-8 w-48 bg-zinc-800" />
             <Skeleton className="h-4 w-full bg-zinc-800" />
             <Skeleton className="h-32 w-full bg-zinc-800" />
+          </div>
+        ) : isError || !user ? (
+          <div className="p-6 space-y-4">
+            <div className="text-center py-8">
+              <p className="text-sm text-zinc-500">用户数据加载失败，请关闭后重试</p>
+            </div>
           </div>
         ) : (
           <>
@@ -229,7 +235,7 @@ export function UserDetailDialog({ userId, onOpenChange }: UserDetailDialogProps
                   <div className="grid grid-cols-3 gap-2 pt-2">
                     <div className="text-center p-2 rounded bg-zinc-800/30">
                       <div className="text-xs text-zinc-500">ID</div>
-                      <code className="text-xs text-zinc-400 font-mono truncate block">{user.id.slice(0, 8)}...</code>
+                      <code className="text-xs text-zinc-400 font-mono truncate block">{user.id?.slice(0, 8) ?? '?'}...</code>
                     </div>
                     {user.username && (
                       <div className="text-center p-2 rounded bg-zinc-800/30">
@@ -272,7 +278,7 @@ export function UserDetailDialog({ userId, onOpenChange }: UserDetailDialogProps
                           <div key={sub.id} className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <code className="text-xs text-zinc-300 font-mono truncate">{sub.token.slice(0, 16)}...</code>
+                                <code className="text-xs text-zinc-300 font-mono truncate">{sub.token?.slice(0, 16) ?? '???'}...</code>
                                 {sub.is_revoked ? (
                                   <Badge variant="outline" className="bg-red-900/30 text-red-400 border-red-800/50 text-[10px]">已吊销</Badge>
                                 ) : (
