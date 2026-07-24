@@ -246,6 +246,20 @@ cmd_agent() {
         fi
     fi
 
+    # P1.2: 禁用并 mask 系统 cloudflared.service
+    # 防止 systemd 拉起野生 cloudflared 进程，与 agent 管理的进程冲突（vps206/vps81 教训）
+    # agent 的 killStrayCloudflaredProcesses 会兜底清理，但 mask 在源头杜绝更稳妥
+    if systemctl list-unit-files 2>/dev/null | grep -q '^cloudflared\.service'; then
+        header "禁用并 mask 系统 cloudflared.service"
+        systemctl stop cloudflared 2>/dev/null || true
+        systemctl disable cloudflared 2>/dev/null || true
+        # 强制 mask: ln -sf /dev/null 即使目标已是普通文件也能覆盖
+        # （systemctl mask 在 /etc/systemd/system/cloudflared.service 已是普通文件时会失败）
+        ln -sf /dev/null /etc/systemd/system/cloudflared.service
+        systemctl daemon-reload
+        info "已 mask 系统 cloudflared.service（由 yundu-node-agent 统一管理）"
+    fi
+
     install_systemd "yundu-node-agent" \
         "${INSTALL_DIR}/node-agent --endpoint=${endpoint} --token=${token} --runtime=${runtime} --config-dir=${CONFIG_DIR}" \
         "YunDu Node Agent - 节点代理服务"

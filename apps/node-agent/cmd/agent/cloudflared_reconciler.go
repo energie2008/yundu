@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -95,6 +96,10 @@ func (r *CloudflaredReconciler) Start(ctx context.Context) {
 func (r *CloudflaredReconciler) reconcileOnce(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// 0. P1: 主动清理野生 cloudflared 进程（每轮 30s 调用一次）
+	//    防止 vps206 式 "sudo nohup + agent token" 双进程冲突
+	r.killStrayCloudflaredProcesses()
 
 	// 1. 从面板拉取 cloudflared 隧道期望状态（独立接口）
 	cfg, err := r.httpClient.FetchCloudflaredTunnels(ctx)
@@ -235,14 +240,16 @@ func readLocalTunnelID() (string, error) {
 // startProcess 启动 cloudflared 进程。
 // 优先使用 token 模式（cloudflared tunnel run --token <token>），
 // 否则使用 config 模式（cloudflared tunnel --config <path> run）。
+// 注意:必须加 --no-autoupdate 标志,否则 cloudflared 会 fork 子进程检查更新,
+// 父进程退出后子进程变孤儿,导致 agent 的 r.cmd 追踪失败(vps206 教训)。
 func (r *CloudflaredReconciler) startProcess(tunnel client.CloudflaredTunnel) error {
 	var cmd *exec.Cmd
 	mode := "config"
 	if tunnel.Token != "" {
-		cmd = exec.Command("cloudflared", "tunnel", "run", "--token", tunnel.Token)
+		cmd = exec.Command("cloudflared", "--no-autoupdate", "tunnel", "run", "--token", tunnel.Token)
 		mode = "token"
 	} else {
-		cmd = exec.Command("cloudflared", "tunnel", "--config", cloudflaredConfigPath, "run")
+		cmd = exec.Command("cloudflared", "--no-autoupdate", "tunnel", "--config", cloudflaredConfigPath, "run")
 	}
 
 	stdout, err := cmd.StdoutPipe()
@@ -302,6 +309,91 @@ func (r *CloudflaredReconciler) stopProcess() {
 	r.waitCh = nil
 }
 
+// killStrayCloudflaredProcesses 清理所有非当前 reconciler 管理的 cloudflared 进程。
+// 防止 vps206 式 "sudo nohup + agent token" 双进程冲突：systemd 拉起、手工 nohup、
+// 残留 docker 容器等任意来源的野生 cloudflared 都会被 SIGTERM 清理。
+//
+// 调用时机：每轮 Observe 开头（30s 周期），确保野生进程在 30 秒内被清理。
+// 保护对象：当前 r.cmd 管理的 cloudflared PID 及其子进程（cloudflared 可能 fork worker）。
+//
+// 实现细节：
+//   - pgrep -f cloudflared 匹配命令行包含 cloudflared 的进程（含 cloudflared.real）
+//   - 跳过 agent 自身 PID、管理的 PID、管理 PID 的子进程（PPID 检查）
+//   - 读取 /proc/<pid>/cmdline 用于日志展示
+//   - SIGTERM 后等待 2 秒优雅退出，仍存活则跳过（下轮再处理，避免阻塞协调循环）
+func (r *CloudflaredReconciler) killStrayCloudflaredProcesses() {
+	// 当前管理的 cloudflared PID（保护对象，避免误杀自己启动的进程）
+	var managedPid int
+	if r.cmd != nil && r.cmd.Process != nil {
+		managedPid = r.cmd.Process.Pid
+	}
+
+	// pgrep -f cloudflared 匹配命令行包含 cloudflared 的进程
+	// pgrep 不存在或无匹配时返回非 0 错误，正常情况
+	out, err := exec.Command("pgrep", "-f", "cloudflared").Output()
+	if err != nil {
+		// pgrep 退出码 1 表示无匹配进程，是正常情况；其他错误静默忽略
+		return
+	}
+
+	killed := 0
+	for _, line := range strings.Fields(string(out)) {
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		// 跳过 agent 自身 PID
+		if pid == os.Getpid() {
+			continue
+		}
+		// 跳过当前管理的 cloudflared PID
+		if pid == managedPid {
+			continue
+		}
+		// 跳过管理进程的子进程（cloudflared 可能 fork worker，PPID == managedPid）
+		// 这防止误杀 agent 自己启动的 cloudflared 的 worker 子进程
+		if managedPid > 0 {
+			if ppid, err := readPPID(pid); err == nil && ppid == managedPid {
+				continue
+			}
+		}
+
+		// 读取 cmdline 用于日志展示（\x00 分隔参数）
+		cmdLine, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		cmdStr := strings.ReplaceAll(string(cmdLine), "\x00", " ")
+
+		r.logger.Warn("killing stray cloudflared process", "pid", pid, "cmd", cmdStr)
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+		killed++
+	}
+
+	if killed > 0 {
+		// 给野生进程 2 秒优雅退出时间，避免立即重启时端口/连接冲突
+		time.Sleep(2 * time.Second)
+		r.logger.Info("stray cloudflared cleanup done", "killed", killed)
+	}
+}
+
+// readPPID 读取 /proc/<pid>/stat 获取父进程 PID。
+// /proc/<pid>/stat 格式: pid (comm) state ppid ...
+// comm 可能含空格和括号,从最后一个 ')' 开始解析。
+func readPPID(pid int) (int, error) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, err
+	}
+	s := string(data)
+	lastParen := strings.LastIndexByte(s, ')')
+	if lastParen < 0 {
+		return 0, fmt.Errorf("invalid stat format for pid %d", pid)
+	}
+	fields := strings.Fields(s[lastParen+1:])
+	if len(fields) < 2 {
+		return 0, fmt.Errorf("invalid stat format for pid %d", pid)
+	}
+	return strconv.Atoi(fields[1])
+}
+
 // pipeLogs 读取进程输出并转发到日志。
 func (r *CloudflaredReconciler) pipeLogs(rc io.ReadCloser, stream string) {
 	scanner := bufio.NewScanner(rc)
@@ -335,6 +427,23 @@ func (r *CloudflaredReconciler) Kind() string { return "cloudflared-tunnel" }
 func (r *CloudflaredReconciler) Observe(ctx context.Context) (resource.ObservedState, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// P1: 每轮（30s）清理野生 cloudflared 进程
+	// 放在 Observe 而非 Apply,确保即使无 drift 也能定期清理野生进程
+	// （vps206 教训:野生进程在 stable 期间出现,Apply 不会被调用）
+	r.killStrayCloudflaredProcesses()
+
+	// P1: 检查管理的 cloudflared 进程是否存活
+	// 如果 r.cmd 为空或进程已退出（ProcessState 非 nil）,返回空 hash 强制 drift
+	// 触发 Apply 重启 cloudflared（vps81 教训:agent 重启后 r.cmd=nil,旧进程已死时不会自动拉起）
+	if r.cmd == nil || r.cmd.ProcessState != nil {
+		cmdNil := r.cmd == nil
+		exited := r.cmd != nil && r.cmd.ProcessState != nil
+		r.logger.Warn("cloudflared process not running, forcing drift to trigger restart",
+			"cmd_nil", cmdNil, "exited", exited)
+		return resource.ObservedState{Hash: "", Empty: true}, nil
+	}
+
 	return resource.ObservedState{
 		Hash:  r.lastHash,
 		Empty: r.lastHash == "",
@@ -370,6 +479,10 @@ func (r *CloudflaredReconciler) Diff(desired resource.DesiredState, observed res
 func (r *CloudflaredReconciler) Apply(ctx context.Context, diff resource.DiffResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// P1: 启动新 cloudflared 前再次清理野生进程（双保险）
+	// Observe 已清理过一次,但 FetchDesired/Diff 期间可能有新野生进程出现
+	r.killStrayCloudflaredProcesses()
 
 	cfg, ok := diff.Raw.(*client.CloudflaredTunnelConfig)
 	if !ok || cfg == nil {
