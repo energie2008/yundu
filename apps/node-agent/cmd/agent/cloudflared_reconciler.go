@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -180,14 +181,39 @@ func (r *CloudflaredReconciler) reconcileOnce(ctx context.Context) error {
 
 // writeConfigYAML 生成并写入 cloudflared config.yml。
 // 手动拼接 YAML（结构简单），避免引入 yaml.v3 依赖。
+//
+// P3.2: 凭证下发链路收敛。
+// 面板下发的 tunnel.Token 已包含完整凭证（AccountTag/TunnelID/TunnelSecret），
+// 这里将 token 解码为 /etc/cloudflared/credentials.json，供 config 模式使用。
+// 不再依赖手工 SSH 拷贝 credentials.json，实现零 SSH 闭环。
 func (r *CloudflaredReconciler) writeConfigYAML(tunnel client.CloudflaredTunnel) error {
 	var sb strings.Builder
 
-	// TunnelID 优先从面板下发的 tunnel.TunnelID 读取；
-	// 若面板未下发（节点 config_json 无 cloudflared_tunnel_id），
-	// 自动从本地 /etc/cloudflared/credentials.json 读取，
-	// 保证单节点模式下 cloudflared 进程能以 "tunnel: <id>" 启动。
+	// P3.2: 优先用 token 生成 credentials.json（面板下发的 token 是 CF 生成的真相源）
 	tunnelID := tunnel.TunnelID
+	if tunnel.Token != "" {
+		// 从 token 提取 TunnelID（优先于面板下发的 tunnel_id 字段，
+		// 因为 token 是 CF API 创建 tunnel 时生成的，TunnelID 以 token 为准）
+		if id, err := extractTunnelIDFromToken(tunnel.Token); err == nil && id != "" {
+			tunnelID = id
+		} else {
+			r.logger.Warn("failed to extract tunnel_id from token", "error", err)
+		}
+
+		// 解码 token 写入 credentials.json（原子写入：tmp + rename）
+		if credsBytes, err := tokenToCredentials(tunnel.Token); err == nil {
+			if err := writeAtomic("/etc/cloudflared/credentials.json", credsBytes, 0644); err != nil {
+				r.logger.Error("failed to write credentials.json", "error", err)
+				return fmt.Errorf("write credentials.json: %w", err)
+			}
+			r.logger.Info("credentials.json written from token", "tunnel_id", tunnelID)
+		} else {
+			r.logger.Warn("failed to decode token to credentials.json", "error", err)
+		}
+	}
+
+	// fallback: 无 token 时从本地 credentials.json 读 TunnelID
+	// （兼容旧节点：token 未下发但本地已有手工拷贝的 credentials.json）
 	if tunnelID == "" {
 		if id, err := readLocalTunnelID(); err == nil && id != "" {
 			tunnelID = id
@@ -219,6 +245,66 @@ func (r *CloudflaredReconciler) writeConfigYAML(tunnel client.CloudflaredTunnel)
 	return writeAtomic(cloudflaredConfigPath, []byte(sb.String()), 0644)
 }
 
+// tokenToCredentials 解码 cloudflared token 为 credentials.json 内容。
+//
+// cloudflared token 是 base64 编码的 JSON，字段映射：
+//   a → AccountTag
+//   t → TunnelID
+//   s → TunnelSecret
+//
+// credentials.json 是 cloudflared config 模式必需的凭证文件，格式：
+//   {"AccountTag": "...", "TunnelID": "...", "TunnelSecret": "..."}
+//
+// P3.2: 通过解码 token 生成 credentials.json，无需面板额外下发 credentials 字段，
+// 也不需要改 DB schema。token 本身已由面板通过 config_json.cloudflared_token 下发，
+// 包含完整凭证信息。实现零 SSH 闭环（agent 自动落地 credentials.json）。
+func tokenToCredentials(token string) ([]byte, error) {
+	// token 可能是标准 base64，尝试 StdEncoding；若失败尝试 RawStdEncoding（无 padding）
+	decoded, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(token)
+		if err != nil {
+			return nil, fmt.Errorf("decode token base64: %w", err)
+		}
+	}
+	var raw struct {
+		A string `json:"a"` // AccountTag
+		T string `json:"t"` // TunnelID
+		S string `json:"s"` // TunnelSecret
+	}
+	if err := json.Unmarshal(decoded, &raw); err != nil {
+		return nil, fmt.Errorf("parse token json: %w", err)
+	}
+	if raw.T == "" || raw.A == "" || raw.S == "" {
+		return nil, fmt.Errorf("token missing required fields (a/t/s)")
+	}
+	creds := map[string]string{
+		"AccountTag":   raw.A,
+		"TunnelID":     raw.T,
+		"TunnelSecret": raw.S,
+	}
+	return json.MarshalIndent(creds, "", "  ")
+}
+
+// extractTunnelIDFromToken 从 token 中提取 TunnelID（不写文件）。
+// 用于 writeConfigYAML 中 config.yml 的 tunnel: <id> 字段。
+func extractTunnelIDFromToken(token string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(token)
+		if err != nil {
+			return "", fmt.Errorf("decode token base64: %w", err)
+		}
+	}
+	var raw struct {
+		T string `json:"t"`
+	}
+	if err := json.Unmarshal(decoded, &raw); err != nil {
+		return "", fmt.Errorf("parse token json: %w", err)
+	}
+	return raw.T, nil
+}
+
 // readLocalTunnelID 从 /etc/cloudflared/credentials.json 读取 TunnelID。
 // 单节点模式下，面板可能不下发 cloudflared_tunnel_id（依赖本地 credentials），
 // 此函数提供 fallback，避免 config.yml 缺少 tunnel: 字段导致 cloudflared 启动失败。
@@ -238,19 +324,19 @@ func readLocalTunnelID() (string, error) {
 }
 
 // startProcess 启动 cloudflared 进程。
-// 优先使用 token 模式（cloudflared tunnel run --token <token>），
-// 否则使用 config 模式（cloudflared tunnel --config <path> run）。
+//
+// P3.3: 退役 token 模式，统一 config 模式。
+// 原因:token 模式下 cloudflared 会忽略本地 config.yml 的 protocol/ingress 等配置，
+// 全部走 CF Dashboard 远程配置（config_src=cloudflare），导致 protocol: http2 失效。
+// 改造后:token 在 writeConfigYAML 中解码为 /etc/cloudflared/credentials.json，
+// cloudflared 通过 --config 读取本地 config.yml + credentials.json 启动，
+// protocol/ingress 等配置完全由面板通过 agent 下发，CF Dashboard 无法覆盖。
+//
 // 注意:必须加 --no-autoupdate 标志,否则 cloudflared 会 fork 子进程检查更新,
 // 父进程退出后子进程变孤儿,导致 agent 的 r.cmd 追踪失败(vps206 教训)。
 func (r *CloudflaredReconciler) startProcess(tunnel client.CloudflaredTunnel) error {
-	var cmd *exec.Cmd
-	mode := "config"
-	if tunnel.Token != "" {
-		cmd = exec.Command("cloudflared", "--no-autoupdate", "tunnel", "run", "--token", tunnel.Token)
-		mode = "token"
-	} else {
-		cmd = exec.Command("cloudflared", "--no-autoupdate", "tunnel", "--config", cloudflaredConfigPath, "run")
-	}
+	// P3.3: 统一 config 模式，删除 token 分支
+	cmd := exec.Command("cloudflared", "--no-autoupdate", "tunnel", "--config", cloudflaredConfigPath, "run")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -280,7 +366,7 @@ func (r *CloudflaredReconciler) startProcess(tunnel client.CloudflaredTunnel) er
 		waitCh <- err
 	}()
 
-	r.logger.Info("cloudflared started", "pid", cmd.Process.Pid, "mode", mode)
+	r.logger.Info("cloudflared started", "pid", cmd.Process.Pid, "mode", "config")
 	return nil
 }
 

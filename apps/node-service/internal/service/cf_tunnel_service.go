@@ -140,7 +140,14 @@ func (s *CFTunnelService) CreateTunnelWithDNS(ctx context.Context, req CreateTun
 
 // createTunnel 调用 CF API 创建 Tunnel
 // POST /accounts/{account_id}/cfd_tunnel
-// Body: {"name": "<tunnel_name>", "tunnel_secret": "<random_32B_base64>", "config_src": "cloudflare"}
+// Body: {"name": "<tunnel_name>", "tunnel_secret": "<random_32B_base64>", "config_src": "local"}
+//
+// P3.1: config_src 从 "cloudflare" 改为 "local"。
+// 原因:cloudflare 模式下 CF Dashboard 远程配置会覆盖本地 config.yml,
+// 导致 protocol: http2 等本地设置失效。local 模式强制 cloudflared 只读本地配置,
+// 消除远程配置覆盖风险,agent 写什么 cloudflared 就用什么。
+// 后续 ingress 配置由面板通过 /api/v1/agent/cloudflared-tunnels 下发到 agent,
+// agent 写入 /etc/cloudflared/config.yml,不再依赖 CF Dashboard。
 func (s *CFTunnelService) createTunnel(ctx context.Context, name string) (tunnelID, token string, err error) {
 	// 生成 tunnel_secret（32 字节随机 base64）
 	secret, err := generateTunnelSecret()
@@ -151,7 +158,7 @@ func (s *CFTunnelService) createTunnel(ctx context.Context, name string) (tunnel
 	body := map[string]interface{}{
 		"name":         name,
 		"tunnel_secret": secret,
-		"config_src":   "cloudflare",
+		"config_src":   "local",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
