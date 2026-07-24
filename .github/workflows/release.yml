@@ -45,9 +45,15 @@ jobs:
           GOPROXY: 'https://goproxy.cn,direct'
           # go.work 会把所有模块拉进来，CI 中需关闭 workspace 模式，让每个 app 用自己的 go.mod 独立编译
           GOWORK: 'off'
+          # 从 git tag 提取版本号,通过 ldflags 注入 main.AgentVersion
+          # 解决 self-upgrader 升级死循环:旧版本号导致升级后重启又回到旧版本
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -e
           mkdir -p dist
+          # 从 tag 提取纯版本号 (v0.3.4 → 0.3.4,用于 self-upgrader 版本比较)
+          AGENT_VERSION="${RELEASE_TAG#v}"
+          echo "Injecting AgentVersion=${AGENT_VERSION}"
           # 先对每个模块执行 go mod download 补全 go.sum（CI 环境无本地模块缓存）
           for mod in apps/node-agent apps/node-service apps/api-gateway apps/identity-service apps/subscription-service apps/traffic-service cmd/migrate; do
             echo "::group::go mod download $mod"
@@ -55,8 +61,9 @@ jobs:
             echo "::endgroup::"
           done
           # node-agent 需要 with_quic/with_wireguard/with_utls 构建 Hysteria2/Tuic/WireGuard
+          # -ldflags "-X main.AgentVersion=<version>" 注入版本号,self-upgrader 据此判断是否需要升级
           echo "::group::Build node-agent"
-          ( cd apps/node-agent && go build -tags "with_quic,with_wireguard,with_utls" -o ../../dist/node-agent-${GOARCH} ./cmd/agent/ )
+          ( cd apps/node-agent && go build -tags "with_quic,with_wireguard,with_utls" -ldflags "-X 'main.AgentVersion=${AGENT_VERSION}'" -o ../../dist/node-agent-${GOARCH} ./cmd/agent/ )
           echo "::endgroup::"
 
           echo "::group::Build node-service"

@@ -53,10 +53,14 @@ import (
 
 const (
 	ServiceName      = "node-agent"
-	AgentVersion     = "0.2.12"
 	HeartbeatSeconds = 10
 	DefaultGRPCPort  = 9082
 )
+
+// AgentVersion 通过 CI ldflags 注入（-X main.AgentVersion=v0.3.4）。
+// 默认值 "dev" 仅用于本地开发,生产构建由 release.yml 覆盖。
+// 必须是 var 而非 const,否则 ldflags 无法注入。
+var AgentVersion = "dev"
 
 type pendingRequest struct {
 	ch   chan *pb.PanelMessage
