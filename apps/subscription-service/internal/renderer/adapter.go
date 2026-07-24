@@ -494,28 +494,9 @@ func parseTLS(proto nodespec.Protocol, transportType string, cfg map[string]inte
 		tls.PinSHA256 = getString(cfg, "pin_sha256", "pinned_peer_cert_sha256")
 	}
 
-	if len(dbALPN) > 0 {
-		tls.ALPN = dbALPN
-	} else {
-		nestedALPN := getNestedStrings(cfg, "tls", "alpn")
-		if len(nestedALPN) > 0 {
-			tls.ALPN = nestedALPN
-		} else {
-			switch proto {
-			case nodespec.ProtocolHysteria2, nodespec.ProtocolTUIC:
-				tls.ALPN = []string{"h3"}
-			default:
-				// WS/HTTPUpgrade 传输依赖 HTTP/1.1 Upgrade 机制，
-				// ALPN 包含 h2 会导致 CF CDN 协商 HTTP/2 后 WS Upgrade 失败（返回 400）
-				tt := strings.ToLower(transportType)
-				if tt == "ws" || tt == "httpupgrade" {
-					tls.ALPN = []string{"http/1.1"}
-				} else {
-					tls.ALPN = []string{"h2", "http/1.1"}
-				}
-			}
-		}
-	}
+	// P2: ALPN 统一由 DeriveALPN 推导,不再读取 dbALPN 或嵌套 config
+	// （node_service.go 保存时已用 DeriveALPN 覆盖 dbALPN,此处保持一致即可）
+	tls.ALPN = nodespec.DeriveALPN(string(proto), transportType)
 
 	return tls
 }
@@ -562,10 +543,10 @@ func parseReality(cfg map[string]interface{}, dbSNI string, dbALPN []string) *no
 		fp = "chrome"
 	}
 	reality.Fingerprint = fp
-	if len(dbALPN) > 0 {
-		reality.ALPN = dbALPN
-	} else if len(reality.ALPN) == 0 {
-		reality.ALPN = []string{"h2", "http/1.1"}
+	// P2: ALPN 统一由 DeriveALPN 推导（REALITY 走 default 分支 → ["h2","http/1.1"]）
+	// parseReality 无 protocol 参数,REALITY 仅用于 vless+xhttp,DeriveALPN("vless","xhttp") = ["h2","http/1.1"]
+	if len(reality.ALPN) == 0 {
+		reality.ALPN = nodespec.DeriveALPN("vless", "xhttp")
 	}
 	return reality
 }

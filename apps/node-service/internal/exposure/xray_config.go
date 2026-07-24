@@ -12,6 +12,7 @@ import (
 
 	"github.com/airport-panel/node-service/internal/model"
 	"github.com/airport-panel/node-service/internal/repo"
+	"github.com/airport-panel/subscription/nodespec"
 )
 
 const (
@@ -526,11 +527,8 @@ func buildXrayStreamSettings(node *model.Node) *XrayStreamSettings {
 		if sni != "" {
 			tlsSettings.ServerName = sni
 		}
-		if len(node.ALPN) > 0 {
-			tlsSettings.ALPN = node.ALPN
-		} else {
-			tlsSettings.ALPN = []string{"h2", "http/1.1"}
-		}
+		// P2: ALPN 由 DeriveALPN 统一推导,不再读取 node.ALPN
+		tlsSettings.ALPN = nodespec.DeriveALPN(node.ProtocolType, node.TransportType)
 		// uTLS 指纹（三级回退：顶层 fingerprint > tls_settings.fingerprint > utls_fingerprint）
 		// 借鉴 xboard UTLS_CONFIGURATION 的 fingerprint 字段
 		if fp := pickStringNested(node.ConfigJSON, "fingerprint", "tls_settings", "tls"); fp != "" {

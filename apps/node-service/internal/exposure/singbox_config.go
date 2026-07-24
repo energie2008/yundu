@@ -5,6 +5,7 @@ import (
 
 	"github.com/airport-panel/node-service/internal/model"
 	"github.com/airport-panel/node-service/internal/repo"
+	"github.com/airport-panel/subscription/nodespec"
 )
 
 type SBInboundUser struct {
@@ -232,11 +233,8 @@ func buildSingBoxTLS(node *model.Node) *SBTLS {
 	if node.SNI != nil {
 		tls.ServerName = *node.SNI
 	}
-	if len(node.ALPN) > 0 {
-		tls.ALPN = node.ALPN
-	} else {
-		tls.ALPN = []string{"h2", "http/1.1"}
-	}
+	// P2: ALPN 由 DeriveALPN 统一推导,不再读取 node.ALPN
+	tls.ALPN = nodespec.DeriveALPN(node.ProtocolType, node.TransportType)
 
 	if security == "reality" {
 		reality := &SBReality{

@@ -1133,13 +1133,20 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 		return fmt.Errorf("P1-6 TLS 一致性校验: %w", err)
 	}
 
-	// 7.1 argo_tunnel 专属处理：WS/HTTPUpgrade ALPN + hostname 一致性校验
+	// 7. ALPN 统一推导（P2: 消除散落硬编码,收敛到 DeriveALPN 纯函数）
+	// 规则:
+	//   - Hysteria2/TUIC(QUIC)       → ["h3"]
+	//   - WS/HTTPUpgrade              → ["http/1.1"] (CF CDN 协商 HTTP/2 后 WS Upgrade 失败)
+	//   - 其他(TCP/gRPC/XHTTP/REALITY) → ["h2","http/1.1"]
+	// 此处统一覆盖 node.ALPN 和 config_json.alpn,后续渲染器(xray/singbox/订阅)直接使用。
+	derivedALPN := nodespec.DeriveALPN(node.ProtocolType, node.TransportType)
+	node.ALPN = derivedALPN
+	if node.ConfigJSON != nil {
+		node.ConfigJSON["alpn"] = derivedALPN
+	}
+
+	// 7.1 argo_tunnel 专属处理：hostname 一致性校验
 	if isArgoTunnelExposureNode(node) {
-		// WS/HTTPUpgrade 传输 ALPN 必须 http/1.1（CF CDN 协商 HTTP/2 后 WS Upgrade 失败）
-		if strings.EqualFold(node.TransportType, "ws") || strings.EqualFold(node.TransportType, "httpupgrade") {
-			node.ConfigJSON["alpn"] = []string{"http/1.1"}
-			node.ALPN = []string{"http/1.1"}
-		}
 		// cdn_address 自动同步 host_header（作为 CDN 路由域名）
 		if node.HostHeader != nil && *node.HostHeader != "" {
 			node.ConfigJSON["cdn_address"] = *node.HostHeader
@@ -1190,15 +1197,8 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 		}
 	}
 
-	// 7.2 cdn/cdn_saas 专属处理：WS/HTTPUpgrade 传输 ALPN 必须 http/1.1
-	// （nginx 8445 需 HTTP/1.1 支持 WebSocket Upgrade）
-	// 注意：XHTTP 不强制覆盖 ALPN，packet-up/stream-up 模式支持 h2+http/1.1 协商，
-	//   强制 http/1.1 会导致部分客户端 TLS 协商失败连不上。保留用户在面板配置的值。
+	// 7.2 cdn/cdn_saas 专属处理：cdn_address 自动同步
 	if isCDNExposureNode(node) {
-		if strings.EqualFold(node.TransportType, "ws") || strings.EqualFold(node.TransportType, "httpupgrade") {
-			node.ConfigJSON["alpn"] = []string{"http/1.1"}
-			node.ALPN = []string{"http/1.1"}
-		}
 		// cdn_address 自动同步 host_header/SNI
 		if node.HostHeader != nil && *node.HostHeader != "" {
 			node.ConfigJSON["cdn_address"] = *node.HostHeader

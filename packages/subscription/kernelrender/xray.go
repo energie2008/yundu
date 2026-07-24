@@ -559,19 +559,10 @@ func (r *XrayRenderer) renderStreamSettings(spec *nodespec.NodeSpec) (map[string
 		if spec.TLS.SNI != "" {
 			tlsSettings["serverName"] = spec.TLS.SNI
 		}
-		// R7 修复：按传输类型修正 ALPN
-		// gRPC 必须为 ["h2"]，WS/HTTPUpgrade 为 ["h2","http/1.1"]，其他保持原值
-		alpn := spec.TLS.ALPN
-		switch spec.Transport.Type {
-		case nodespec.TransportGRPC:
-			alpn = []string{"h2"}
-		case nodespec.TransportWS, nodespec.TransportHTTPUpgrade:
-			if len(alpn) == 0 {
-				alpn = []string{"h2", "http/1.1"}
-			}
-		}
-		if len(alpn) > 0 {
-			tlsSettings["alpn"] = alpn
+		// P2: ALPN 由 nodespec.DeriveALPN 统一推导（在 node_service.go 保存时和 adapter.go 渲染时）
+		// 此处直接使用 spec.TLS.ALPN,不再做传输类型覆盖（消除散落规则）
+		if len(spec.TLS.ALPN) > 0 {
+			tlsSettings["alpn"] = spec.TLS.ALPN
 		}
 		// 注：allowInsecure 是客户端设置，不应出现在服务端 inbound TLS 配置中。
 		// xray 26.3.27 仍支持 allowInsecure 字段（用于 outbound/客户端侧），但服务端 inbound 不需要。

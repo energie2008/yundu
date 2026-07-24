@@ -151,60 +151,9 @@ func (c *ArgoTunnelConsistencyChecker) checkNode(node *model.Node) string {
 	if cdnAddr == "" {
 		return "config_json.cdn_address 为空，cloudflared ingress 无法路由"
 	}
-	// 5. WS/HTTPUpgrade 传输 ALPN 必须为 ["http/1.1"]
-	if node.TransportType == "ws" || node.TransportType == "httpupgrade" {
-		alpn := extractALPNSlice(node.ConfigJSON["alpn"])
-		if !isALPNHTTP11(alpn) {
-			return "WS/HTTPUpgrade 节点 ALPN 应为 [http/1.1]，实际为 " + formatALPN(alpn)
-		}
-	}
+	// P2: ALPN 校验已删除 — ALPN 由 nodespec.DeriveALPN 统一推导,
+	// node_service.go 保存时已强制覆盖,无需重复校验
 	return ""
-}
-
-// extractALPNSlice 从 config_json.alpn 提取 ALPN 切片
-// 兼容 []string（Go 内部）和 []interface{}（JSON 反序列化）两种类型
-func extractALPNSlice(v interface{}) []string {
-	if v == nil {
-		return nil
-	}
-	// 优先 []string（Go 内部直接赋值的情况）
-	if s, ok := v.([]string); ok {
-		return s
-	}
-	// JSON 反序列化为 []interface{}
-	if arr, ok := v.([]interface{}); ok {
-		result := make([]string, 0, len(arr))
-		for _, item := range arr {
-			if s, ok := item.(string); ok {
-				result = append(result, s)
-			}
-		}
-		return result
-	}
-	return nil
-}
-
-// isALPNHTTP11 检查 ALPN 是否仅包含 http/1.1
-func isALPNHTTP11(alpn []string) bool {
-	if len(alpn) != 1 {
-		return false
-	}
-	return alpn[0] == "http/1.1"
-}
-
-// formatALPN 格式化 ALPN 用于日志输出
-func formatALPN(alpn []string) string {
-	if len(alpn) == 0 {
-		return "[]"
-	}
-	result := "["
-	for i, v := range alpn {
-		if i > 0 {
-			result += ","
-		}
-		result += v
-	}
-	return result + "]"
 }
 
 // countArgoTunnelNodes 统计 argo_tunnel 节点数量
