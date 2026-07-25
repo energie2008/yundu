@@ -12,24 +12,26 @@ import (
 )
 
 const (
-	RealityTCPPortStart   = 9450
-	RealityTCPPortEnd     = 9600
-	CDNHTTPPortStart      = 8446
-	CDNHTTPPortEnd        = 8600
+	// P5: 直连节点端口统一 30000+，绕过 nginx stream
+	RealityTCPPortStart = 30000
+	RealityTCPPortEnd   = 30200
+	// CDN 内部端口（nginx 反代到 xray 127.0.0.1，不对外暴露）
+	CDNHTTPPortStart = 8446
+	CDNHTTPPortEnd   = 8600
 	// Hysteria2 UDP 端口范围对齐用户期望的端口跳跃区间 40020-40200。
 	// 单节点主端口从 40020 起递增分配；若节点启用 port_hopping，
 	// hopping 范围由 config_json.port_hopping.port_range 单独配置（可覆盖整个区间）。
 	Hysteria2UDPPortStart = 40020
 	Hysteria2UDPPortEnd   = 40200
 	// TUIC UDP 端口范围紧跟 Hysteria2 之后，避免与 Hy2 hopping 区间冲突。
-	TUICUDPPortStart      = 40210
-	TUICUDPPortEnd        = 40299
-	ShadowTLSPortStart    = 9700
-	ShadowTLSPortEnd      = 9749
-	AnyTLSPortStart       = 9750
-	AnyTLSPortEnd         = 9799
-	TunnelPortStart       = 20530
-	TunnelPortEnd         = 20699
+	TUICUDPPortStart   = 40210
+	TUICUDPPortEnd     = 40299
+	ShadowTLSPortStart = 30300
+	ShadowTLSPortEnd   = 30349
+	AnyTLSPortStart    = 30350
+	AnyTLSPortEnd      = 30399
+	TunnelPortStart    = 20530
+	TunnelPortEnd      = 20699
 
 	// P1-3: 硬性保留端口 — 443 永远属于 nginx stream SNI 分流，不可分配给任何 xray inbound
 	NginxStreamPort = 443
@@ -154,8 +156,8 @@ func portRangeFor(protocolType, transportType, securityType string) (start, end 
 		return AnyTLSPortStart, AnyTLSPortEnd, nil
 	}
 
-	// 直连 TCP+TLS（如 trojan+tcp+tls, vless+tcp+tls）：走 nginx 443 SNI default，
-	// 与 REALITY 节点共用高位端口范围（9450-9600），AllocateServerPort 会自动跳过已占用端口。
+	// 直连 TCP+TLS（如 trojan+tcp+tls, vless+tcp+tls）：P5 后绕过 nginx，
+	// 与 REALITY 节点共用 30000+ 高位端口范围，AllocateServerPort 会自动跳过已占用端口。
 	if transportType == "tcp" && securityType == "tls" {
 		return RealityTCPPortStart, RealityTCPPortEnd, nil
 	}

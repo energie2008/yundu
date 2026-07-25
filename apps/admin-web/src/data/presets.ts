@@ -24,7 +24,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'both',
     base_spec: {
       protocol: 'vless',
-      port: 443,
+      port: 30000,
       transport: { type: 'tcp' },
       security: 'reality',
       allow_udp: true,
@@ -56,7 +56,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'both',
     base_spec: {
       protocol: 'trojan',
-      port: 443,
+      port: 30000,
       transport: { type: 'tcp' },
       security: 'tls',
       allow_udp: false,
@@ -147,7 +147,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'singbox_only',
     base_spec: {
       protocol: 'anytls',
-      port: 443,
+      port: 30350,
       transport: { type: 'tcp' },
       security: 'tls',
       traffic_rate: 1.0,
@@ -232,8 +232,8 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'xray_only',
     base_spec: {
       protocol: 'vless',
-      port: 443,
-      server_port: 8448,
+      port: 30000,
+      server_port: 30000,
       transport: {
         type: 'xhttp',
         xhttp: {
@@ -326,7 +326,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'experimental',
     base_spec: {
       protocol: 'vless',
-      port: 443,
+      port: 30000,
       transport: {
         type: 'xhttp',
         xhttp: {
@@ -421,7 +421,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'both',
     base_spec: {
       protocol: 'hysteria2',
-      port: 443,
+      port: 40020,
       transport: { type: 'quic' },
       security: 'tls',
       allow_udp: true,
@@ -456,7 +456,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'both',
     base_spec: {
       protocol: 'tuic',
-      port: 443,
+      port: 40210,
       transport: { type: 'quic' },
       security: 'tls',
       allow_udp: true,
@@ -492,7 +492,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'singbox_only',
     base_spec: {
       protocol: 'vless',
-      port: 443,
+      port: 30000,
       transport: { type: 'tcp' },
       security: 'none',
       allow_udp: true,
@@ -557,7 +557,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'experimental',
     base_spec: {
       protocol: 'shadowsocks',
-      port: 443,
+      port: 30000,
       transport: { type: 'tcp' },
       security: 'reality',
       allow_udp: true,
@@ -627,7 +627,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'xray_only',
     base_spec: {
       protocol: 'vless',
-      port: 443,
+      port: 30000,
       transport: {
         type: 'xhttp',
         xhttp: { path: '/su', host: '', mode: 'stream-up', no_grpc_header: true },
@@ -676,7 +676,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'both',
     base_spec: {
       protocol: 'shadowsocks',
-      port: 8388,
+      port: 30000,
       transport: { type: 'tcp' },
       security: 'none',
       traffic_rate: 1.0,
@@ -702,7 +702,7 @@ export const DEFAULT_PRESETS: PresetTemplate[] = [
     kernel_compat: 'experimental',
     base_spec: {
       protocol: 'mieru',
-      port: 4000,
+      port: 30001,
       transport: { type: 'tcp' },
       security: 'none',
       traffic_rate: 1.0,

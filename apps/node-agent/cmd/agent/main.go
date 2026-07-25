@@ -918,6 +918,12 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 			"sb_inbounds", len(singboxConfig["inbounds"].([]interface{})))
 	}
 
+	// 端口跳跃元数据提取：sing-box 不支持原生 hop_ports 字段，
+	// kernelrender 将 port_hopping 配置写入每个 inbound 的 _port_hopping 元数据字段。
+	// 此处从 sing-box inbounds 中剥离并收集，用于后续 iptables DNAT 自动应用。
+	// 必须在 StartNative 之前剥离，否则 sing-box 解析 JSON 会报 "unknown field _port_hopping"。
+	portHoppingRules := firewall.ExtractPortHoppingFromSingboxConfig(singboxConfig, a.logger)
+
 	// P-Chain-Bridge: 提取 _chain_bridges 字段（自签证书/insecure 链式桥接配置）
 	// 面板在 xray runtime 下遇到 insecure=1 时自动生成 sing-box 桥接配置，
 	// xray chain outbound 为 socks5 指向本地桥接端口，sing-box 桥接用 insecure:true 连接上游。
@@ -1026,6 +1032,20 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 
 	// 同步防火墙规则：从 xray/sing-box 配置提取 inbound 端口并确保已开放
 	a.syncFirewallPorts(configMap)
+
+	// 端口跳跃 DNAT 自动应用：对配置了 port_hopping 的 hysteria2/TUIC inbound，
+	// 通过 iptables/nftables DNAT 把 port_range 范围内所有 UDP 端口
+	// 重定向到 listen_port 单端口（sing-box 实际监听端口）。
+	// 这是 sing-box 不支持原生端口跳跃的零 SSH 解决方案。
+	if len(portHoppingRules) > 0 {
+		if err := firewall.ApplyPortHoppingDNAT(portHoppingRules, a.logger); err != nil {
+			a.logger.Warn("port hopping DNAT application failed (non-fatal)",
+				"rule_count", len(portHoppingRules), "error", err)
+		} else {
+			a.logger.Info("port hopping DNAT rules applied",
+				"rule_count", len(portHoppingRules))
+		}
+	}
 
 	// P3: 更新主动拨测目标列表
 	a.UpdateProberTargets(configMap)

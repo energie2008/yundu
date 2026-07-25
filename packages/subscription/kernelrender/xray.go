@@ -527,18 +527,14 @@ func (r *XrayRenderer) renderStreamSettings(spec *nodespec.NodeSpec) (map[string
 		if spec.Reality == nil {
 			return nil, fmt.Errorf("REALITY场景缺少reality配置")
 		}
-		// P5.5: target（REALITY 回落目标）多级回退：
-		//   1. spec.Reality.Dest（用户显式配置，推荐）
-		//   2. SNI:443（直连场景默认，回落到伪装大厂域名）
-		// 直连 REALITY 节点 dest 留空是合法的（回退 SNI:443，直连不经过 nginx 不会循环）。
-		// CDN 场景建议显式设置 reality_dest 避免回退 SNI:443 造成 nginx→xray→nginx 循环。
+		// P5: target（REALITY 回落目标）多级回退：
+		//   1. spec.Reality.Dest（用户显式配置，优先保存）
+		//   2. www.primevideo.com:443（默认回退，大厂域名支持 TLS1.3+H2）
+		// 直连 REALITY 节点 dest 留空是合法的（回退到 www.primevideo.com:443）。
+		// 用户编辑保存的 dest 优先使用，不会被回退覆盖。
 		realityTarget := spec.Reality.Dest
 		if realityTarget == "" {
-			if spec.Reality.SNI != "" {
-				realityTarget = spec.Reality.SNI + ":443"
-			} else {
-				realityTarget = "mesu.apple.com:443"
-			}
+			realityTarget = "www.primevideo.com:443"
 		}
 		reality := map[string]interface{}{
 			"target":      realityTarget,
@@ -866,12 +862,9 @@ func (r *XrayRenderer) renderDownloadInbound(spec *nodespec.NodeSpec, sl *speedL
 		if len(ds.Reality.ShortIDs) > 0 {
 			shortIDs = ds.Reality.ShortIDs
 		}
-		// 下行 REALITY target：必须由用户显式配置，不使用 SNI:443 兜底
-		// 支持两种填法：
-		//   1. 本地反代：127.0.0.1:9454（推荐，与主 REALITY 共用或独立端口）
-		//   2. 伪装域名：oyc.yale.edu:443（直连模式）
-		// 以编辑保存优先：Dest 为空时记录日志并返回 nil（跳过下行 inbound 生成）
-		// 上层 preflight_validator.go 会在节点保存阶段强制要求 dest 非空
+		// 下行 REALITY target：用户显式配置 dest 优先保存
+		// dest 留空时默认回退 www.primevideo.com:443（大厂域名，TLS1.3+H2）
+		// 用户编辑保存的 dest 不会被回退覆盖
 		dlRealityTarget := ds.Reality.Dest
 		if dlRealityTarget == "" && spec.Reality != nil {
 			// 回退到主 Reality.Dest（仅当主 Reality 显式配置了 dest 时）
@@ -880,7 +873,7 @@ func (r *XrayRenderer) renderDownloadInbound(spec *nodespec.NodeSpec, sl *speedL
 		if dlRealityTarget == "" {
 			slog.Warn("下行 REALITY dest 未配置，跳过下行 inbound 生成",
 				"node_code", spec.Code,
-				"hint", "请在节点编辑的 download_settings 中填写 dest（本地反代如 127.0.0.1:9454 或伪装域名如 oyc.yale.edu:443）")
+				"hint", "请在节点编辑的 download_settings 中填写 dest（如 www.primevideo.com:443）")
 			return nil
 		}
 		reality := map[string]interface{}{

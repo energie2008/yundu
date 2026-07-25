@@ -61,7 +61,7 @@ export interface NodeSpecForm {
     short_id?: string
     // server_name 是 REALITY 下行 SNI 域名（如 sub6.dannelblog.na.am）
     server_name?: string
-    // dest 是 REALITY 下行回落目标（IP:Port，如 127.0.0.1:9454）
+    // dest 是 REALITY 下行回落目标（host:port，如 www.primevideo.com:443）
     dest?: string
     fingerprint?: string
     alpn?: string
@@ -155,6 +155,33 @@ export function applyPresetToSpec(preset: PresetTemplate): Partial<NodeSpecForm>
     if (bs.credentials.password) result.password = bs.credentials.password
     if (bs.credentials.method) result.method = bs.credentials.method
     if (bs.credentials.flow !== undefined) result.flow = bs.credentials.flow
+  }
+
+  // === 映射预设的 transport.mux / sockopt 到 advanced ===
+  const bsAny = bs as any
+  if (bsAny.transport?.mux || bsAny.transport?.sockopt) {
+    const mux = bsAny.transport?.mux
+    const sockopt = bsAny.transport?.sockopt
+    const existingAdvanced = (result.advanced || {}) as Record<string, unknown>
+    const advancedUpdate: Record<string, unknown> = { ...existingAdvanced }
+    if (mux) {
+      advancedUpdate.mux = {
+        enabled: mux.enabled ?? false,
+        protocol: mux.protocol || '',
+        max_connections: mux.max_connections || 8,
+        max_streams: mux.max_streams || 32,
+        padding: mux.padding ?? false,
+        keep_alive_period: mux.keep_alive_period || 30,
+        max_concurrency: mux.max_concurrency || '',
+        c_max_reuse_times: mux.c_max_reuse_times || '',
+        h_max_request_times: mux.h_max_request_times || '',
+        h_max_reusable_secs: mux.h_max_reusable_secs || '',
+      }
+    }
+    if (sockopt) {
+      advancedUpdate.sockopt = sockopt
+    }
+    result.advanced = advancedUpdate
   }
 
   // === 根据协议/传输/安全类型清空不适用字段（防止 DEFAULT_SPEC 残留） ===

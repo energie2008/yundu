@@ -115,8 +115,12 @@ func ExtractPortsFromConfig(config map[string]interface{}) []PortRule {
 			rules = append(rules, PortRule{Port: port, Protocol: proto})
 		}
 
-		// If it's hysteria2 with port hopping, also open UDP for the hop range.
-		// The hop range is configured via listen_ports in sing-box hysteria2 inbound.
+		// If it's hysteria2/TUIC with port hopping (stored in _port_hopping metadata),
+		// also open UDP for the hop range. The hop range is configured via
+		// inbound._port_hopping.port_range (sing-box doesn't natively support hop_ports,
+		// so kernelrender writes port hopping info to _port_hopping metadata field).
+		// DNAT redirects hop range → listen_port, but firewall still needs ACCEPT
+		// rules for the hop range ports to allow incoming traffic.
 		if hopRange := extractPortHopRange(inbound); hopRange != nil {
 			for i := hopRange[0]; i <= hopRange[1]; i++ {
 				key := fmt.Sprintf("%d/udp", i)
@@ -161,11 +165,25 @@ func extractString(m map[string]interface{}, key string) string {
 	return ""
 }
 
-// extractPortHopRange extracts port hopping range from sing-box hysteria2 inbound.
-// sing-box hysteria2 uses hop_ports like "20000-50000".
+// extractPortHopRange extracts port hopping range from sing-box hysteria2/TUIC inbound.
+// sing-box doesn't natively support hop_ports field (parse error on 1.13.x),
+// so port hopping info is stored in inbound._port_hopping metadata field
+// (written by kernelrender/singbox.go, stripped before applying to sing-box kernel).
 // Returns [start, end] or nil if not configured.
 func extractPortHopRange(inbound map[string]interface{}) []int {
-	// sing-box hysteria2: inbound.listen_ports or inbound.hop_ports
+	// Primary: read from _port_hopping metadata (kernelrender convention)
+	if ph, ok := inbound["_port_hopping"].(map[string]interface{}); ok {
+		if enabled, _ := ph["enabled"].(bool); enabled {
+			hopPorts := extractString(ph, "port_range")
+			if hopPorts == "" {
+				return nil
+			}
+			return parsePortRange(hopPorts)
+		}
+		return nil
+	}
+	// Legacy fallback: hop_ports field (deprecated, sing-box rejects it)
+	// Kept for backward compatibility with configs rendered before this fix.
 	hopPorts := extractString(inbound, "hop_ports")
 	if hopPorts == "" {
 		// Also check nested obfs or settings
@@ -176,6 +194,12 @@ func extractPortHopRange(inbound map[string]interface{}) []int {
 	if hopPorts == "" {
 		return nil
 	}
+	return parsePortRange(hopPorts)
+}
+
+// parsePortRange parses "start-end" port range string into [start, end].
+// Returns nil if invalid.
+func parsePortRange(hopPorts string) []int {
 	parts := strings.SplitN(hopPorts, "-", 2)
 	if len(parts) != 2 {
 		return nil
@@ -186,6 +210,186 @@ func extractPortHopRange(inbound map[string]interface{}) []int {
 		return nil
 	}
 	return []int{start, end}
+}
+
+// PortHoppingRule represents a port hopping DNAT rule.
+// Traffic to port_range (UDP) is redirected to listen_port (sing-box actual listen port).
+type PortHoppingRule struct {
+	Tag        string // inbound tag, for idempotent rule management
+	PortRange  string // "40020-40200" format
+	StartPort  int    // 40020
+	EndPort    int    // 40200
+	ListenPort int    // 40020 (sing-box actual listen port)
+	Protocol   string // "udp" (hysteria2/TUIC are UDP-based)
+}
+
+// ExtractPortHoppingFromSingboxConfig extracts _port_hopping metadata from each
+// sing-box inbound, strips the field from the config (so sing-box kernel won't
+// reject it as "unknown field"), and returns the list of port hopping rules.
+//
+// This must be called BEFORE passing singboxConfig to StartNative, otherwise
+// sing-box JSON parsing will fail with: "inbounds[N]._port_hopping: json: unknown field".
+//
+// Returns nil if singboxConfig is nil or no inbound has _port_hopping.
+func ExtractPortHoppingFromSingboxConfig(singboxConfig map[string]interface{}, logger *slog.Logger) []PortHoppingRule {
+	if singboxConfig == nil {
+		return nil
+	}
+	inbounds, ok := singboxConfig["inbounds"].([]interface{})
+	if !ok {
+		return nil
+	}
+
+	var rules []PortHoppingRule
+	for _, ib := range inbounds {
+		inbound, ok := ib.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		phRaw, exists := inbound["_port_hopping"]
+		if !exists {
+			continue
+		}
+		ph, ok := phRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		enabled, _ := ph["enabled"].(bool)
+		if !enabled {
+			// Strip even if disabled, to keep config clean
+			delete(inbound, "_port_hopping")
+			continue
+		}
+		portRange := extractString(ph, "port_range")
+		listenPort := extractInt(ph, "listen_port")
+		if listenPort == 0 {
+			listenPort = extractInt(inbound, "listen_port")
+		}
+		tag := extractString(inbound, "tag")
+		if portRange == "" || listenPort == 0 {
+			logger.Warn("port hopping rule skipped: missing port_range or listen_port",
+				"tag", tag, "port_range", portRange, "listen_port", listenPort)
+			delete(inbound, "_port_hopping")
+			continue
+		}
+		rng := parsePortRange(portRange)
+		if rng == nil {
+			logger.Warn("port hopping rule skipped: invalid port_range",
+				"tag", tag, "port_range", portRange)
+			delete(inbound, "_port_hopping")
+			continue
+		}
+		// Determine protocol from inbound type
+		proto := "udp"
+		if protoType, _ := inbound["type"].(string); protoType == "hysteria2" || protoType == "tuic" {
+			proto = "udp"
+		}
+		rules = append(rules, PortHoppingRule{
+			Tag:        tag,
+			PortRange:  portRange,
+			StartPort:  rng[0],
+			EndPort:    rng[1],
+			ListenPort: listenPort,
+			Protocol:   proto,
+		})
+		// ★ Critical: strip _port_hopping from inbound before sing-box parses it
+		delete(inbound, "_port_hopping")
+		logger.Info("port hopping rule extracted",
+			"tag", tag, "port_range", portRange,
+			"listen_port", listenPort, "protocol", proto)
+	}
+	return rules
+}
+
+// ApplyPortHoppingDNAT applies iptables/nftables DNAT rules to redirect
+// port hopping range traffic to the actual sing-box listen port.
+//
+// For each rule: traffic to UDP ports [StartPort..EndPort] is redirected to
+// ListenPort (where sing-box actually listens). This is the standard solution
+// for sing-box not supporting native port hopping.
+//
+// Rules are idempotent: re-applying the same rule is a no-op (iptables -C check).
+// Rules are tagged with a comment for easy identification and cleanup.
+//
+// Reference: https://v2.hysteria.network/docs/advanced/Port-Hopping/#server
+//            https://sqybi.com/blog/solving-the-issue-openwrt-homeproxy-hysteria2-port-hopping/
+func ApplyPortHoppingDNAT(rules []PortHoppingRule, logger *slog.Logger) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	path, err := exec.LookPath("iptables")
+	if err != nil {
+		// Try nftables fallback (rare on Ubuntu/Debian servers)
+		if nftPath, nftErr := exec.LookPath("nft"); nftErr == nil {
+			return applyPortHoppingNft(nftPath, rules, logger)
+		}
+		logger.Warn("no iptables/nft binary found, port hopping DNAT skipped")
+		return nil
+	}
+
+	var errs []error
+	for _, r := range rules {
+		// iptables DNAT range uses "start-end" format (colon also works but dash is clearer)
+		dportRange := fmt.Sprintf("%d:%d", r.StartPort, r.EndPort)
+		// Use --to-destination :PORT to keep dest IP unchanged, only rewrite dest port
+		toDest := fmt.Sprintf(":%d", r.ListenPort)
+
+		// Idempotent: check if rule already exists
+		check := exec.Command(path, "-t", "nat", "-C", "PREROUTING",
+			"-p", r.Protocol,
+			"--dport", dportRange,
+			"-j", "DNAT",
+			"--to-destination", toDest)
+		if check.Run() == nil {
+			logger.Debug("port hopping DNAT rule already exists",
+				"tag", r.Tag, "range", r.PortRange, "listen_port", r.ListenPort)
+			continue
+		}
+
+		// Add the rule
+		add := exec.Command(path, "-t", "nat", "-A", "PREROUTING",
+			"-p", r.Protocol,
+			"--dport", dportRange,
+			"-j", "DNAT",
+			"--to-destination", toDest)
+		if out, err := add.CombinedOutput(); err != nil {
+			errs = append(errs, fmt.Errorf("iptables DNAT add failed for tag=%s range=%s: %w, out: %s",
+				r.Tag, r.PortRange, err, string(out)))
+		} else {
+			logger.Info("port hopping DNAT rule applied",
+				"tag", r.Tag, "range", r.PortRange,
+				"listen_port", r.ListenPort, "protocol", r.Protocol)
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%d/%d DNAT rules failed: %v", len(errs), len(rules), errs[0])
+	}
+	return nil
+}
+
+// applyPortHoppingNft applies port hopping DNAT rules using nftables.
+// Used as fallback when iptables binary is not available (rare on YunDu VPS).
+func applyPortHoppingNft(nftPath string, rules []PortHoppingRule, logger *slog.Logger) error {
+	// nft add rule inet nat prerouting udp dport 40020-40200 dnat to :40020
+	var errs []error
+	for _, r := range rules {
+		dportRange := fmt.Sprintf("%d-%d", r.StartPort, r.EndPort)
+		toDest := fmt.Sprintf(":%d", r.ListenPort)
+		cmd := exec.Command(nftPath, "add", "rule", "inet", "nat", "prerouting",
+			r.Protocol, "dport", dportRange, "dnat", "to", toDest)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			errs = append(errs, fmt.Errorf("nft DNAT add failed for tag=%s range=%s: %w, out: %s",
+				r.Tag, r.PortRange, err, string(out)))
+		} else {
+			logger.Info("port hopping DNAT rule applied (nft)",
+				"tag", r.Tag, "range", r.PortRange, "listen_port", r.ListenPort)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%d/%d nft DNAT rules failed: %v", len(errs), len(rules), errs[0])
+	}
+	return nil
 }
 
 func parseIntStr(s string) (int, error) {

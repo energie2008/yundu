@@ -63,9 +63,9 @@ type DeploymentProfile string
 const (
 	ProfileDirect  DeploymentProfile = "direct"
 	ProfileCFSaaS  DeploymentProfile = "cf_saas"
-	ProfileCFArgo   DeploymentProfile = "cf_argo"
-	ProfileHybrid   DeploymentProfile = "hybrid"
-	ProfileOverlay  DeploymentProfile = "overlay"
+	ProfileCFArgo  DeploymentProfile = "cf_argo"
+	ProfileHybrid  DeploymentProfile = "hybrid"
+	ProfileOverlay DeploymentProfile = "overlay"
 )
 
 type PresetTemplate struct {
@@ -361,7 +361,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			},
 			BaseSpec: NodeSpec{
 				Protocol: ProtocolVLESS,
-				Port:     443,
+				Port:     30000,
 				Transport: TransportConfig{
 					Type: TransportTCP,
 				},
@@ -404,7 +404,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			DeploymentProfile: ProfileDirect,
 			BaseSpec: NodeSpec{
 				Protocol: ProtocolTrojan,
-				Port:     443,
+				Port:     30000,
 				Transport: TransportConfig{
 					Type: TransportTCP,
 				},
@@ -423,7 +423,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 				"alpn 建议只用 http/1.1，避免 h2 特征暴露",
 				"需配置真实证书（ACME 或 CF Origin CA）",
 			},
-			Warnings: []string{"Trojan 为 TCP 直连，VPS IP 会暴露"},
+			Warnings:            []string{"Trojan 为 TCP 直连，VPS IP 会暴露"},
 			UpdatedFromUpstream: now,
 		},
 		// ===== P03: VLESS+WS+TLS（cf_saas）=====
@@ -528,7 +528,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			DeploymentProfile: ProfileDirect,
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolAnyTLS,
-				Port:        443,
+				Port:        30350,
 				Security:    SecurityTLS,
 				TrafficRate: 1.0,
 				IsVisible:   true,
@@ -583,7 +583,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 						NoGRPCHeader: true,
 						DownloadSettings: &XHTTPDownloadConfig{
 							Address:  "",
-							Port:     443,
+							Port:     30000,
 							Network:  TransportXHTTP,
 							Security: SecurityReality,
 							Path:     "/dl",
@@ -639,7 +639,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			UIWarning: "此配置上行暴露VPS真实IP，仅推荐用于高级用户自选线路",
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolVLESS,
-				Port:        8443,
+				Port:        30000,
 				AllowUDP:    true,
 				TrafficRate: 1.0,
 				IsVisible:   true,
@@ -757,7 +757,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			UIWarning: "IP完全暴露，仅用于VPS来源清洁、追求极致速度的高级直连线路",
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolVLESS,
-				Port:        443,
+				Port:        30000,
 				AllowUDP:    true,
 				TrafficRate: 1.0,
 				IsVisible:   true,
@@ -770,15 +770,15 @@ func BuildDefaultPresets() []*PresetTemplate {
 						Headers:      map[string]string{"Referer": "https://www.google.com/"},
 					},
 					Mux: &MuxConfig{
-						Enabled:         true,
-						Protocol:        MuxProtocolXmux,
-						MaxConnections:  32,
-						MaxConcurrency:  "16-32",
-						CMaxReuseTimes:  "64-128",
+						Enabled:          true,
+						Protocol:         MuxProtocolXmux,
+						MaxConnections:   32,
+						MaxConcurrency:   "16-32",
+						CMaxReuseTimes:   "64-128",
 						HMaxRequestTimes: "128-256",
 						HMaxReusableSecs: "10-30",
-						Padding:         true,
-						KeepAlivePeriod: 30,
+						Padding:          true,
+						KeepAlivePeriod:  30,
 					},
 					Sockopt: &SockoptConfig{
 						TCPFastOpen:  true,
@@ -867,7 +867,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			DeploymentProfile: ProfileDirect,
 			BaseSpec: NodeSpec{
 				Protocol: ProtocolHysteria2,
-				Port:     443,
+				Port:     40020,
 				Transport: TransportConfig{
 					Type: TransportQUIC,
 					PortHopping: &PortHoppingConfig{
@@ -917,7 +917,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			DeploymentProfile: ProfileDirect,
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolTUIC,
-				Port:        443,
+				Port:        40210,
 				Security:    SecurityTLS,
 				AllowUDP:    true,
 				TrafficRate: 1.0,
@@ -963,7 +963,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			UIWarning: "这是叠加层协议，不是独立协议，需挂在其他协议 outbound 之上",
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolVLESS,
-				Port:        443,
+				Port:        30000,
 				AllowUDP:    true,
 				TrafficRate: 1.0,
 				IsVisible:   true,
@@ -1053,7 +1053,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			},
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolShadowsocks,
-				Port:        443,
+				Port:        30000,
 				AllowUDP:    true,
 				TrafficRate: 1.0,
 				IsVisible:   true,
@@ -1150,7 +1150,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			UIWarning: "IP完全暴露，仅用于VPS来源清洁、追求极致速度的高级直连线路；需服务器同时具备IPv4和IPv6地址",
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolVLESS,
-				Port:        443,
+				Port:        30000,
 				AllowUDP:    true,
 				TrafficRate: 1.0,
 				IsVisible:   true,
@@ -1207,7 +1207,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			DeploymentProfile: ProfileDirect,
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolShadowsocks,
-				Port:        8388,
+				Port:        30000,
 				Security:    SecurityNone,
 				TrafficRate: 1.0,
 				IsVisible:   true,
@@ -1235,7 +1235,7 @@ func BuildDefaultPresets() []*PresetTemplate {
 			DeploymentProfile: ProfileDirect,
 			BaseSpec: NodeSpec{
 				Protocol:    ProtocolMieru,
-				Port:        4000,
+				Port:        30001,
 				Security:    SecurityNone,
 				TrafficRate: 1.0,
 				IsVisible:   true,

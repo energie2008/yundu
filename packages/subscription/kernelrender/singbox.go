@@ -162,17 +162,30 @@ func (r *SingBoxRenderer) addProtocolFields(inbound map[string]interface{}, spec
 				inbound["down_mbps"] = c.DownMbps
 			}
 		}
-		// 端口跳跃（hop_ports）：sing-box hysteria2 inbound 原生支持
-		// 当配置 port_hopping.enabled=true 且 port_range 非空时写入 hop_ports 字段
-		// sing-box 会监听 port_range 范围内所有 UDP 端口，实现端口跳跃抗封锁
+		// 端口跳跃（Port Hopping）：sing-box 内核本身不支持 hop_ports 字段
+		// （实测 sing-box 1.13.14 加载报错 "json: unknown field hop_ports"）。
+		// 业界标准方案：iptables/nftables DNAT 把端口范围重定向到 listen_port 单端口。
+		// 此处写入 _port_hopping 元数据（前缀 "_" 表示不进入内核配置，类似 _limiter），
+		// 由 node-agent 提取后自动应用 iptables DNAT 规则，实现零 SSH 端口跳跃。
 		if spec.Transport.PortHopping != nil && spec.Transport.PortHopping.Enabled && spec.Transport.PortHopping.PortRange != "" {
-			inbound["hop_ports"] = spec.Transport.PortHopping.PortRange
+			inbound["_port_hopping"] = map[string]interface{}{
+				"enabled":     true,
+				"port_range":  spec.Transport.PortHopping.PortRange,
+				"interval":    spec.Transport.PortHopping.Interval,
+				"listen_port": resolveInboundPort(spec),
+			}
 		}
 	case nodespec.ProtocolTUIC:
 		inbound["congestion_control"] = "bbr"
-		// 端口跳跃：TUIC v5 也支持 hop_ports（sing-box 1.11+）
+		// 端口跳跃：TUIC 同 Hysteria2，sing-box 不支持原生 hop_ports，
+		// 通过 _port_hopping 元数据由 agent 应用 iptables DNAT。
 		if spec.Transport.PortHopping != nil && spec.Transport.PortHopping.Enabled && spec.Transport.PortHopping.PortRange != "" {
-			inbound["hop_ports"] = spec.Transport.PortHopping.PortRange
+			inbound["_port_hopping"] = map[string]interface{}{
+				"enabled":     true,
+				"port_range":  spec.Transport.PortHopping.PortRange,
+				"interval":    spec.Transport.PortHopping.Interval,
+				"listen_port": resolveInboundPort(spec),
+			}
 		}
 	case nodespec.ProtocolAnyTLS:
 		// padding_scheme: AnyTLS 填充方案（如 "max-0" 无填充）。
@@ -459,22 +472,19 @@ func (r *SingBoxRenderer) renderTLS(spec *nodespec.NodeSpec) map[string]interfac
 		if spec.Reality.SNI != "" {
 			tls["server_name"] = spec.Reality.SNI
 		}
-		// handshake.server/server_port：推荐由用户显式配置 dest（host:port）
-	// 支持两种填法：
-	//   1. 本地反代：127.0.0.1:9454（推荐，回落到本地 nginx vhost 反代真实站点）
-	//   2. 伪装域名：oyc.yale.edu:443（直连模式，回落到真实外部站点）
-	// 注意：sing-box 渲染器无 error 返回通道，dest 为空时仍用 SNI:443 兜底（向后兼容）
-	// 上层 deployment_service.go 的 preflight 校验应在节点保存阶段强制要求 dest 非空
-	handshakeServer := spec.Reality.SNI
-	handshakePort := 443
-	if spec.Reality.Dest != "" {
-		if h, p, err := net.SplitHostPort(spec.Reality.Dest); err == nil {
-			if port, err := strconv.Atoi(p); err == nil && port > 0 {
-				handshakeServer = h
-				handshakePort = port
+		// handshake.server/server_port：用户显式配置 dest 优先保存
+		// dest 留空时默认回退 www.primevideo.com:443（大厂域名，TLS1.3+H2）
+		// 用户编辑保存的 dest 不会被回退覆盖
+		handshakeServer := "www.primevideo.com"
+		handshakePort := 443
+		if spec.Reality.Dest != "" {
+			if h, p, err := net.SplitHostPort(spec.Reality.Dest); err == nil {
+				if port, err := strconv.Atoi(p); err == nil && port > 0 {
+					handshakeServer = h
+					handshakePort = port
+				}
 			}
 		}
-	}
 		// Reality 在 Sing-box 下是 tls.reality.enabled=true，不是独立 security 类型
 		reality := map[string]interface{}{
 			"enabled": true,
@@ -973,7 +983,8 @@ func (r *SingBoxRenderer) convertTunAddressToLegacy(config map[string]interface{
 
 // patternCache 缓存已编译的正则，避免重复编译。
 // B33: 原实现是无界 map 且无并发保护，恶意或大量不同 pattern 会导致内存无限增长。
-//      改为有界缓存（sync.Map + 原子计数器），达到 maxPatternCacheSize 上限时清空重建。
+//
+//	改为有界缓存（sync.Map + 原子计数器），达到 maxPatternCacheSize 上限时清空重建。
 const maxPatternCacheSize = 100
 
 var (
@@ -996,9 +1007,10 @@ func matchesPattern(pattern, subject string) bool {
 
 // compilePattern 编译用户模式，带缓存。非法模式返回 nil。
 // B33: 以 trim 后的 pattern 作为缓存 key，避免 " foo" 与 "foo " 这类仅首尾空白
-//      差异的模式产生不同 key 却编译出等价正则、重复占用缓存；裸模式转义也统一使用
-//      trimmed，保证 key 与编译结果一致。缓存条目达到 maxPatternCacheSize 时
-//      整体清空并重新计数（simple but effective，防止无限增长）。
+//
+//	差异的模式产生不同 key 却编译出等价正则、重复占用缓存；裸模式转义也统一使用
+//	trimmed，保证 key 与编译结果一致。缓存条目达到 maxPatternCacheSize 时
+//	整体清空并重新计数（simple but effective，防止无限增长）。
 func compilePattern(pattern string) *regexp.Regexp {
 	trimmed := strings.TrimSpace(pattern)
 	key := trimmed

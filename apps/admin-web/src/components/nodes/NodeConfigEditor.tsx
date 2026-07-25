@@ -112,7 +112,7 @@ export interface DownloadSettings {
   short_id: string
   // server_name 是下行 REALITY 的 SNI 域名（与 sni 字段同义，用于兼容旧表单）
   server_name: string
-  // dest 是下行 REALITY 的回落目标（IP:Port，如 127.0.0.1:9454 或 www.microsoft.com:443）
+  // dest 是下行 REALITY 的回落目标（host:port，如 www.primevideo.com:443）
   dest: string
   fingerprint: string
   alpn: string
@@ -830,14 +830,14 @@ function DownloadSettingsPanel({ spec, updateSpec }: {
                     <p className="text-[10px] text-zinc-500">REALITY 握手 SNI 域名（与客户端连接的域名一致）</p>
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-zinc-300 text-xs">下行 REALITY Dest (回落目标 IP:Port)</Label>
+                    <Label className="text-zinc-300 text-xs">下行 REALITY Dest (回落目标 host:port)</Label>
                     <Input
                       value={dl.dest}
                       onChange={(e) => uDL('dest', e.target.value)}
-                      placeholder="127.0.0.1:9454 或 www.microsoft.com:443"
+                      placeholder="www.primevideo.com:443"
                       className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9 font-mono text-xs"
                     />
-                    <p className="text-[10px] text-zinc-500">回落目标（host:port），推荐本地反代端口如 127.0.0.1:9454</p>
+                    <p className="text-[10px] text-zinc-500">回落目标（host:port），留空则回退 www.primevideo.com:443</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -1018,24 +1018,27 @@ function AdvancedSettingsDialog({ open, onOpenChange, config, onConfigChange }: 
             </TabsContent>
             <TabsContent value="hopping" className="mt-0 space-y-5">
               <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-800/50 border border-zinc-700/50">
-                <div><div className="text-sm text-zinc-200 font-medium">启用端口跳跃 (Port Hopping)</div><div className="text-xs text-zinc-500">Hysteria2等UDP协议支持，客户端在端口范围内随机连接，抗端口封锁</div></div>
+                <div><div className="text-sm text-zinc-200 font-medium">启用端口跳跃 (Port Hopping)</div><div className="text-xs text-zinc-500">服务端监听整个端口范围，客户端随机选端口连接，抗端口封锁</div></div>
                 <Switch checked={config.port_hopping.enabled} onChange={(e) => uHop('enabled', e.target.checked)} />
               </div>
               {config.port_hopping.enabled && (<>
-                <div className="space-y-2"><Label className="text-zinc-300 text-sm">端口范围</Label><Input value={config.port_hopping.port_range} onChange={(e) => uHop('port_range', e.target.value)} placeholder="例如: 40020-40200 (单端口用逗号分隔: 443,8443,2053)" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9 font-mono" /></div>
-                <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-900/50">
-                  <p className="text-xs text-amber-300 font-medium mb-1">⚠️ 端口跳跃配置说明</p>
-                  <div className="text-xs text-amber-200/80 space-y-1">
-                    <p>• <strong>客户端口和服务端口</strong>都填主端口（如 40020），不是范围</p>
-                    <p>• <strong>端口范围</strong>在此处填写（如 40020-40200）</p>
-                    <p>• 订阅链接自动渲染为 <code className="text-amber-100">mport=40020-40200</code></p>
-                    <p>• <strong>Hysteria2 是 UDP 协议，不能走 CDN/nginx 443</strong>，必须直连</p>
+                <div className="space-y-2"><Label className="text-zinc-300 text-sm">端口范围</Label><Input value={config.port_hopping.port_range} onChange={(e) => uHop('port_range', e.target.value)} placeholder="例如: 40020-40200" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9 font-mono" /><p className="text-xs text-zinc-500">格式: 起始端口-结束端口，范围建议 ≤200 个端口</p></div>
+                <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-900/50">
+                  <p className="text-xs text-emerald-300 font-medium mb-1">自动配置（零 SSH）</p>
+                  <div className="text-xs text-emerald-200/80 space-y-1">
+                    <p>• 服务端 sing-box 自动监听整个端口范围（原生 <code className="text-emerald-100">hop_ports</code>）</p>
+                    <p>• node-agent 自动放行范围内所有 UDP 端口防火墙</p>
+                    <p>• 订阅链接自动渲染 <code className="text-emerald-100">mport=40020-40200</code></p>
+                    <p>• 无需手动配置 iptables/NAT，无需 SSH 登录</p>
                   </div>
                 </div>
-                <div className="p-3 rounded-lg bg-blue-950/30 border border-blue-900/50">
-                  <p className="text-xs text-blue-300 font-medium mb-1">服务端 iptables 规则（需手动配置）</p>
-                  <code className="text-xs text-blue-200 block bg-blue-950/50 p-2 rounded font-mono">iptables -t nat -A PREROUTING -p udp --dport 40020:40200 -j REDIRECT --to-ports 40020</code>
-                  <p className="text-xs text-blue-400/60 mt-1">将端口范围内的 UDP 流量重定向到主端口（xray 监听端口）</p>
+                <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-900/50">
+                  <p className="text-xs text-amber-300 font-medium mb-1">注意事项</p>
+                  <div className="text-xs text-amber-200/80 space-y-1">
+                    <p>• <strong>客户端口和服务端口</strong>填主端口（如 40020），端口范围在此处填写</p>
+                    <p>• <strong>Hysteria2 是 UDP 协议，不能走 CDN/nginx 443</strong>，必须直连</p>
+                    <p>• 确保云厂商安全组已放行对应 UDP 端口段</p>
+                  </div>
                 </div>
               </>)}
             </TabsContent>
@@ -1293,7 +1296,8 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
   const needsServiceName = ['grpc'].includes(spec.transport)
   const showsAuth = ['vless', 'vmess', 'tuic'].includes(spec.protocol)
   const showsPassword = ['trojan', 'ss', 'hysteria2', 'tuic', 'anytls', 'mieru'].includes(spec.protocol)
-  const showsFlow = spec.protocol === 'vless' && spec.security === 'reality'
+  // P5: flow 仅在 VLESS+REALITY+TCP 时有效，XHTTP 不支持 flow
+  const showsFlow = spec.protocol === 'vless' && spec.security === 'reality' && spec.transport === 'tcp'
   const showsXHTTP = spec.transport === 'xhttp'
   // argo_tunnel 节点识别：仅 CF 隧道节点需要 DB 字段层面的 TLS 分离
   // argo_tunnel: cloudflared 明文 HTTP 回源，DB security_type=none，客户端必须 TLS
@@ -1367,8 +1371,16 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
         const securities = SECURITY_OPTIONS[proto] || SECURITY_OPTIONS.vless
         next.transport = transports[0].value
         next.security = securities.find(s => s.value === 'reality')?.value || securities[0].value
-        next.client_port = next.security === 'reality' ? 443 : proto === 'ss' ? 8388 : proto === 'mieru' ? 4000 : 443
-        next.server_port = next.client_port
+        // P5: 直连节点客户端口=服务端口=高位端口（PortPlanner 自动分配具体值）
+        // CDN/隧道节点客户端口=443，服务端口由 PortPlanner 分配
+        const isDirect = !(next as { exposure_mode?: string }).exposure_mode || (next as { exposure_mode?: string }).exposure_mode === 'direct'
+        // P5: 直连节点端口统一 30000+，绕过 nginx
+        if (proto === 'hysteria2') { next.client_port = 40020; next.server_port = 40020 }
+        else if (proto === 'tuic') { next.client_port = 40210; next.server_port = 40210 }
+        else if (proto === 'ss') { next.client_port = 30000; next.server_port = 30000 }
+        else if (proto === 'mieru') { next.client_port = 30001; next.server_port = 30001 }
+        else if (isDirect) { next.client_port = 30000; next.server_port = 30000 }
+        else { next.client_port = 443; next.server_port = 8446 }
         next.uuid = ''; next.password = ''; next.flow = ''
         next.method = proto === 'ss' ? 'aes-256-gcm' : undefined
         next.advanced = { ...DEFAULT_ADVANCED }
@@ -1385,10 +1397,10 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
           if (sec === 'reality') { next.flow = 'xtls-rprx-vision' }
           else { next.flow = '' }
         } else {
-          if (sec === 'reality') { next.client_port = 443; next.flow = 'xtls-rprx-vision' }
-          else if (sec === 'none') { next.client_port = next.protocol === 'ss' ? 8388 : next.protocol === 'mieru' ? 4000 : 8080; next.flow = '' }
-          else { next.client_port = 443; next.flow = '' }
-          next.server_port = next.client_port
+          // P5: 直连节点用高位端口，不走 443
+          if (sec === 'reality') { next.client_port = 30000; next.server_port = 30000; next.flow = 'xtls-rprx-vision' }
+          else if (sec === 'none') { next.client_port = next.protocol === 'ss' ? 30000 : next.protocol === 'mieru' ? 30001 : 30002; next.server_port = next.client_port; next.flow = '' }
+          else { next.client_port = 30000; next.server_port = 30000; next.flow = '' }
         }
       }
       if (key === 'transport') {
@@ -1414,7 +1426,14 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
           if (!next.xhttp_mode) next.xhttp_mode = 'packet-up'
         }
       }
-      if (key === 'client_port') next.server_port = value as number
+      // P5: 同步端口仅对直连/UDP节点生效（客户端口=服务端口）
+      // CDN/隧道节点的服务端口由 PortPlanner 自动分配，不应与客户端口同步
+      if (key === 'client_port') {
+        const em = (next as { exposure_mode?: string }).exposure_mode
+        if (em === 'direct' || !em || em === 'reality') {
+          next.server_port = value as number
+        }
+      }
       if (key === 'parent_node_id') {
         // YunDu 使用 UUID，没有 numeric_id 字段；保留 parent_node_id 即可
         next.parent_numeric_id = 0
@@ -1764,7 +1783,16 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
 
   React.useEffect(() => {
     if (open) {
-      setSpec({ ...DEFAULT_SPEC, ...initialSpec, advanced: { ...DEFAULT_ADVANCED, ...(initialSpec?.advanced || {}) }, id: initialSpec?.id || '', code: initialSpec?.code || '', numeric_id: initialSpec?.numeric_id || 0 })
+      // P5: 编辑模式下，直连节点 client_port 应 = server_port
+      // 旧节点可能 DB 中 Port=443，需在 UI 层同步
+      const loaded = { ...DEFAULT_SPEC, ...initialSpec, advanced: { ...DEFAULT_ADVANCED, ...(initialSpec?.advanced || {}) }, id: initialSpec?.id || '', code: initialSpec?.code || '', numeric_id: initialSpec?.numeric_id || 0 }
+      const em = (loaded as any).exposure_mode
+      const isDirect = !em || em === 'direct'
+      const isUDP = loaded.protocol === 'hysteria2' || loaded.protocol === 'tuic'
+      if (isDirect && !isUDP && loaded.server_port && loaded.server_port > 0 && loaded.client_port !== loaded.server_port) {
+        loaded.client_port = loaded.server_port
+      }
+      setSpec(loaded)
       setYamlText(specToYaml({ ...DEFAULT_SPEC, ...initialSpec }, 'yaml'))
       setEditorMode('yaml')
       if (initialSpec?.preset_id) {
@@ -1943,11 +1971,12 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
                 </div>
                 <div className="p-3 rounded-lg bg-zinc-800/30 border border-zinc-700/30">
                   <div className="text-xs text-zinc-400 space-y-1.5">
-                    <p className="text-zinc-300 font-medium mb-1">标准架构端口填写规则（nginx 443 + SNI 分流）：</p>
-                    <p><strong className="text-emerald-400">CDN节点</strong>（TCP协议，经CF CDN）：客户端口=<strong className="text-zinc-200">443</strong>，服务端口=高位端口（如9445）</p>
-                    <p><strong className="text-blue-400">直连节点</strong>（REALITY/TCP，经nginx 443 SNI default）：客户端口=<strong className="text-zinc-200">443</strong>，服务端口=高位端口（如9450）</p>
-                    <p><strong className="text-rose-400">UDP节点</strong>（Hysteria2/TUIC，不能走nginx 443）：客户端口=服务端口=高位端口（如40020），点同步按钮</p>
-                    <p className="text-zinc-500 mt-1.5 pt-1.5 border-t border-zinc-700/50">注：标准架构下所有TCP协议客户端口都是443（nginx stream监听443）。UDP协议绕过nginx直接连xray端口。</p>
+                    <p className="text-zinc-300 font-medium mb-1">端口规则（P5 架构：直连节点绕过 nginx）：</p>
+                    <p><strong className="text-emerald-400">CDN节点</strong>（exposure_mode=cdn_saas）：客户端口=<strong className="text-zinc-200">443</strong>，服务端口=内部端口（8446+），xray绑127.0.0.1</p>
+                    <p><strong className="text-blue-400">直连节点</strong>（exposure_mode=direct）：客户端口=服务端口=<strong className="text-zinc-200">30000+</strong>，xray绑0.0.0.0，绕过nginx，客户端直连 VPS:端口</p>
+                    <p><strong className="text-purple-400">隧道节点</strong>（exposure_mode=argo_tunnel）：客户端口=<strong className="text-zinc-200">443</strong>，服务端口=高位端口（20530+），cloudflared转发</p>
+                    <p><strong className="text-rose-400">UDP节点</strong>（Hysteria2/TUIC）：客户端口=服务端口=40020+，绕过nginx</p>
+                    <p className="text-zinc-500 mt-1.5 pt-1.5 border-t border-zinc-700/50">注：直连节点（trojan+tls/reality/anytls/ss/mieru）客户端直连 VPS:30000+端口，不再经nginx 443。服务端口由PortPlanner自动分配。</p>
                   </div>
                 </div>
                 {showsAuth && (<div className="space-y-2">
@@ -2029,7 +2058,7 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
                 </div>)}
                 {showRealityFields && (<div className="p-4 rounded-lg bg-zinc-800/50 border border-zinc-700/50 space-y-4">
                   <div className="text-sm font-medium text-zinc-200 flex items-center gap-2"><Shield className="w-4 h-4 text-emerald-400" />REALITY 设置</div>
-                  <div className="space-y-2"><Label className="text-zinc-400 text-xs">伪装站点 (dest:port) <span className="text-rose-400">*</span></Label><Input value={spec.reality_dest || ''} onChange={(e) => updateSpec('reality_dest', e.target.value)} placeholder="127.0.0.1:9454（本地反代）或 oyc.yale.edu:443（伪装域名）" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9" /><p className="text-[10px] text-zinc-500">必填。本地反代推荐（nginx vhost 回落真实站点），伪装域名用于直连模式</p></div>
+                    <div className="space-y-2"><Label className="text-zinc-400 text-xs">伪装站点 (dest:port)</Label><Input value={spec.reality_dest || ''} onChange={(e) => updateSpec('reality_dest', e.target.value)} placeholder="留空=自动回退 www.primevideo.com:443" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9" /><p className="text-[10px] text-zinc-500">可选。留空则自动回退到 www.primevideo.com:443。编辑保存后优先使用保存的域名，不会被回退覆盖。</p></div>
                   <div className="space-y-2"><Label className="text-zinc-400 text-xs">SNI (Server Name)</Label><Input value={spec.sni || ''} onChange={(e) => updateSpec('sni', e.target.value)} placeholder="www.microsoft.com" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9" /></div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between"><Label className="text-zinc-400 text-xs">公钥 (PublicKey)</Label><Button type="button" variant="ghost" size="sm" onClick={generateKeyPairAction} disabled={isGeneratingKey} className="h-7 px-2 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50"><Key className="w-3 h-3 mr-1" />{isGeneratingKey ? '生成中...' : '生成密钥对'}</Button></div>
@@ -2059,7 +2088,7 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
                     <button
                       key="direct"
                       type="button"
-                      onClick={() => { updateSpec('exposure_mode', 'direct'); updateSpec('cdn_address', undefined); }}
+                      onClick={() => { updateSpec('exposure_mode', 'direct'); updateSpec('cdn_address', undefined); updateSpec('client_port', 30000); updateSpec('server_port', 30000); }}
                       className={`p-3 rounded-lg border text-left transition-all ${(spec as any).exposure_mode === 'direct' || !(spec as any).exposure_mode ? 'border-indigo-500 bg-indigo-950/30' : 'border-zinc-700 bg-zinc-800/30 hover:border-zinc-600'}`}
                     >
                       <div className="flex items-center gap-2 mb-1"><Server className="w-4 h-4 text-zinc-300" /><span className="font-medium text-sm text-zinc-100">直连</span></div>
@@ -2068,7 +2097,7 @@ export function NodeConfigEditor({ open, onOpenChange, mode, initialSpec, onSave
                     <button
                       key="cdn_saas"
                       type="button"
-                      onClick={() => { updateSpec('exposure_mode', 'cdn_saas'); if (spec.host) updateSpec('cdn_address', spec.host); }}
+                      onClick={() => { updateSpec('exposure_mode', 'cdn_saas'); if (spec.host) updateSpec('cdn_address', spec.host); updateSpec('client_port', 443); }}
                       className={`p-3 rounded-lg border text-left transition-all ${(spec as any).exposure_mode === 'cdn_saas' ? 'border-indigo-500 bg-indigo-950/30' : 'border-zinc-700 bg-zinc-800/30 hover:border-zinc-600'}`}
                     >
                       <div className="flex items-center gap-2 mb-1"><Globe className="w-4 h-4 text-blue-400" /><span className="font-medium text-sm text-zinc-100">CF CDN</span></div>

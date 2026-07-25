@@ -280,8 +280,10 @@ func (a *PluginAdapter) StartNative(ctx context.Context, configBytes []byte) err
 	return nil
 }
 
-// stripMetaFields 从配置 JSON 中剥离 _nginx_vhosts / _limiter / _traffic_quota / _singbox_config / _chain_bridges 等元数据字段，
+// stripMetaFields 从配置 JSON 中剥离 _nginx_vhosts / _limiter / _traffic_quota / _singbox_config / _chain_bridges / _port_hopping 等元数据字段，
 // 防止内核 JSON 解析失败。
+// 注意：_port_hopping 嵌套在 sing-box inbound 内部，由 firewall.ExtractPortHoppingFromSingboxConfig
+// 在调用 StartNative 之前剥离；此处顶层 delete 是双重保险，处理边缘情况。
 func stripMetaFields(data []byte) ([]byte, error) {
 	var cfg map[string]interface{}
 	if err := json.Unmarshal(data, &cfg); err != nil {
@@ -292,6 +294,15 @@ func stripMetaFields(data []byte) ([]byte, error) {
 	delete(cfg, "_traffic_quota")
 	delete(cfg, "_singbox_config")
 	delete(cfg, "_chain_bridges")
+	delete(cfg, "_port_hopping")
+	// 同时剥离 sing-box inbounds 内嵌的 _port_hopping（双重保险）
+	if inbounds, ok := cfg["inbounds"].([]interface{}); ok {
+		for _, ib := range inbounds {
+			if inbound, ok := ib.(map[string]interface{}); ok {
+				delete(inbound, "_port_hopping")
+			}
+		}
+	}
 	return json.Marshal(cfg)
 }
 

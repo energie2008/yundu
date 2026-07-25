@@ -221,13 +221,13 @@ setup_direct_node_firewall() {
         return 0
     fi
     header "配置直连节点端口防火墙规则"
-    # TCP 直连：REALITY / trojan+tls / ss / mieru / anytls
-    ufw allow 9450:9600/tcp 2>/dev/null || true
-    ufw allow 9750:9799/tcp 2>/dev/null || true
+    # TCP 直连：REALITY / trojan+tls / ss / mieru / anytls / shadowtls
+    ufw allow 30000:30200/tcp 2>/dev/null || true
+    ufw allow 30300:30399/tcp 2>/dev/null || true
     # UDP 直连：Hysteria2 / TUIC
     ufw allow 40020:40200/udp 2>/dev/null || true
     ufw allow 40210:40299/udp 2>/dev/null || true
-    success "直连节点端口已放行 (9450-9600/tcp, 9750-9799/tcp, 40020-40200/udp, 40210-40299/udp)"
+    success "直连节点端口已放行 (30000-30200/tcp, 30300-30399/tcp, 40020-40200/udp, 40210-40299/udp)"
 }
 
 # ===== 子命令: agent =====
@@ -285,8 +285,8 @@ cmd_agent() {
     fi
 
     # P5.4: 开放直连节点端口段（直连节点绕过 nginx，直接监听 0.0.0.0:port）
-    # - 9450-9600/tcp: REALITY / trojan+tls / ss / mieru 直连
-    # - 9750-9799/tcp: AnyTLS 直连
+# - 30000-30200/tcp: REALITY / trojan+tls / ss / mieru 直连
+# - 30300-30399/tcp: AnyTLS / ShadowTLS 直连
     # - 40020-40200/udp: Hysteria2
     # - 40210-40299/udp: TUIC
     # 优先用 ufw（Debian/Ubuntu 默认），未安装则跳过（VPS 安全组通常已处理）

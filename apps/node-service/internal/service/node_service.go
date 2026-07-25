@@ -48,7 +48,7 @@ type NodeService struct {
 	portPlanner     *PortPlanner
 	logger          *slog.Logger
 	// P1-5: 证书 SAN 同步钩子，节点保存后自动触发
-	certSyncHook    CertSyncHook
+	certSyncHook CertSyncHook
 }
 
 func NewNodeService(nodeRepo *repo.NodeRepo, runtimeRepo *repo.RuntimeRepo, healthRepo *repo.HealthRepo, chainRepo *repo.ChainRepo) *NodeService {
@@ -920,12 +920,7 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 		secStr = *node.SecurityType
 	}
 
-	// 1. TCP协议强制Port=443
-	if !isUDPProtocol(node.ProtocolType) {
-		node.Port = 443
-	}
-
-	// 2. 自动分配ServerPort
+	// 1. 自动分配ServerPort（先分配，后面根据 exposure_mode 决定客户端口 Port）
 	if !isUDPProtocol(node.ProtocolType) {
 		// TCP协议：必须有ServerPort
 		if node.ServerPort == nil || *node.ServerPort == 0 {
@@ -944,6 +939,19 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 				return fmt.Errorf("auto-allocate server_port: %w", err)
 			}
 			node.ServerPort = &port
+		}
+		// P5: 根据暴露方式设置客户端口（Port）
+		// - CDN/argo_tunnel 节点：Port=443（客户端→CF/nginx 443→xray 127.0.0.1:ServerPort）
+		// - 直连节点（direct/reality）：Port=ServerPort（客户端直连 VPS:高位端口）
+		//   ServerPort==Port 触发 resolveListenAddress 返回 0.0.0.0（绕过 nginx）
+		em := determineExposureMode(node)
+		if em == "cdn" || em == "cdn_saas" || em == "argo_tunnel" {
+			node.Port = 443
+		} else {
+			// 直连节点：客户端口=服务端口（如 30000），触发 0.0.0.0 绑定
+			if node.ServerPort != nil && *node.ServerPort > 0 {
+				node.Port = *node.ServerPort
+			}
 		}
 	} else {
 		// UDP协议：不需要nginx转发，但也要分配高位端口（若未指定）
@@ -1545,24 +1553,24 @@ func (s *NodeService) CreateNodeFromURI(ctx context.Context, req *CreateNodeFrom
 		IsEnabled:             true,
 		IsVisible:             true,
 		AllowUDP:              true,
-			SpeedLimitMbps:        nil,
-			TrafficRate:           trafficRate,
-			Priority:              100,
-			CapacityScore:         100,
-			ProtocolSchemaVersion: "v1",
-			ConfigJSON:            configJSON,
-			Tags:                  []string{},
-			Metadata:              make(map[string]interface{}),
-			LastPublishedVersion:  0,
-		}
+		SpeedLimitMbps:        nil,
+		TrafficRate:           trafficRate,
+		Priority:              100,
+		CapacityScore:         100,
+		ProtocolSchemaVersion: "v1",
+		ConfigJSON:            configJSON,
+		Tags:                  []string{},
+		Metadata:              make(map[string]interface{}),
+		LastPublishedVersion:  0,
+	}
 
-		// Bug-B1: 自动为 REALITY 节点补全 private_key/public_key。
-		// B39 修复: autoGenerateREALITYKeys 失败不再静默吞掉，以 Error 级别记录
-		if err := autoGenerateREALITYKeys(ctx, node); err != nil {
-			log.Printf("error: auto-generate REALITY keys failed for node from URI %s: %v", node.Code, err)
-		}
+	// Bug-B1: 自动为 REALITY 节点补全 private_key/public_key。
+	// B39 修复: autoGenerateREALITYKeys 失败不再静默吞掉，以 Error 级别记录
+	if err := autoGenerateREALITYKeys(ctx, node); err != nil {
+		log.Printf("error: auto-generate REALITY keys failed for node from URI %s: %v", node.Code, err)
+	}
 
-		if err := s.nodeRepo.Create(ctx, node); err != nil {
+	if err := s.nodeRepo.Create(ctx, node); err != nil {
 		return nil, err
 	}
 
