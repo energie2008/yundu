@@ -979,31 +979,47 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 		}
 	}
 
-	// 3. REALITY节点必须有RealityServerName/SNI
+	// 3. REALITY节点：SNI 与 RealityServerName 双向同步（修复 P07/P09 SNI 修改不生效问题）
+	//
+	// 历史问题：原逻辑为单向覆盖 node.SNI = node.RealityServerName，当前端不发送
+	// reality_server_name（只发送 sni）时，node.RealityServerName 保留 DB 旧值，
+	// 会把用户修改的新 SNI 反向覆盖回旧值。
+	//
+	// 修复策略：以 node.SNI 为优先权威源（前端 specToNodePayload 总是发送 sni 字段，
+	// 用户在面板编辑的就是 SNI 输入框）。SNI 非空时同步到 RealityServerName；
+	// SNI 为空时尝试从 RealityServerName / config_json 回填。
 	if secStr == "reality" {
-		if node.RealityServerName == nil || *node.RealityServerName == "" {
-			if node.ConfigJSON != nil {
-				if rs, ok := node.ConfigJSON["reality_settings"].(map[string]interface{}); ok {
-					if sn, ok := rs["server_name"].(string); ok && sn != "" {
-						node.RealityServerName = &sn
+		if node.SNI != nil && *node.SNI != "" {
+			// SNI 非空：以 SNI 为准，同步到 RealityServerName
+			sniVal := *node.SNI
+			node.RealityServerName = &sniVal
+		} else {
+			// SNI 为空：尝试从 RealityServerName / config_json 回填
+			if node.RealityServerName == nil || *node.RealityServerName == "" {
+				if node.ConfigJSON != nil {
+					if rs, ok := node.ConfigJSON["reality_settings"].(map[string]interface{}); ok {
+						if sn, ok := rs["server_name"].(string); ok && sn != "" {
+							node.RealityServerName = &sn
+						}
 					}
-				}
-				if node.RealityServerName == nil || *node.RealityServerName == "" {
-					if sn, ok := node.ConfigJSON["reality_server_name"].(string); ok && sn != "" {
-						node.RealityServerName = &sn
+					if node.RealityServerName == nil || *node.RealityServerName == "" {
+						if sn, ok := node.ConfigJSON["reality_server_name"].(string); ok && sn != "" {
+							node.RealityServerName = &sn
+						}
 					}
-				}
-				if node.RealityServerName == nil || *node.RealityServerName == "" {
-					if node.SNI != nil && *node.SNI != "" {
-						node.RealityServerName = node.SNI
+					if node.RealityServerName == nil || *node.RealityServerName == "" {
+						if sn, ok := node.ConfigJSON["server_name"].(string); ok && sn != "" {
+							node.RealityServerName = &sn
+						}
 					}
 				}
 			}
+			if node.RealityServerName == nil || *node.RealityServerName == "" {
+				return fmt.Errorf("REALITY节点必须设置 reality_server_name（伪装SNI域名），用于nginx stream SNI分流")
+			}
+			// 回填 SNI
+			node.SNI = node.RealityServerName
 		}
-		if node.RealityServerName == nil || *node.RealityServerName == "" {
-			return fmt.Errorf("REALITY节点必须设置 reality_server_name（伪装SNI域名），用于nginx stream SNI分流")
-		}
-		node.SNI = node.RealityServerName
 	}
 
 	// 4. 同步ServerPort到ConfigJSON（向后兼容渲染器）
@@ -1021,14 +1037,18 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 		}
 	}
 
-	// 5. 同步RealityServerName到ConfigJSON
+	// 5. 同步RealityServerName到ConfigJSON（修复 P07/P09/P15/P17/vlessr SNI 修改不生效问题）
+	// 必须同时写顶层 server_name + reality_server_name + reality_settings.server_name，
+	// 因为 normalizer.copyFlatKey 优先读顶层 server_name，若顶层为旧值会忽略 nested 的新值。
 	if node.RealityServerName != nil && *node.RealityServerName != "" {
-		node.ConfigJSON["reality_server_name"] = *node.RealityServerName
+		rsn := *node.RealityServerName
+		node.ConfigJSON["reality_server_name"] = rsn
+		node.ConfigJSON["server_name"] = rsn
 		if rs, ok := node.ConfigJSON["reality_settings"].(map[string]interface{}); ok {
-			rs["server_name"] = *node.RealityServerName
+			rs["server_name"] = rsn
 		} else {
 			node.ConfigJSON["reality_settings"] = map[string]interface{}{
-				"server_name": *node.RealityServerName,
+				"server_name": rsn,
 			}
 		}
 	}
