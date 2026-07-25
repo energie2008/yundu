@@ -1311,9 +1311,9 @@ func (s *DeploymentService) buildNginxVhosts(nodes []*model.Node) map[string]int
 		isReality := tc == TerminationReality
 
 		if cdnAddr != "" {
-			// P4: CDN 节点（nginx_plus_xray）xray 持证书，nginx proxy_pass https 回源。
+			// 回退 P4：CDN 节点 nginx 持证书，nginx 8445 终止 TLS 后 proxy_pass http 回源。
 			// 流量路径：CF → nginx 443 stream (SNI 分流) → nginx 8445 (TLS 终止 + location 路由)
-			//         → proxy_pass https://127.0.0.1:serverPort → xray inbound（持证书，二次 TLS 终止）
+			//         → proxy_pass http://127.0.0.1:serverPort → xray inbound（security=none，明文）
 			// 同 SNI 多节点通过 path 区分，nginx 8445 按 location 路由到不同 xray inbound 端口。
 			serverPort := n.Port
 			if sp, ok := n.ConfigJSON["server_port"].(float64); ok && sp > 0 && sp <= 65535 {
@@ -1330,7 +1330,7 @@ func (s *DeploymentService) buildNginxVhosts(nodes []*model.Node) map[string]int
 			// 覆盖 WS/gRPC/HTTPUpgrade/XHTTP 全协议，由 RenderWSVhostConf 按 ServerName 合并到同一 server 块
 			// 注入 per-domain 证书路径，让 nginx 8445 能加载 ssl_certificate 完成 TLS termination
 			// 证书路径与 node-agent certmagic 存储约定一致：/etc/yundu/certs/{domain}/fullchain.pem
-			// P4: BackendHTTPS=true 让 nginx proxy_pass https 回源到 xray（xray 持证书）
+			// 回退 P4：BackendHTTPS=false 让 nginx proxy_pass http 回源到 xray（security=none）
 			nodePath := extractNodePath(n, "")
 			if nodePath != "" && serverPort > 0 {
 				wsEntries = append(wsEntries, &nginxrender.WSVhostEntry{
@@ -1342,8 +1342,8 @@ func (s *DeploymentService) buildNginxVhosts(nodes []*model.Node) map[string]int
 					IsGRPC:        strings.EqualFold(n.TransportType, "grpc"),
 					IsHTTPUpgrade: strings.EqualFold(n.TransportType, "httpupgrade"),
 					IsXHTTP:       strings.EqualFold(n.TransportType, "xhttp"),
-					// P4: nginx_plus_xray 架构下 nginx 通过 proxy_pass https 回源到 xray
-					BackendHTTPS: tc == TerminationNginxPlusXray,
+					// 回退 P4：nginx 持证书架构下 nginx 通过 proxy_pass http 回源到 xray（security=none）
+					BackendHTTPS: false,
 				})
 			}
 
@@ -2421,7 +2421,9 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 			}
 		}
 	}
-	// P4: CDN 节点 SNI 回退到 cdn_address（nginx_plus_xray 的证书域名是 cdn_address）
+	// 回退 P4：CDN 节点不再走 injectCertFromBundle（NeedsCertBundle 对 TerminationNginx 返回 false）。
+	// 此 SNI 回退逻辑保留供 self_tcp/self_udp 节点使用，CDN 节点路径已成死代码（无害保留）。
+	// 历史：P4 阶段 CDN 节点 SNI 回退到 cdn_address（nginx_plus_xray 的证书域名是 cdn_address）。
 	if sni == "" {
 		if cdnAddr, ok := n.ConfigJSON["cdn_address"].(string); ok && cdnAddr != "" {
 			sni = strings.TrimSpace(cdnAddr)
@@ -2730,31 +2732,10 @@ func modelNodeToNodeSpec(n *model.Node) *nodespec.NodeSpec {
 		IsVisible: n.IsVisible,
 		NodeType:  string(n.NodeType),
 	}
-	// P4: CDN 节点（nginx_plus_xray）xray 持证书，security 强制为 tls + certificateFile
-	// nginx proxy_pass https 回源到 xray，TLS 由 xray 终止（非 nginx 终止）
-	// 证书文件由 agent 端 certMgr 写入 /etc/yundu/certs/{cdnAddr}/，xray 用 certificateFile 引用
-	// 证书热重载由 xray 自动完成（文件变化时重新加载），无需重新渲染配置
-	if tc := ClassifyTermination(n); tc == TerminationNginxPlusXray {
-		spec.Security = nodespec.SecurityTLS
-		if spec.TLS == nil {
-			spec.TLS = &nodespec.TLSConfig{}
-		}
-		// SNI 用 cdn_address（CDN 节点的证书域名）
-		if spec.TLS.SNI == "" {
-			if cdnAddr, ok := n.ConfigJSON["cdn_address"].(string); ok && cdnAddr != "" {
-				spec.TLS.SNI = strings.TrimSpace(cdnAddr)
-			}
-		}
-		// P4: 用 certificateFile 引用证书文件（certMgr 写入 /etc/yundu/certs/{cdnAddr}/）
-		// 清除内联 PEM，确保走 certificateFile 分支（非 Material.InlinePEM / CertPEM）
-		if spec.TLS.SNI != "" {
-			spec.TLS.CertFile = fmt.Sprintf("/etc/yundu/certs/%s/fullchain.pem", spec.TLS.SNI)
-			spec.TLS.KeyFile = fmt.Sprintf("/etc/yundu/certs/%s/privkey.pem", spec.TLS.SNI)
-			spec.TLS.CertPEM = ""
-			spec.TLS.KeyPEM = ""
-			spec.TLS.Material = nil
-		}
-	}
+	// 回退 P4：CDN 节点（TerminationNginx）不再在 NodeSpec 构建阶段强制注入证书。
+	// TLS 剥离由 kernel_render_adapter.go 的 stripTLSFromXrayInbound 在渲染阶段处理：
+	//   spec.Security 由 DB SecurityType=tls 自然得出 → 渲染时剥离为 none → xray inbound security=none
+	// 证书由 nginx 8445 持有（CertPath/KeyPath 在 buildNginxVhosts 中注入），xray 不持证书。
 	// R3: AddressIPv6 — 从 ConfigJSON 或 Metadata 读取
 	if addr6, ok := getStringFromNodeConfig(n, "address_ipv6"); ok && addr6 != "" {
 		spec.AddressIPv6 = addr6

@@ -70,14 +70,13 @@ func TestShouldStripTLSForArgoTunnel(t *testing.T) {
 }
 
 func TestShouldStripTLSForNginxVhost(t *testing.T) {
-	// P4: shouldStripTLSForNginxVhost 已退役（恒返回 false）
-	// CDN 节点（nginx_plus_xray）xray 持证书，不再剥离 TLS
+	// 回退 P4：CDN 节点（nginx 持证书）剥离 TLS，xray security=none
 	cases := []struct {
 		mode string
 		want bool
 	}{
-		{"cdn", false},      // P4: xray 持证书，不剥离
-		{"cdn_saas", false}, // P4: xray 持证书，不剥离
+		{"cdn", true},      // 回退 P4：nginx 持证书，剥离 TLS
+		{"cdn_saas", true}, // 回退 P4：nginx 持证书，剥离 TLS
 		{"argo_tunnel", false},
 		{"direct", false},
 		{"reality", false},
@@ -345,8 +344,8 @@ func TestClassifyTermination(t *testing.T) {
 					"cdn_address":   "cdn.example.com",
 				},
 			},
-			// P4: CDN 节点改用 nginx_plus_xray（xray 持证书，nginx proxy_pass https）
-			want: TerminationNginxPlusXray,
+			// 回退 P4：CDN 节点改回 nginx 持证书（TLS 剥离，proxy_pass http）
+			want: TerminationNginx,
 		},
 		{
 			name: "direct_tls",
@@ -406,9 +405,9 @@ func TestTerminationClassNeedsCertBundle(t *testing.T) {
 	if TerminationReality.NeedsCertBundle() {
 		t.Error("reality should not need cert bundle")
 	}
-	// P4: nginx_plus_xray 需要 xray 持证书（nginx proxy_pass https）
-	if !TerminationNginxPlusXray.NeedsCertBundle() {
-		t.Error("nginx_plus_xray should need cert bundle (P4: xray 持证书)")
+	// 回退 P4：nginx_plus_xray 已退役，NeedsCertBundle 返回 false（CDN 节点改回 nginx 持证书）
+	if TerminationNginxPlusXray.NeedsCertBundle() {
+		t.Error("nginx_plus_xray should NOT need cert bundle (回退 P4: nginx 持证书)")
 	}
 }
 
@@ -419,13 +418,13 @@ func TestTerminationClassNeedsTLSStrip(t *testing.T) {
 	if !TerminationNginx.NeedsTLSStrip() {
 		t.Error("nginx should need TLS strip")
 	}
-	// P4: nginx_plus_xray 不剥离 TLS（xray 持证书，nginx proxy_pass https）
+	// 回退 P4：nginx_plus_xray 已退役，NeedsTLSStrip 返回 false（保留常量仅供向后兼容）
 	if TerminationNginxPlusXray.NeedsTLSStrip() {
-		t.Error("nginx_plus_xray should NOT need TLS strip (P4: xray 持证书)")
+		t.Error("nginx_plus_xray should NOT need TLS strip (P4 已退役)")
 	}
-	// P4: nginx_plus_xray 需要 nginx vhost（proxy_pass https 路由）
+	// nginx_plus_xray 仍需要 nginx vhost（常量保留，行为不变）
 	if !TerminationNginxPlusXray.NeedsNginxVhost() {
-		t.Error("nginx_plus_xray should need nginx vhost (P4: proxy_pass https)")
+		t.Error("nginx_plus_xray should need nginx vhost (常量保留)")
 	}
 	if TerminationSelfTCP.NeedsTLSStrip() {
 		t.Error("self_tcp should not need TLS strip")
@@ -447,9 +446,9 @@ func TestGetExposurePolicy(t *testing.T) {
 	}{
 		{"direct", false, false, true, true},
 		{"reality", false, false, true, false},
-		// P4: CDN 节点 StripTLS=false（xray 持证书），NeedsCertBundle=true（xray 需要证书 PEM）
-		{"cdn", false, true, true, true},
-		{"cdn_saas", false, true, true, true},
+		// 回退 P4：CDN 节点 StripTLS=true（nginx 持证书），NeedsCertBundle=false（xray 不持证书）
+		{"cdn", true, true, true, false},
+		{"cdn_saas", true, true, true, false},
 		{"argo_tunnel", true, false, false, false},
 		{"none", false, false, true, false},
 		{"unknown_mode", false, false, true, true}, // 回退到 direct

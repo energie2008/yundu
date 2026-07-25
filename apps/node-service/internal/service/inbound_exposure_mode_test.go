@@ -9,13 +9,13 @@ import (
 
 // 阶段2.3 单元测试：4 场景覆盖 inbound 级 TLS 剥离判定
 // 场景：
-//  1. 纯 CDN 节点 → 主 inbound 判定为 cdn_saas，P4 后不剥离（xray 持证书）
+//  1. 纯 CDN 节点 → 主 inbound 判定为 cdn_saas，回退 P4 后剥离（nginx 持证书）
 //  2. 纯直连节点 → 主 inbound 判定为 direct，不剥离
-//  3. split mode 上行（主 inbound tag="in-<code>"）→ cdn_saas，P4 后不剥离
+//  3. split mode 上行（主 inbound tag="in-<code>"）→ cdn_saas，回退 P4 后剥离
 //  4. split mode 下行（显式 _inbound_role="downstream"）→ reality/direct，不剥离（p06 事故核心）
 //
 // 阶段3更新：下行inbound使用 _inbound_role 显式字段标识，tag后缀仅作防御性fallback。
-// P4 更新：CDN 节点（nginx_plus_xray）xray 持证书，shouldStripTLSForNginxVhost 退役（恒 false）。
+// 回退 P4：CDN 节点（nginx 持证书）shouldStripTLSForNginxVhost 恢复对 cdn/cdn_saas 返回 true。
 func TestDetermineInboundExposureMode(t *testing.T) {
 	mkNode := func(em string, dlEM *string, cfg map[string]interface{}) *model.Node {
 		if cfg == nil {
@@ -60,11 +60,11 @@ func TestDetermineInboundExposureMode(t *testing.T) {
 		wantStrip bool
 	}{
 		{
-			name:      "1_pure_cdn_main_inbound_should_NOT_strip_p4",
+			name:      "1_pure_cdn_main_inbound_should_strip_rollback_p4",
 			node:      mkNode("cdn_saas", nil, map[string]interface{}{"cdn_address": "cdn.example.com"}),
 			inbMap:    mkInb(mainTag, false),
 			wantEM:    "cdn_saas",
-			wantStrip: false, // P4: xray 持证书，nginx proxy_pass https，不剥离
+			wantStrip: true, // 回退 P4：nginx 持证书，xray security=none，剥离 TLS
 		},
 		{
 			name:      "2_pure_direct_main_inbound_should_not_strip",
@@ -74,11 +74,11 @@ func TestDetermineInboundExposureMode(t *testing.T) {
 			wantStrip: false,
 		},
 		{
-			name:      "3_split_upstream_main_inbound_cdn_saas_should_NOT_strip_p4",
+			name:      "3_split_upstream_main_inbound_cdn_saas_should_strip_rollback_p4",
 			node:      mkNode("cdn_saas", strPtr("direct"), nil),
 			inbMap:    mkInb(mainTag, false),
 			wantEM:    "cdn_saas",
-			wantStrip: false, // P4: xray 持证书，不剥离
+			wantStrip: true, // 回退 P4：nginx 持证书，剥离 TLS
 		},
 		{
 			name:      "4_split_downstream_dl_inbound_direct_should_NOT_strip_p06_fix",
@@ -103,7 +103,7 @@ func TestDetermineInboundExposureMode(t *testing.T) {
 				t.Errorf("determineInboundExposureMode=%q, want %q", gotEM, c.wantEM)
 			}
 			// P1-1: 剥离判定改为 argo_tunnel 和 cdn/cdn_saas 独立判断
-			// P4: shouldStripTLSForNginxVhost 退役（恒 false），仅 argo_tunnel 剥离
+			// 回退 P4：shouldStripTLSForNginxVhost 恢复对 cdn/cdn_saas 返回 true，CDN 节点剥离 TLS
 			gotStrip := shouldStripTLSForArgoTunnel(gotEM) || shouldStripTLSForNginxVhost(gotEM)
 			if gotStrip != c.wantStrip {
 				t.Errorf("strip check for %q = %v, want %v", gotEM, gotStrip, c.wantStrip)

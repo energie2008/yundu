@@ -39,7 +39,7 @@ type ExposurePolicy struct {
 // 映射规则（与 TerminationClass 一致）：
 //   - direct:      xray 自终止 TLS，公网监听，证书由 xray 持有
 //   - reality:     xray REALITY 握手，公网监听，无传统证书
-//   - cdn:         P4: xray 持证书 + nginx proxy_pass https（nginx_plus_xray），本地回环
+//   - cdn:         回退 P4：nginx 持证书 + TLS 剥离 + proxy_pass http 回源，xray security=none，本地回环
 //   - cdn_saas:    同 cdn
 //   - argo_tunnel: CF 边缘终止 TLS，IPv6 回环（cloudflared），xray 无 TLS
 var exposurePolicyMap = map[string]ExposurePolicy{
@@ -60,22 +60,22 @@ var exposurePolicyMap = map[string]ExposurePolicy{
 		CertHeldBy:      "none",
 	},
 	"cdn": {
-		// P4: nginx_plus_xray 架构 — xray 持证书，nginx proxy_pass https 回源
+		// 回退 P4：nginx 持证书，终止 TLS 后 proxy_pass http 回源，xray security=none
 		ListenAddress:   "127.0.0.1",
-		StripTLS:        false,
+		StripTLS:        true,
 		NeedsNginxVhost: true,
 		NeedsStreamSNI:  true,
-		NeedsCertBundle: true,
-		CertHeldBy:      "xray",
+		NeedsCertBundle: false,
+		CertHeldBy:      "nginx",
 	},
 	"cdn_saas": {
-		// P4: 同 cdn — xray 持证书，nginx proxy_pass https 回源
+		// 回退 P4：同 cdn — nginx 持证书，终止 TLS 后 proxy_pass http 回源
 		ListenAddress:   "127.0.0.1",
-		StripTLS:        false,
+		StripTLS:        true,
 		NeedsNginxVhost: true,
 		NeedsStreamSNI:  true,
-		NeedsCertBundle: true,
-		CertHeldBy:      "xray",
+		NeedsCertBundle: false,
+		CertHeldBy:      "nginx",
 	},
 	"argo_tunnel": {
 		ListenAddress:   "::",
