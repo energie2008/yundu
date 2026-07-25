@@ -774,11 +774,19 @@ type AgentConfigResultRequest struct {
 // DeploymentResultRequest P3-1: Agent 上报部署 ACK/NACK 的请求体。
 // Agent 在 precheck / activate / healthcheck 各阶段完成后通过
 // POST /api/v1/agent/deployment-result 上报结果。
+//
+// P0 修复：向后兼容旧版 agent（v0.4.0 及以下）发送的 status 字符串字段。
+// 旧 agent 发送 status:"ack"/"nack" 而非 success:true/false，
+// 导致面板始终记录 nack，触发配置版本循环递增。
+// 新 agent（v0.4.2+）发送 success:true/false，Status 字段为空。
+// RecordDeploymentResult 优先使用 Success，fallback 到 Status。
 type DeploymentResultRequest struct {
 	Version            string     `json:"version" binding:"required"`
 	Success            bool       `json:"success"`
+	Status             string     `json:"status,omitempty"` // 向后兼容: 旧 agent 发送 "ack"/"nack"
 	Message            string     `json:"message"`
-	Phase              string     `json:"phase"` // precheck / activate / healthcheck
+	Error              string     `json:"error,omitempty"` // 向后兼容: 旧 agent 发送 error 而非 message
+	Phase              string     `json:"phase"`           // precheck / activate / healthcheck
 	DurationMs         int64      `json:"duration_ms"`
 	DeploymentTargetID *uuid.UUID `json:"deployment_target_id,omitempty"`
 }

@@ -1120,9 +1120,21 @@ func (s *DeploymentService) RecordDeploymentResult(ctx context.Context, serverCo
 	if req.Version != "" {
 		fmt.Sscanf(req.Version, "%d", &versionNo)
 	}
+	// P0 修复：向后兼容旧版 agent（v0.4.0-）的 status 字符串字段。
+	// 旧 agent 发送 status:"ack"/"nack" 而非 success:true/false，
+	// 导致 Success 字段默认 false，面板误记录 nack。
+	// 优先使用 Success 字段；若 Success=false，再 fallback 检查 Status 字段。
 	status := "ack"
 	if !req.Success {
-		status = "nack"
+		// fallback: 旧 agent 发送 status:"ack" 时，Success 默认 false 但 Status="ack"
+		if req.Status != "ack" {
+			status = "nack"
+		}
+	}
+	// 向后兼容：旧 agent 发送 error 字段而非 message
+	errMsg := req.Message
+	if errMsg == "" && req.Error != "" {
+		errMsg = req.Error
 	}
 	phase := req.Phase
 	if phase == "" {
@@ -1134,7 +1146,7 @@ func (s *DeploymentService) RecordDeploymentResult(ctx context.Context, serverCo
 		VersionNo:       versionNo,
 		Status:          status,
 		Phase:           phase,
-		Error:           req.Message,
+		Error:           errMsg,
 		ApplyDurationMs: req.DurationMs,
 	}
 	if req.DeploymentTargetID != nil {
@@ -1145,12 +1157,13 @@ func (s *DeploymentService) RecordDeploymentResult(ctx context.Context, serverCo
 	}
 
 	// 若为 nack 且有 target 关联，触发既有 target 状态更新与回滚判定
-	if !req.Success && req.DeploymentTargetID != nil && *req.DeploymentTargetID != uuid.Nil {
+	// P0: 使用计算后的 status（兼容旧 agent）而非 req.Success
+	if status == "nack" && req.DeploymentTargetID != nil && *req.DeploymentTargetID != uuid.Nil {
 		updateReq := &model.UpdateDeploymentResultRequest{
 			TargetID: *req.DeploymentTargetID,
 			Status:   model.TargetStatusFailed,
 			ApplyResult: map[string]interface{}{
-				"error":       req.Message,
+				"error":       errMsg,
 				"duration_ms": req.DurationMs,
 				"phase":       phase,
 			},
