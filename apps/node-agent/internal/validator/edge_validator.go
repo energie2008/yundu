@@ -23,6 +23,29 @@ type PreCheckResult struct {
 	Duration string   `json:"duration"`
 }
 
+// inboundPort 表示一个 inbound 的监听端口和绑定地址。
+// P0 修复：CDN 架构下 xray inbound 可能 listen=127.0.0.1（nginx 反代后端），
+// precheck 必须测试实际 listen 地址而非总是 0.0.0.0，否则会与 nginx 的 0.0.0.0:443 误冲突。
+type inboundPort struct {
+	port   int
+	listen string // "127.0.0.1", "0.0.0.0", "" (空=默认 0.0.0.0)
+}
+
+// buildListenAddr 根据 inbound 的 listen 字段构建 precheck 测试地址。
+// listen 为空/"0.0.0.0"/"::" → ":port"（测试所有接口）
+// listen 为 "127.0.0.1"/"localhost" → "127.0.0.1:port"（只测 localhost，避免与 nginx 0.0.0.0 冲突）
+// listen 为其他 IP → "IP:port"
+func buildListenAddr(listen string, port int) string {
+	listen = strings.TrimSpace(listen)
+	if listen == "" || listen == "0.0.0.0" || listen == "::" {
+		return fmt.Sprintf(":%d", port)
+	}
+	if listen == "localhost" {
+		listen = "127.0.0.1"
+	}
+	return fmt.Sprintf("%s:%d", listen, port)
+}
+
 // EdgeValidator 执行边缘侧预检
 type EdgeValidator struct {
 	logger *slog.Logger
@@ -47,7 +70,7 @@ func (v *EdgeValidator) PreCheckEdge(ctx context.Context, configJSON []byte, ker
 	selfPorts := v.getSelfListeningPorts()
 
 	// Phase 1: 端口强占检测
-	ports, err := extractInboundPorts(configJSON)
+	ports, err := extractInboundPortsWithListen(configJSON)
 	if err != nil {
 		result.Passed = false
 		result.Errors = append(result.Errors, fmt.Sprintf("extract inbound ports: %v", err))
@@ -56,35 +79,44 @@ func (v *EdgeValidator) PreCheckEdge(ctx context.Context, configJSON []byte, ker
 	}
 
 	// 去重：Xray/sing-box允许多个inbound共享同一端口（不同协议/SNI分流）
-	ports = deduplicatePorts(ports)
+	// P0: 按 (listen, port) 组合去重，同一端口不同 listen 地址是不同绑定
+	ports = deduplicateInboundPorts(ports)
 
-	v.logger.Info("edge pre-check: extracted inbound ports", "count", len(ports), "ports", ports, "self_listening", selfPorts)
+	// 仅用于日志展示的端口号列表
+	portNums := make([]int, 0, len(ports))
+	for _, p := range ports {
+		portNums = append(portNums, p.port)
+	}
+	v.logger.Info("edge pre-check: extracted inbound ports", "count", len(ports), "ports", portNums, "self_listening", selfPorts)
 
-	for _, port := range ports {
-		if port <= 0 || port > 65535 {
+	for _, ip := range ports {
+		if ip.port <= 0 || ip.port > 65535 {
 			continue
 		}
 		// 跳过内部 API 端口（使用范围判断）
-		if machine.IsInternalAPIPort(port) {
+		if machine.IsInternalAPIPort(ip.port) {
 			continue
 		}
 
 		// 如果端口已经被自身进程监听（delta reload场景），跳过检测
-		if _, ok := selfPorts[port]; ok {
-			v.logger.Debug("edge pre-check: port already held by self (reload scenario)", "port", port)
+		if _, ok := selfPorts[ip.port]; ok {
+			v.logger.Debug("edge pre-check: port already held by self (reload scenario)", "port", ip.port)
 			continue
 		}
 
-		addr := fmt.Sprintf(":%d", port)
+		// P0 修复：尊重 inbound 的 listen 字段，测试实际绑定地址。
+		// CDN 架构下 nginx 占用 0.0.0.0:443，但 xray inbound 只需 listen=127.0.0.1:443，
+		// 测试 0.0.0.0:443 会误报冲突，改为测试 127.0.0.1:443 即可通过。
+		addr := buildListenAddr(ip.listen, ip.port)
 		listener, err := net.Listen("tcp", addr)
 		if err != nil {
 			result.Passed = false
-			result.Errors = append(result.Errors, fmt.Sprintf("port %d is already in use: %v", port, err))
-			v.logger.Warn("edge pre-check: port conflict detected", "port", port, "error", err)
+			result.Errors = append(result.Errors, fmt.Sprintf("port %d is already in use: %v", ip.port, err))
+			v.logger.Warn("edge pre-check: port conflict detected", "port", ip.port, "listen", ip.listen, "addr", addr, "error", err)
 			continue
 		}
 		listener.Close()
-		v.logger.Debug("edge pre-check: port available", "port", port)
+		v.logger.Debug("edge pre-check: port available", "port", ip.port, "listen", ip.listen, "addr", addr)
 	}
 
 	// Phase 2: JSON 语法校验（基础校验，内核 -test 由 executor DryRun 完成）
@@ -118,32 +150,35 @@ func (v *EdgeValidator) PreCheckEdge(ctx context.Context, configJSON []byte, ker
 	return result, nil
 }
 
-// extractInboundPorts 从配置 JSON 中提取所有 inbound 监听端口
-func extractInboundPorts(configJSON []byte) ([]int, error) {
+// extractInboundPortsWithListen 从配置 JSON 中提取所有 inbound 监听端口及其绑定地址。
+// P0: 同时提取 listen 字段，供 precheck 测试实际地址（CDN 后端 listen=127.0.0.1 不应测 0.0.0.0）。
+func extractInboundPortsWithListen(configJSON []byte) ([]inboundPort, error) {
 	var cfg map[string]interface{}
 	if err := json.Unmarshal(configJSON, &cfg); err != nil {
 		return nil, err
 	}
 
-	var ports []int
+	var ports []inboundPort
 
-	// xray 格式: inbounds[].port
+	// xray 格式: inbounds[].port + inbounds[].listen
 	if inbounds, ok := cfg["inbounds"].([]interface{}); ok {
 		for _, ib := range inbounds {
 			if m, ok := ib.(map[string]interface{}); ok {
 				if port, ok := toInt(m["port"]); ok {
-					ports = append(ports, port)
+					listen, _ := m["listen"].(string)
+					ports = append(ports, inboundPort{port: port, listen: listen})
 				}
 			}
 		}
 	}
 
-	// sing-box 格式: inbounds[].listen_port
+	// sing-box 格式: inbounds[].listen_port + inbounds[].listen
 	if inbounds, ok := cfg["inbounds"].([]interface{}); ok {
 		for _, ib := range inbounds {
 			if m, ok := ib.(map[string]interface{}); ok {
 				if port, ok := toInt(m["listen_port"]); ok {
-					ports = append(ports, port)
+					listen, _ := m["listen"].(string)
+					ports = append(ports, inboundPort{port: port, listen: listen})
 				}
 			}
 		}
@@ -248,13 +283,15 @@ func toInt(v interface{}) (int, bool) {
 	return 0, false
 }
 
-// deduplicatePorts 对端口列表去重，保持原有顺序
-func deduplicatePorts(ports []int) []int {
-	seen := make(map[int]bool)
-	result := make([]int, 0, len(ports))
+// deduplicateInboundPorts 对 (listen, port) 组合去重，保持原有顺序。
+// P0: 同一端口不同 listen 地址是不同绑定（如 127.0.0.1:443 与 0.0.0.0:443），需分别检测。
+func deduplicateInboundPorts(ports []inboundPort) []inboundPort {
+	seen := make(map[string]bool)
+	result := make([]inboundPort, 0, len(ports))
 	for _, p := range ports {
-		if !seen[p] {
-			seen[p] = true
+		key := fmt.Sprintf("%s:%d", p.listen, p.port)
+		if !seen[key] {
+			seen[key] = true
 			result = append(result, p)
 		}
 	}
