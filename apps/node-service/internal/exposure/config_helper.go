@@ -2,6 +2,7 @@ package exposure
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/airport-panel/node-service/internal/repo"
@@ -105,6 +106,12 @@ func FetchNodeCredentials(ctx context.Context, fetcher UserCredentialFetcher, no
 			return nil, err
 		}
 		if len(creds) > 0 {
+			// P0 修复：按 UserID 排序确保凭证顺序稳定。
+			// 数据库查询未使用 ORDER BY，每次返回行顺序可能不同，
+			// 导致 clients 数组顺序变化 → JSON 序列化不同 → hash 不同 → 版本循环递增。
+			sort.Slice(creds, func(i, j int) bool {
+				return creds[i].UserID.String() < creds[j].UserID.String()
+			})
 			result[id] = creds
 		}
 	}

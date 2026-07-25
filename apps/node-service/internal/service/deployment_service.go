@@ -1203,6 +1203,14 @@ func (s *DeploymentService) PushUserBanToAllServers(ctx context.Context, userIDs
 }
 
 func (s *DeploymentService) buildRuntimeConfig(ctx context.Context, runtimeType string, nodes []*model.Node, listenHost string) (map[string]interface{}, error) {
+	// P0 修复：按 Node ID 排序确保配置渲染顺序稳定。
+	// 数据库查询 ListByRuntimeID 未使用 ORDER BY，每次返回行顺序可能不同，
+	// 导致 inbounds 数组顺序变化 → JSON 序列化不同 → hash 不同 → 版本循环递增。
+	// 排序后所有下游处理（凭证预取、链路构建、内核渲染）都使用一致的节点顺序。
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].ID.String() < nodes[j].ID.String()
+	})
+
 	// 通过 chainRepo 查询节点绑定的路由组（替代已删除的 Node.ChainID 字段）
 	var chainID uuid.UUID
 	var hasChain bool
