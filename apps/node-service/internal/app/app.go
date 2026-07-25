@@ -880,6 +880,36 @@ func Run() {
 					}},
 				}, nil
 			}
+
+			// 处理 ConfigResult 消息：agent 应用配置后上报成功/失败结果
+			// 修复"下发失败"误报：原逻辑此处返回 nil, nil 静默丢弃 ConfigResult，
+			// 导致 _dispatch_status 永远停留在 failed/pushed，面板显示"下发失败"。
+			// 现调用 ReportConfigResult 更新状态为 applied/failed。
+			if cr := msg.GetConfigResult(); cr != nil {
+				serverCode := machineID
+				versionStr := strconv.FormatInt(cr.GetVersion(), 10)
+				success := cr.GetSuccess()
+				errMsg := cr.GetError()
+
+				if deploymentService != nil && serverService != nil && runtimeService != nil {
+					serverSrv, err := serverService.GetServerByCode(ctx, serverCode)
+					if err == nil && serverSrv != nil {
+						providerType := model.RuntimeProviderNodeAgent
+						rt, err := runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, nil)
+						if err == nil && rt != nil {
+							if rerr := deploymentService.ReportConfigResult(ctx, rt.ID, versionStr, success, errMsg); rerr != nil {
+								logger.Warn("gRPC onMessage: ReportConfigResult failed",
+									"server_code", serverCode, "version", versionStr, "error", rerr)
+							} else {
+								logger.Info("gRPC onMessage: ConfigResult processed",
+									"server_code", serverCode, "version", versionStr, "success", success)
+							}
+						}
+					}
+				}
+				return nil, nil
+			}
+
 			return nil, nil
 		}
 		grpcHandler.Unlock()

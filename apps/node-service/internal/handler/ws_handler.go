@@ -13,9 +13,9 @@ import (
 	"github.com/airport-panel/node-service/internal/middleware"
 	"github.com/airport-panel/node-service/internal/model"
 	"github.com/airport-panel/node-service/internal/service"
+	pb "github.com/airport-panel/proto/agent/v1"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	pb "github.com/airport-panel/proto/agent/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -150,6 +150,48 @@ func (h *WSHandler) HandleWebSocket(c *gin.Context) {
 			}
 			continue
 		}
+
+		// 处理 ConfigResult 消息：agent 应用配置后上报成功/失败结果
+		// 修复"下发失败"误报：原逻辑无此分支，ConfigResult 被静默丢弃，
+		// 导致 _dispatch_status 永远停留在 failed/pushed。
+		if cr := msg.GetConfigResult(); cr != nil {
+			versionStr := strconv.FormatInt(cr.GetVersion(), 10)
+			success := cr.GetSuccess()
+			errMsg := cr.GetError()
+			h.handleWSConfigResult(serverCode, versionStr, success, errMsg)
+			continue
+		}
+	}
+}
+
+// handleWSConfigResult 处理 WS 上报的配置应用结果，更新节点下发状态。
+// 与 gRPC onMessage 中的 ConfigResult 处理逻辑对齐。
+func (h *WSHandler) handleWSConfigResult(serverCode, versionStr string, success bool, errMsg string) {
+	if h.deploymentService == nil || h.serverService == nil || h.runtimeService == nil {
+		h.logger.Warn("ws ConfigResult: required service missing",
+			"server_code", serverCode)
+		return
+	}
+	ctx := context.Background()
+	serverSrv, err := h.serverService.GetServerByCode(ctx, serverCode)
+	if err != nil || serverSrv == nil {
+		h.logger.Warn("ws ConfigResult: server not found",
+			"server_code", serverCode, "error", err)
+		return
+	}
+	providerType := model.RuntimeProviderNodeAgent
+	rt, err := h.runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, nil)
+	if err != nil || rt == nil {
+		h.logger.Warn("ws ConfigResult: runtime not found",
+			"server_code", serverCode, "error", err)
+		return
+	}
+	if err := h.deploymentService.ReportConfigResult(ctx, rt.ID, versionStr, success, errMsg); err != nil {
+		h.logger.Warn("ws ConfigResult: ReportConfigResult failed",
+			"server_code", serverCode, "version", versionStr, "error", err)
+	} else {
+		h.logger.Debug("ws ConfigResult processed",
+			"server_code", serverCode, "version", versionStr, "success", success)
 	}
 }
 
@@ -182,22 +224,22 @@ func (h *WSHandler) handleWSHeartbeat(sess *wsSession, seq int64, hb *pb.Heartbe
 		hbReq.MemPercent = &mem
 		hbReq.DiskPercent = &disk
 		hbReq.Metrics = map[string]interface{}{
-			"cpu_percent":       cpu,
-			"mem_percent":       mem,
-			"mem_total_mb":      memTotal,
-			"mem_used_mb":       memUsed,
-			"disk_percent":      disk,
-			"disk_total_gb":     diskTotal,
-			"disk_used_gb":      diskUsed,
-			"network_in_kbps":   netIn,
-			"network_out_kbps":  netOut,
-			"uptime_seconds":    uptime,
-			"load_1":            load.GetLoad_1(),
-			"load_5":            load.GetLoad_5(),
-			"load_15":           load.GetLoad_15(),
-			"tcp_connections":   load.GetTcpConnections(),
-			"active_streams":    load.GetActiveStreams(),
-			"goroutines":        load.GetGoroutines(),
+			"cpu_percent":      cpu,
+			"mem_percent":      mem,
+			"mem_total_mb":     memTotal,
+			"mem_used_mb":      memUsed,
+			"disk_percent":     disk,
+			"disk_total_gb":    diskTotal,
+			"disk_used_gb":     diskUsed,
+			"network_in_kbps":  netIn,
+			"network_out_kbps": netOut,
+			"uptime_seconds":   uptime,
+			"load_1":           load.GetLoad_1(),
+			"load_5":           load.GetLoad_5(),
+			"load_15":          load.GetLoad_15(),
+			"tcp_connections":  load.GetTcpConnections(),
+			"active_streams":   load.GetActiveStreams(),
+			"goroutines":       load.GetGoroutines(),
 		}
 	}
 
