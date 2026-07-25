@@ -922,8 +922,9 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 
 	// 1. 自动分配ServerPort（先分配，后面根据 exposure_mode 决定客户端口 Port）
 	if !isUDPProtocol(node.ProtocolType) {
-		// TCP协议：必须有ServerPort
-		if node.ServerPort == nil || *node.ServerPort == 0 {
+		// TCP协议：必须有ServerPort，且不能是443（443是nginx专用端口）
+		// ServerPort==443 会导致 xray listen 0.0.0.0:443 与 nginx 443 端口冲突
+		if node.ServerPort == nil || *node.ServerPort == 0 || *node.ServerPort == 443 {
 			if s.portPlanner == nil {
 				return fmt.Errorf("port planner not initialized")
 			}

@@ -12,23 +12,25 @@ func NodeInfoToNodeSpec(n *model.NodeInfo) nodespec.NodeSpec {
 	// 订阅地址标准化（零 SSH 架构）：
 	// address 字段统一表示客户端连接目标（优选IP/域名），订阅直接输出，不覆盖。
 	// cdn_address 仅作为 CDN 路由域名（SNI/Host），不覆盖客户端连接地址。
-	// 端口映射：cdn_port/client_port 覆盖 DB Port（CDN/Tunnel 节点客户端口=443）
+	// 端口映射：仅 client_port 覆盖 DB Port（隧道节点用 client_port 字段）
+	// CDN 节点（cdn/cdn_saas）客户端 port 始终是 DB Port（443），由 standardizeNodeFields 强制设置。
+	// cdn_port 仅用于服务端内部端口计算（kernel_render_adapter.go generateCDNMirrorInbound），
+	// 不能覆盖客户端 port，否则客户端会连到 xray 内部高位端口而非 CF CDN 443。
+	// 直连节点客户端 port = DB Port = ServerPort（高位端口），也无需覆盖。
 	address := n.Address
 	port := n.Port
 	securityType := n.SecurityType
 	if n.ConfigJSON != nil {
-		// 端口映射：cdn_port 优先，client_port 次之（隧道节点用 client_port 字段）
-		for _, portKey := range []string{"cdn_port", "client_port"} {
-			if portVal, ok := n.ConfigJSON[portKey]; ok {
-				switch v := portVal.(type) {
-				case float64:
-					if v > 0 {
-						port = int(v)
-					}
-				case int:
-					if v > 0 {
-						port = v
-					}
+		// 仅 client_port 覆盖（隧道节点客户端口，如 cloudflared 节点 client_port=443）
+		if portVal, ok := n.ConfigJSON["client_port"]; ok {
+			switch v := portVal.(type) {
+			case float64:
+				if v > 0 {
+					port = int(v)
+				}
+			case int:
+				if v > 0 {
+					port = v
 				}
 			}
 		}
