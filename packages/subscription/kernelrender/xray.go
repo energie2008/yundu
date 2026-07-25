@@ -527,14 +527,18 @@ func (r *XrayRenderer) renderStreamSettings(spec *nodespec.NodeSpec) (map[string
 		if spec.Reality == nil {
 			return nil, fmt.Errorf("REALITY场景缺少reality配置")
 		}
-		// target（REALITY 回落目标）：必须由用户显式配置，不使用 SNI:443 兜底
-		// 支持两种填法：
-		//   1. 本地反代：127.0.0.1:9454（推荐，回落到本地 nginx vhost 反代真实站点）
-		//   2. 伪装域名：oyc.yale.edu:443（直连模式，回落到真实外部站点）
-		// 以编辑保存优先：Dest 为空时返回错误，强制用户填写，避免 xray 反代 SNI 自身造成循环
+		// P5.5: target（REALITY 回落目标）多级回退：
+		//   1. spec.Reality.Dest（用户显式配置，推荐）
+		//   2. SNI:443（直连场景默认，回落到伪装大厂域名）
+		// 直连 REALITY 节点 dest 留空是合法的（回退 SNI:443，直连不经过 nginx 不会循环）。
+		// CDN 场景建议显式设置 reality_dest 避免回退 SNI:443 造成 nginx→xray→nginx 循环。
 		realityTarget := spec.Reality.Dest
 		if realityTarget == "" {
-			return nil, fmt.Errorf("REALITY dest 未配置：请在节点编辑中填写 reality_dest（本地反代如 127.0.0.1:9454 或伪装域名如 oyc.yale.edu:443）")
+			if spec.Reality.SNI != "" {
+				realityTarget = spec.Reality.SNI + ":443"
+			} else {
+				realityTarget = "mesu.apple.com:443"
+			}
 		}
 		reality := map[string]interface{}{
 			"target":      realityTarget,

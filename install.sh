@@ -206,6 +206,30 @@ EOF
     success "systemd 服务: ${unit}"
 }
 
+# P5.4: 开放直连节点端口段
+# 直连节点（trojan+tls/reality/anytls/ss/mieru/hy2/tuic）绕过 nginx，
+# 直接监听 0.0.0.0:port，需在防火墙放行对应端口段。
+# 优先用 ufw（Debian/Ubuntu），未安装或未启用则跳过（VPS 安全组通常已处理）。
+setup_direct_node_firewall() {
+    if ! command -v ufw >/dev/null 2>&1; then
+        warn "ufw 未安装，跳过直连端口防火墙配置（请确认 VPS 安全组已放行）"
+        return 0
+    fi
+    # ufw 未启用时不主动启用，避免意外阻断 SSH
+    if ! ufw status 2>/dev/null | grep -q "Status: active"; then
+        warn "ufw 未启用，跳过直连端口规则（请手动 ufw enable 后重跑，或确认 VPS 安全组已放行）"
+        return 0
+    fi
+    header "配置直连节点端口防火墙规则"
+    # TCP 直连：REALITY / trojan+tls / ss / mieru / anytls
+    ufw allow 9450:9600/tcp 2>/dev/null || true
+    ufw allow 9750:9799/tcp 2>/dev/null || true
+    # UDP 直连：Hysteria2 / TUIC
+    ufw allow 40020:40200/udp 2>/dev/null || true
+    ufw allow 40210:40299/udp 2>/dev/null || true
+    success "直连节点端口已放行 (9450-9600/tcp, 9750-9799/tcp, 40020-40200/udp, 40210-40299/udp)"
+}
+
 # ===== 子命令: agent =====
 
 cmd_agent() {
@@ -259,6 +283,14 @@ cmd_agent() {
         systemctl daemon-reload
         info "已 mask 系统 cloudflared.service（由 yundu-node-agent 统一管理）"
     fi
+
+    # P5.4: 开放直连节点端口段（直连节点绕过 nginx，直接监听 0.0.0.0:port）
+    # - 9450-9600/tcp: REALITY / trojan+tls / ss / mieru 直连
+    # - 9750-9799/tcp: AnyTLS 直连
+    # - 40020-40200/udp: Hysteria2
+    # - 40210-40299/udp: TUIC
+    # 优先用 ufw（Debian/Ubuntu 默认），未安装则跳过（VPS 安全组通常已处理）
+    setup_direct_node_firewall
 
     install_systemd "yundu-node-agent" \
         "${INSTALL_DIR}/node-agent --endpoint=${endpoint} --token=${token} --runtime=${runtime} --config-dir=${CONFIG_DIR}" \

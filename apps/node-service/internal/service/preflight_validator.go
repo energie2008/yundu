@@ -109,11 +109,11 @@ func validateSemantics(spec *nodespec.NodeSpec) error {
 		if spec.Reality.SNI == "" {
 			return fmt.Errorf("REALITY 缺少 SNI（serverNames）")
 		}
-		// dest 必填：支持本地反代（127.0.0.1:9454）或伪装域名（oyc.yale.edu:443）
-		// 以编辑保存优先，不使用 SNI:443 兜底，避免 xray 反代 SNI 自身造成循环
-		if spec.Reality.Dest == "" {
-			return fmt.Errorf("REALITY 缺少 dest（回落目标），请在节点编辑中填写 reality_dest（本地反代如 127.0.0.1:9454 或伪装域名如 oyc.yale.edu:443）")
-		}
+		// dest 留空时渲染层（xray_config.go:550-572）会多级回退：
+		//   顶层 dest > reality_dest > reality_settings.dest > SNI:443 > mesu.apple.com:443
+		// P5: 直连 REALITY 节点 dest 留空是合法的（回退到 SNI:443，直连场景不会循环）。
+		// CDN 场景建议显式设置 reality_dest 避免回退 SNI:443 造成 nginx→xray→nginx 循环。
+		// 此处不再硬性阻断 dest 为空，由渲染层保证 dest 最终有值。
 	}
 
 	// XHTTP mode 禁止 auto（项目记忆）

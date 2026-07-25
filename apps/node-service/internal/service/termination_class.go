@@ -101,15 +101,18 @@ func (tc TerminationClass) NeedsNginxVhost() bool {
 }
 
 // NeedsStreamSNI 判断该 TerminationClass 是否需要 nginx stream SNI 分流。
-// cf_edge (argo_tunnel) 完全绕过 nginx（cloudflared 直连 xray），不需要 stream SNI；
-// self_udp（UDP 协议）不经过 nginx stream；
-// nginx/self_tcp/reality 都经过 nginx 443 stream（SNI 透传/分流）。
+//
+// P5 改造后：只有 CDN 节点（TerminationNginx/TerminationNginxPlusXray）需要 nginx 443 stream SNI 分流。
+// - cf_edge (argo_tunnel) 完全绕过 nginx（cloudflared 直连 xray）
+// - self_udp（UDP 协议）不经过 nginx stream
+// - self_tcp（trojan+tls/ss/mieru 直连）走 0.0.0.0:port，绕过 nginx stream
+// - reality 走 0.0.0.0:port，绕过 nginx stream（消除同 SNI 单后端限制 + 退役 fallback 静态站）
 func (tc TerminationClass) NeedsStreamSNI() bool {
 	switch tc {
-	case TerminationCFEdge, TerminationSelfUDP:
+	case TerminationCFEdge, TerminationSelfUDP, TerminationSelfTCP, TerminationReality:
 		return false
 	default:
-		return true
+		return true // 仅 TerminationNginx(CDN) / TerminationNginxPlusXray(CDN P4) 走 nginx stream
 	}
 }
 

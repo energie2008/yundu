@@ -68,7 +68,15 @@ func (s *DeploymentService) precheckRuntimePerServer(ctx context.Context, nodes 
 
 		// --- 1. REALITY hard checks (cannot be bypassed by manual ConfigJSON edits) ---
 		if security == "reality" {
-			if serverPort <= 0 {
+			exposureMode := strings.ToLower(toStringOrEmpty(n.ConfigJSON, "exposure_mode"))
+			if n.ExposureMode != nil && *n.ExposureMode != "" {
+				exposureMode = strings.ToLower(*n.ExposureMode)
+			}
+			// P5: 直连 REALITY 节点（exposure_mode=direct）绕过 nginx，xray 直接监听 externalPort，
+			// server_port=0 是预期状态（不再需要 nginx stream 分流到内部端口）。
+			// 非 direct 的 REALITY 节点（CDN/Argo）仍需要 server_port > 0。
+			isDirectReality := exposureMode == "direct"
+			if !isDirectReality && serverPort <= 0 {
 				return fmt.Errorf("%w: node %s: REALITY requires server_port > 0 (auto-allocate failed or missing)", ErrPrecheckRuntime, code)
 			}
 			if serverPort == 443 {

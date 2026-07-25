@@ -1294,11 +1294,15 @@ func (s *DeploymentService) buildNginxVhosts(nodes []*model.Node) map[string]int
 			continue
 		}
 
-		// P2-2: 使用 TerminationClass 做前置过滤，替代分散的 exposureMode 字符串判断。
-		// cf_edge (argo_tunnel) 节点完全绕过 nginx（cloudflared 直连 xray），跳过。
-		// self_udp (hysteria2/tuic) 节点不经过 nginx stream，跳过 vhost/stream 生成。
+		// P5.2: 使用 TerminationClass.NeedsStreamSNI() 做前置过滤，单一真相源。
+		// 仅 CDN 节点（TerminationNginx/NginxPlusXray）需要 nginx 443 stream SNI 分流。
+		// cf_edge/self_udp/self_tcp/reality 全部绕过 nginx stream：
+		// - cf_edge: cloudflared 直连 xray
+		// - self_udp: UDP 协议直接监听 0.0.0.0:UDP端口
+		// - self_tcp: trojan+tls/ss/mieru 直连 0.0.0.0:port（P5 改造）
+		// - reality: xray 0.0.0.0:port + dest=大厂域名（P5 改造，消除同 SNI 限制 + 退役 fallback 静态站）
 		tc := ClassifyTermination(n)
-		if tc == TerminationCFEdge || tc == TerminationSelfUDP {
+		if !tc.NeedsStreamSNI() {
 			continue
 		}
 
@@ -2761,10 +2765,10 @@ func modelNodeToNodeSpec(n *model.Node) *nodespec.NodeSpec {
 	}
 	// R3: ClientPort / ServerPort — 从 ConfigJSON 读取
 	// 端口语义（renderer.resolveInboundPort / resolveListenAddress 已实现通用规则）：
-	//   - ServerPort > 0 && ServerPort != Port → xray 绑 127.0.0.1:ServerPort（CDN/Tunnel/Direct-REALITY）
+	//   - ServerPort > 0 && ServerPort != Port → xray 绑 127.0.0.1:ServerPort（CDN/Tunnel 节点）
 	//   - ServerPort == 0 或 ServerPort == Port → xray 绑 0.0.0.0:Port（直连/UDP 公网）
-	// 不按 node_type 区分：Direct REALITY（Port=443, ServerPort=9450）也使用 ServerPort，
-	// 通过 nginx stream SNI 转发。数据层的错误 server_port 应通过数据修复解决，而非代码强制忽略。
+	// P5 改造后：直连节点（trojan+tls/reality/anytls/ss/mieru）ServerPort 应为 0，
+	// 触发 0.0.0.0:Port 绑定，绕过 nginx stream。数据层的错误 server_port 通过 P5.3 SQL 修复。
 	if cp, ok := getStringFromNodeConfig(n, "client_port"); ok && cp != "" {
 		if port, err := strconv.Atoi(cp); err == nil && port > 0 {
 			spec.ClientPort = port
