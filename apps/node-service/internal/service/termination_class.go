@@ -12,19 +12,21 @@ import (
 // 将"TLS 在哪里终止"这一架构决策收敛为单一枚举。
 //
 // 分类矩阵：
-//   - cf_edge:     CF 边缘终止 TLS（argo_tunnel），源站接收明文 HTTP
-//   - nginx:       nginx 8445 vhost 终止 TLS（cdn/cdn_saas），proxy_pass http 回源
-//   - self_tcp:    xray 自身终止 TLS（direct TCP+TLS），nginx stream 仅 SNI 透传
-//   - self_udp:    xray 自身终止 TLS（UDP 协议如 hysteria2/tuic），不经过 nginx
-//   - reality:     xray REALITY 握手（direct reality），不走传统 TLS 证书
+//   - cf_edge:          CF 边缘终止 TLS（argo_tunnel），源站接收明文 HTTP
+//   - nginx:            [P4 deprecated] nginx 8445 vhost 终止 TLS（cdn/cdn_saas），proxy_pass http 回源
+//   - nginx_plus_xray:  [P4] CDN 节点 xray 持证书 + nginx proxy_pass https（cdn/cdn_saas）
+//   - self_tcp:         xray 自身终止 TLS（direct TCP+TLS），nginx stream 仅 SNI 透传
+//   - self_udp:         xray 自身终止 TLS（UDP 协议如 hysteria2/tuic），不经过 nginx
+//   - reality:          xray REALITY 握手（direct reality），不走传统 TLS 证书
 type TerminationClass string
 
 const (
-	TerminationCFEdge  TerminationClass = "cf_edge"
-	TerminationNginx   TerminationClass = "nginx"
-	TerminationSelfTCP TerminationClass = "self_tcp"
-	TerminationSelfUDP TerminationClass = "self_udp"
-	TerminationReality TerminationClass = "reality"
+	TerminationCFEdge        TerminationClass = "cf_edge"
+	TerminationNginx         TerminationClass = "nginx"           // [P4 deprecated] CDN 节点改用 nginx_plus_xray
+	TerminationNginxPlusXray TerminationClass = "nginx_plus_xray" // [P4] CDN 节点 xray 持证书，nginx proxy_pass https
+	TerminationSelfTCP       TerminationClass = "self_tcp"
+	TerminationSelfUDP       TerminationClass = "self_udp"
+	TerminationReality       TerminationClass = "reality"
 )
 
 // ClassifyTermination 根据节点的 exposure_mode/protocol/security 判定 TerminationClass。
@@ -32,7 +34,7 @@ const (
 // 判定规则（按优先级）：
 //  1. securityType=reality → TerminationReality
 //  2. exposureMode=argo_tunnel → TerminationCFEdge（CF 边缘终止）
-//  3. exposureMode=cdn/cdn_saas → TerminationNginx（nginx 8445 终止）
+//  3. exposureMode=cdn/cdn_saas → TerminationNginxPlusXray（P4: xray 持证书 + nginx proxy_pass https）
 //  4. protocolType=hysteria2/tuic → TerminationSelfUDP（UDP 不经 nginx）
 //  5. 其他 → TerminationSelfTCP（xray 自终止 TCP TLS）
 func ClassifyTermination(node *model.Node) TerminationClass {
@@ -57,9 +59,9 @@ func ClassifyTermination(node *model.Node) TerminationClass {
 		return TerminationCFEdge
 	}
 
-	// 3. cdn/cdn_saas → nginx 终止
+	// 3. cdn/cdn_saas → nginx + xray 共持证书（P4: xray 持证书，nginx proxy_pass https）
 	if em == "cdn" || em == "cdn_saas" {
-		return TerminationNginx
+		return TerminationNginxPlusXray
 	}
 
 	// 4. UDP 协议 → xray 自终止 UDP TLS
@@ -77,7 +79,9 @@ func (tc TerminationClass) String() string {
 	case TerminationCFEdge:
 		return "CF Edge TLS termination (argo_tunnel)"
 	case TerminationNginx:
-		return "nginx vhost TLS termination (cdn/cdn_saas)"
+		return "[deprecated] nginx vhost TLS termination (cdn/cdn_saas, P4 前架构)"
+	case TerminationNginxPlusXray:
+		return "nginx + xray shared TLS (cdn/cdn_saas, P4: xray 持证书 nginx proxy_pass https)"
 	case TerminationSelfTCP:
 		return "xray self TLS termination (direct TCP)"
 	case TerminationSelfUDP:
@@ -90,9 +94,10 @@ func (tc TerminationClass) String() string {
 }
 
 // NeedsNginxVhost 判断该 TerminationClass 是否需要生成 nginx HTTP vhost（8445 location 路由）。
-// 仅 TerminationNginx（CDN 节点）需要 nginx vhost 做 TLS termination + path 路由。
+// TerminationNginx（P4 前）和 TerminationNginxPlusXray（P4 后）都需要 nginx vhost。
+// 区别：nginx 做 TLS termination + proxy_pass http；nginx_plus_xray 做 proxy_pass https（TLS 由 xray 终止）。
 func (tc TerminationClass) NeedsNginxVhost() bool {
-	return tc == TerminationNginx
+	return tc == TerminationNginx || tc == TerminationNginxPlusXray
 }
 
 // NeedsStreamSNI 判断该 TerminationClass 是否需要 nginx stream SNI 分流。
@@ -109,12 +114,13 @@ func (tc TerminationClass) NeedsStreamSNI() bool {
 }
 
 // NeedsCertBundle 判断该 TerminationClass 是否需要从 cert_bundles 注入证书 PEM。
-// 仅 self_tcp 需要 xray 自身持有证书（nginx/cf_edge 终止 TLS 后明文回源）。
-// reality 不走传统证书。self_udp 需要 xray 持有证书。
-// cf_edge/nginx 的证书由 nginx 持有（ACME），xray inbound 为 sec=none 不需要 PEM。
+// P4 后 nginx_plus_xray 也需要 xray 持有证书（nginx proxy_pass https，TLS 由 xray 终止）。
+// cf_edge（argo_tunnel）的 TLS 由 CF 边缘终止，源站 xray sec=none 不需要 PEM。
+// nginx（P4 前 deprecated）的 TLS 由 nginx 终止，xray sec=none 不需要 PEM。
+// reality 不走传统证书。self_tcp/self_udp 需要 xray 持有证书。
 func (tc TerminationClass) NeedsCertBundle() bool {
 	switch tc {
-	case TerminationSelfTCP, TerminationSelfUDP:
+	case TerminationSelfTCP, TerminationSelfUDP, TerminationNginxPlusXray:
 		return true
 	default:
 		return false
@@ -123,7 +129,8 @@ func (tc TerminationClass) NeedsCertBundle() bool {
 
 // NeedsTLSStrip 判断该 TerminationClass 是否需要剥离 xray inbound 的 TLS。
 // cf_edge: 剥离（cloudflared 明文 HTTP 回源）
-// nginx: 剥离（nginx 终止 TLS 后 proxy_pass http）
+// nginx: 剥离（P4 前架构，nginx 终止 TLS 后 proxy_pass http）
+// nginx_plus_xray: 不剥离（P4 后架构，xray 持证书，nginx proxy_pass https）
 // self_tcp/self_udp/reality: 不剥离（xray 自终止 TLS/REALITY）
 func (tc TerminationClass) NeedsTLSStrip() bool {
 	switch tc {

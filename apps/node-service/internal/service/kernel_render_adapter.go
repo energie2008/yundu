@@ -156,17 +156,18 @@ func shouldStripTLSForArgoTunnel(exposureMode string) bool {
 }
 
 // shouldStripTLSForNginxVhost 仅判断 cdn/cdn_saas 模式是否需要剥离 TLS。
-// CDN 节点的 TLS 终止发生在 nginx 8445 vhost 层（per-domain ACME 证书），
-// nginx 做 TLS termination + path 路由后 proxy_pass http 回源，
-// xray inbound 必须 security=none。
+//
+// P4 退役：CDN 节点改用 nginx_plus_xray 架构（xray 持证书，nginx proxy_pass https 回源），
+// xray inbound 保留 TLS（security=tls + certificateFile），不再剥离。
+// 此函数保留为 false 占位，避免调用点报未定义错误；后续可随调用点一并清理。
+//
+// 历史：P4 前 CDN 节点走 nginx 终止 TLS + proxy_pass http 回源，xray inbound security=none。
+//
 // 与 argo_tunnel 的剥离触发条件完全独立，分开维护避免交叉影响。
 func shouldStripTLSForNginxVhost(exposureMode string) bool {
-	switch exposureMode {
-	case "cdn", "cdn_saas":
-		return true
-	default:
-		return false
-	}
+	// P4: CDN 节点（nginx_plus_xray）xray 持证书，不再剥离 TLS
+	_ = exposureMode
+	return false
 }
 
 // modelNodeToNodeSpecWithCreds 将 DB 节点转为 NodeSpec IR，并注入多用户凭证（P0-1）。
@@ -437,17 +438,16 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 					if listenHost != "" {
 						inbMap["listen"] = listenHost
 					}
-					// R2: CDN 节点原始 inbound 去 TLS 化（不再创建镜像 inbound）
-				// CDN 架构：client → CDN(443/TLS) → nginx(终止TLS, proxy_pass http) → xray(无TLS)
-				// nginx 已终止 TLS，xray inbound 不需要 TLS/REALITY，直接 security=none。
-				// 之前创建镜像 inbound（port+1000）导致端口冲突和 nginx 端口不匹配，
-				// 现在直接修改原始 inbound：去 TLS，listen=127.0.0.1，nginx proxy_pass 指向原始端口。
-				// argo_tunnel 节点例外：cloudflared 通过 [::1] 回源，listen 必须为 "::"
+					// R2: CDN 节点原始 inbound TLS 处理（不再创建镜像 inbound）
+				// P4 架构：client → CDN(443/TLS) → nginx(终止TLS, proxy_pass https) → xray(持证书, 二次TLS终止)
+				// CDN 节点（nginx_plus_xray）xray 持证书保留 TLS，nginx proxy_pass https 回源。
+				// 仅 argo_tunnel 节点剥离 TLS：cloudflared 明文 HTTP 回源，CF Edge 终止 TLS，xray security=none。
 				//
 				// P1 inbound 级 TLS 剥离：每个 inbound 根据自身暴露方式判定，不再节点级一刀切。
 				// 判定逻辑：determineInboundExposureMode(node, inbMap) 返回单个 inbound 的暴露方式，
 				// shouldStripTLSForInbound(em) 决定是否剥离。
-				// - 上行 inbound（cdn_saas/argo_tunnel）→ 剥离 TLS
+				// - argo_tunnel 上行 inbound → 剥离 TLS（cloudflared 明文回源）
+				// - cdn/cdn_saas 上行 inbound → P4 保留 TLS（xray 持证书，nginx proxy_pass https）
 				// - 下行 inbound（显式 _inbound_role="downstream"，默认 direct/reality）→ 保留 TLS/REALITY
 				// - 纯直连节点 → 不剥离
 				//
@@ -456,6 +456,7 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 				// tag 后缀仅作展示命名，不参与安全判定路径。
 				em := determineInboundExposureMode(node, inbMap)
 				// P1-1: argo_tunnel 和 cdn/cdn_saas 分别独立判断，避免耦合
+				// P4: shouldStripTLSForNginxVhost 已退役（恒返回 false），CDN 节点保留 TLS
 				if shouldStripTLSForArgoTunnel(em) || shouldStripTLSForNginxVhost(em) {
 					if kernelName == "xray" {
 						stripTLSFromXrayInbound(inbMap, node)

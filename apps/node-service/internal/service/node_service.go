@@ -1085,11 +1085,11 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 	//    - DB SecurityType="none", config_json.security_type/security="tls", tls=1
 	//    - 只有隧道节点需要 DB 字段层面的分离
 	//
-	// 2) cdn/cdn_saas（CDN 回源到 nginx）→ 非分离，TLS 剥离在渲染层
-	//    - 客户端 → CDN → nginx 443 stream → nginx 8445 (TLS终止) → HTTP明文 → xray
+	// 2) cdn/cdn_saas（CDN 回源到 nginx）→ 非分离，P4: xray 持证书
+	//    - 客户端 → CDN → nginx 443 stream → nginx 8445 (TLS终止) → proxy_pass https → xray (持证书, 二次TLS终止)
 	//    - DB SecurityType="tls", config_json.security_type/security="tls", tls=1（前后一致）
-	//    - xray inbound 的 TLS 剥离由渲染层 shouldStripTLSForNginxVhost 动态完成，
-	//      不通过 DB 字段分离实现（nginx 8445 是否有 vhost 才是决定因素）
+	//    - P4: xray inbound 保留 TLS（security=tls + certificateFile），不再剥离
+	//      shouldStripTLSForNginxVhost 已退役（恒返回 false）
 	//
 	// 3) direct/reality → xray 自终止，无需特殊处理
 	//
@@ -1109,15 +1109,16 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 	}
 
 	// 7.0' cdn/cdn_saas 专属：DB 字段保持 tls，确保客户端 TLS 开启
-	// 注意：此处不做 DB 字段分离，只做字段一致性纠正（确保 DB 和 config_json 都是 tls）
+	// P4: CDN 节点（nginx_plus_xray）xray 持证书，需要 cert_bundle_id 注入证书 PEM
+	// certMgr 将 PEM 写入 /etc/yundu/certs/{cdnAddr}/，xray 用 certificateFile 引用，nginx 也引用同一文件
 	if isCDNExposureNode(node) {
 		tlsSec := "tls"
 		node.SecurityType = &tlsSec
 		node.ConfigJSON["security_type"] = "tls"
 		node.ConfigJSON["security"] = "tls"
 		node.ConfigJSON["tls"] = 1
-		// CDN 节点由 nginx ACME 管理证书，不绑定 cert_bundle
-		delete(node.ConfigJSON, "cert_bundle_id")
+		// P4: 不再 delete cert_bundle_id — CDN 节点 xray 持证书需要 cert bundle
+		// certMgr 从 cert_bundle_id 获取 PEM 写入 /etc/yundu/certs/{cdnAddr}/
 		// client_port 强制为 443（CDN 入口端口）
 		node.Port = 443
 	}
@@ -1197,13 +1198,10 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 		}
 	}
 
-	// 7.2 cdn/cdn_saas 专属处理：cdn_address 自动同步
-	if isCDNExposureNode(node) {
-		// cdn_address 自动同步 host_header/SNI
-		if node.HostHeader != nil && *node.HostHeader != "" {
-			node.ConfigJSON["cdn_address"] = *node.HostHeader
-		}
-	}
+	// P4.6: 已删除 7.2 cdn/cdn_saas 专属处理（cdn_address 自动同步）
+	// 原因：P4 后 cdn_address 是 CDN 域名的单一事实源（用于 cert 路径/SNI/nginx server_name），
+	// 不再从 host_header 自动同步，避免双源真值导致状态不一致。
+	// cdn_address 由用户显式设置或由 argo_tunnel 的 cloudflared hostname 同步逻辑填充。
 
 	// 链式套娃出站 URI 校验（D5 三重防线：正则 + 长度 + 解析）
 	// 在保存前拦截非法 URI，防止渲染时 ParseChainURI 失败导致整个配置下发中断
@@ -1304,8 +1302,8 @@ func isArgoTunnelExposureNode(n *model.Node) bool {
 	return determineExposureMode(n) == "argo_tunnel"
 }
 
-// isCDNExposureNode 判断节点是否为 cdn/cdn_saas 暴露方式（需要 TLS 分离架构）
-// CDN 节点：nginx 8445 终止 TLS + proxy_pass HTTP 回源 + CF 边缘 TLS
+// isCDNExposureNode 判断节点是否为 cdn/cdn_saas 暴露方式
+// P4: CDN 节点（nginx_plus_xray）xray 持证书 + nginx proxy_pass https 回源
 func isCDNExposureNode(n *model.Node) bool {
 	if n == nil || n.ConfigJSON == nil {
 		return false
@@ -1320,8 +1318,8 @@ func isCDNExposureNode(n *model.Node) bool {
 //   - config_json.security_type = "tls"（客户端到 CF Edge 必须 TLS）
 //
 // cdn/cdn_saas 节点不做 DB 字段分离（DB security_type 保持 "tls"），
-// TLS 剥离纯粹在渲染层由 shouldStripTLSForNginxVhost 动态完成
-// （nginx 8445 终止 TLS 后 proxy_pass 明文回源 xray）。
+// P4: xray 持证书 + nginx proxy_pass https，xray inbound 保留 TLS（security=tls）。
+// shouldStripTLSForNginxVhost 已退役（恒返回 false），CDN 节点不再剥离 TLS。
 // 两类节点的剥离触发条件完全独立，避免"改 CDN 逻辑连带影响隧道节点"的耦合风险。
 func isTLSSplitExposureNode(n *model.Node) bool {
 	return isArgoTunnelExposureNode(n)

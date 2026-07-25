@@ -309,12 +309,38 @@ type WSVhostEntry struct {
 	// IsXHTTP 标记为 XHTTP 服务（使用 proxy_pass 无 Upgrade + proxy_buffering off）
 	// 合并渲染时与 WS/gRPC/HTTPUpgrade 共存于同一 server 块，避免 conflicting server_name
 	IsXHTTP bool `json:"is_xhttp,omitempty"`
+	// BackendHTTPS P4: 标记回源使用 HTTPS（nginx_plus_xray 架构，xray 持证书）
+	// 为 true 时 proxy_pass https:// + proxy_ssl_verify off + proxy_ssl_server_name on + proxy_ssl_name
+	// 为 false 时（默认）proxy_pass http://（P4 前架构，nginx 终止 TLS 后明文回源）
+	BackendHTTPS bool `json:"backend_https,omitempty"`
 	// UpPath XHTTP split 模式上行 path（可选，仅 IsXHTTP=true 时有效）
 	// 非空且不等于 WSPath 时生成独立 location（proxy_buffering on）
 	UpPath string `json:"up_path,omitempty"`
 	// DownPath XHTTP split 模式下行 path（可选，仅 IsXHTTP=true 时有效）
 	// 非空且不等于 WSPath 时生成独立 location（proxy_buffering off 流式传输）
 	DownPath string `json:"down_path,omitempty"`
+}
+
+// writeProxySSLDirectives 在 proxy_pass https 回源场景下写入 nginx SSL 相关指令。
+// P4: nginx_plus_xray 架构下 nginx 通过 proxy_pass https 回源到 xray（xray 持证书），
+// 需要关闭证书验证（xray 可能持自签或 CDN 域名证书）并启用 SNI 以匹配 xray 证书域名。
+//
+// 写入的指令（仅当 backendHTTPS=true 时）：
+//
+//	proxy_ssl_verify off;
+//	proxy_ssl_server_name on;
+//	proxy_ssl_name <serverName>;
+//
+// serverName 为空时跳过 proxy_ssl_name 行（nginx 会用 $proxy_host 作为默认 SNI）。
+func writeProxySSLDirectives(buf *strings.Builder, backendHTTPS bool, serverName string) {
+	if !backendHTTPS {
+		return
+	}
+	buf.WriteString("        proxy_ssl_verify off;\n")
+	buf.WriteString("        proxy_ssl_server_name on;\n")
+	if serverName != "" {
+		buf.WriteString(fmt.Sprintf("        proxy_ssl_name %s;\n", serverName))
+	}
 }
 
 // RenderWSVhostConf 生成 WS CDN 反代 vhost 片段。
@@ -365,6 +391,10 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 		IsXHTTP       bool
 		UpPath        string
 		DownPath      string
+		// P4: BackendHTTPS 标记回源使用 HTTPS（nginx_plus_xray 架构）
+		BackendHTTPS bool
+		// P4: ServerName 用于 proxy_ssl_name（CDN 域名）
+		ServerName string
 	}
 	type serverGroup struct {
 		Paths     []pathPort
@@ -389,6 +419,9 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 			IsXHTTP:       e.IsXHTTP,
 			UpPath:        e.UpPath,
 			DownPath:      e.DownPath,
+			// P4: CDN 节点（nginx_plus_xray）回源使用 HTTPS
+			BackendHTTPS: e.BackendHTTPS,
+			ServerName:   e.ServerName,
 		}
 		if g, ok := grouped[e.ServerName]; !ok {
 			serverNames = append(serverNames, e.ServerName)
@@ -490,9 +523,22 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 				if !strings.HasPrefix(grpcLocPath, "/") {
 					grpcLocPath = "/" + grpcLocPath
 				}
-				buf.WriteString(fmt.Sprintf("    # gRPC → 127.0.0.1:%d\n", pp.Port))
+				// P4: nginx_plus_xray 架构下回源使用 grpcs://（xray 持证书）
+				grpcScheme := "grpc"
+				if pp.BackendHTTPS {
+					grpcScheme = "grpcs"
+				}
+				buf.WriteString(fmt.Sprintf("    # gRPC → %s://127.0.0.1:%d\n", grpcScheme, pp.Port))
 				buf.WriteString(fmt.Sprintf("    location %s {\n", grpcLocPath))
-				buf.WriteString(fmt.Sprintf("        grpc_pass grpc://127.0.0.1:%d;\n", pp.Port))
+				buf.WriteString(fmt.Sprintf("        grpc_pass %s://127.0.0.1:%d;\n", grpcScheme, pp.Port))
+				if pp.BackendHTTPS {
+					// P4: xray 持自签/CDN 证书，关闭验证避免证书校验失败
+					buf.WriteString("        grpc_ssl_verify off;\n")
+					buf.WriteString("        grpc_ssl_server_name on;\n")
+					if pp.ServerName != "" {
+						buf.WriteString(fmt.Sprintf("        grpc_ssl_name %s;\n", pp.ServerName))
+					}
+				}
 				buf.WriteString("        grpc_set_header Host $host;\n")
 				buf.WriteString("        grpc_set_header X-Real-IP $remote_addr;\n")
 				buf.WriteString("        grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
@@ -501,9 +547,15 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 				buf.WriteString("        grpc_buffer_size 16k;\n")
 			} else if pp.IsXHTTP {
 				// XHTTP：proxy_pass 无 Upgrade + proxy_buffering off（流式传输）
-				buf.WriteString(fmt.Sprintf("    # XHTTP -> 127.0.0.1:%d\n", pp.Port))
+				// P4: nginx_plus_xray 架构下回源使用 https://（xray 持证书）
+				proxyScheme := "http"
+				if pp.BackendHTTPS {
+					proxyScheme = "https"
+				}
+				buf.WriteString(fmt.Sprintf("    # XHTTP -> %s://127.0.0.1:%d\n", proxyScheme, pp.Port))
 				buf.WriteString(fmt.Sprintf("    location %s {\n", pp.Path))
-				buf.WriteString(fmt.Sprintf("        proxy_pass http://127.0.0.1:%d;\n", pp.Port))
+				buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
+				writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 				buf.WriteString("        proxy_http_version 1.1;\n")
 				buf.WriteString("        proxy_set_header Host $host;\n")
 				buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -515,9 +567,10 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 				buf.WriteString("    }\n")
 				// XHTTP split 模式：upPath（上行，proxy_buffering on 允许缓冲）
 				if pp.UpPath != "" && pp.UpPath != pp.Path {
-					buf.WriteString(fmt.Sprintf("    # XHTTP split upPath -> 127.0.0.1:%d\n", pp.Port))
+					buf.WriteString(fmt.Sprintf("    # XHTTP split upPath -> %s://127.0.0.1:%d\n", proxyScheme, pp.Port))
 					buf.WriteString(fmt.Sprintf("    location %s {\n", pp.UpPath))
-					buf.WriteString(fmt.Sprintf("        proxy_pass http://127.0.0.1:%d;\n", pp.Port))
+					buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
+					writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 					buf.WriteString("        proxy_http_version 1.1;\n")
 					buf.WriteString("        proxy_set_header Host $host;\n")
 					buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -530,9 +583,10 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 				}
 				// XHTTP split 模式：downPath（下行，proxy_buffering off 流式传输）
 				if pp.DownPath != "" && pp.DownPath != pp.Path {
-					buf.WriteString(fmt.Sprintf("    # XHTTP split downPath -> 127.0.0.1:%d\n", pp.Port))
+					buf.WriteString(fmt.Sprintf("    # XHTTP split downPath -> %s://127.0.0.1:%d\n", proxyScheme, pp.Port))
 					buf.WriteString(fmt.Sprintf("    location %s {\n", pp.DownPath))
-					buf.WriteString(fmt.Sprintf("        proxy_pass http://127.0.0.1:%d;\n", pp.Port))
+					buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
+					writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 					buf.WriteString("        proxy_http_version 1.1;\n")
 					buf.WriteString("        proxy_set_header Host $host;\n")
 					buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -546,9 +600,16 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 				continue // XHTTP 已写完 } 和可选 split location，跳过下面的统一 }
 			} else {
 				// WS 和 HTTPUpgrade 都使用 proxy_pass + Upgrade 头
-				buf.WriteString(fmt.Sprintf("    # %s → 127.0.0.1:%d\n", map[bool]string{true: "HTTPUpgrade", false: "WS"}[pp.IsHTTPUpgrade], pp.Port))
+				// P4: nginx_plus_xray 架构下回源使用 https://（xray 持证书）
+				proxyScheme := "http"
+				if pp.BackendHTTPS {
+					proxyScheme = "https"
+				}
+				protoName := map[bool]string{true: "HTTPUpgrade", false: "WS"}[pp.IsHTTPUpgrade]
+				buf.WriteString(fmt.Sprintf("    # %s → %s://127.0.0.1:%d\n", protoName, proxyScheme, pp.Port))
 				buf.WriteString(fmt.Sprintf("    location %s {\n", pp.Path))
-				buf.WriteString(fmt.Sprintf("        proxy_pass http://127.0.0.1:%d;\n", pp.Port))
+				buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
+				writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 				buf.WriteString("        proxy_http_version 1.1;\n")
 				buf.WriteString("        proxy_set_header Upgrade $http_upgrade;\n")
 				buf.WriteString("        proxy_set_header Connection \"upgrade\";\n")
@@ -585,6 +646,9 @@ type XHTTPVhostEntry struct {
 	InternalPort int    `json:"internal_port"`
 	CertPath     string `json:"cert_path,omitempty"`
 	KeyPath      string `json:"key_path,omitempty"`
+	// BackendHTTPS P4: 标记回源使用 HTTPS（nginx_plus_xray 架构，xray 持证书）
+	// 为 true 时 proxy_pass https:// + proxy_ssl_verify off + proxy_ssl_server_name on + proxy_ssl_name
+	BackendHTTPS bool `json:"backend_https,omitempty"`
 }
 
 // RenderXHTTPVhostConf 生成 XHTTP CDN 反代 vhost 片段。
@@ -599,10 +663,12 @@ func RenderXHTTPVhostConf(entries []*XHTTPVhostEntry, cfg *SnippetConfig, certPa
 	}
 
 	type pathPort struct {
-		Path     string
-		Port     int
-		UpPath   string
-		DownPath string
+		Path        string
+		Port        int
+		UpPath      string
+		DownPath    string
+		BackendHTTPS bool // P4: 标记回源使用 HTTPS（nginx_plus_xray 架构）
+		ServerName  string // P4: 用于 proxy_ssl_name
 	}
 	type serverGroup struct {
 		Paths    []pathPort
@@ -616,10 +682,12 @@ func RenderXHTTPVhostConf(entries []*XHTTPVhostEntry, cfg *SnippetConfig, certPa
 			continue
 		}
 		pp := pathPort{
-			Path:     e.XHTTPPath,
-			Port:     e.InternalPort,
-			UpPath:   e.UpPath,
-			DownPath: e.DownPath,
+			Path:         e.XHTTPPath,
+			Port:         e.InternalPort,
+			UpPath:       e.UpPath,
+			DownPath:     e.DownPath,
+			BackendHTTPS: e.BackendHTTPS,
+			ServerName:   e.ServerName,
 		}
 		if g, ok := grouped[e.ServerName]; !ok {
 			serverNames = append(serverNames, e.ServerName)
@@ -693,9 +761,15 @@ func RenderXHTTPVhostConf(entries []*XHTTPVhostEntry, cfg *SnippetConfig, certPa
 		buf.WriteString("    real_ip_recursive on;\n\n")
 
 		for _, pp := range g.Paths {
-			buf.WriteString(fmt.Sprintf("    # XHTTP -> 127.0.0.1:%d\n", pp.Port))
+			// P4: nginx_plus_xray 架构下回源使用 https://（xray 持证书）
+			proxyScheme := "http"
+			if pp.BackendHTTPS {
+				proxyScheme = "https"
+			}
+			buf.WriteString(fmt.Sprintf("    # XHTTP -> %s://127.0.0.1:%d\n", proxyScheme, pp.Port))
 			buf.WriteString(fmt.Sprintf("    location %s {\n", pp.Path))
-			buf.WriteString(fmt.Sprintf("        proxy_pass http://127.0.0.1:%d;\n", pp.Port))
+			buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
+			writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 			buf.WriteString("        proxy_http_version 1.1;\n")
 			buf.WriteString("        proxy_set_header Host $host;\n")
 			buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -707,9 +781,10 @@ func RenderXHTTPVhostConf(entries []*XHTTPVhostEntry, cfg *SnippetConfig, certPa
 			buf.WriteString("    }\n")
 			// XHTTP split 模式：upPath（上行，proxy_buffering on 允许缓冲）
 			if pp.UpPath != "" && pp.UpPath != pp.Path {
-				buf.WriteString(fmt.Sprintf("    # XHTTP split upPath -> 127.0.0.1:%d\n", pp.Port))
+				buf.WriteString(fmt.Sprintf("    # XHTTP split upPath -> %s://127.0.0.1:%d\n", proxyScheme, pp.Port))
 				buf.WriteString(fmt.Sprintf("    location %s {\n", pp.UpPath))
-				buf.WriteString(fmt.Sprintf("        proxy_pass http://127.0.0.1:%d;\n", pp.Port))
+				buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
+				writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 				buf.WriteString("        proxy_http_version 1.1;\n")
 				buf.WriteString("        proxy_set_header Host $host;\n")
 				buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
@@ -722,9 +797,10 @@ func RenderXHTTPVhostConf(entries []*XHTTPVhostEntry, cfg *SnippetConfig, certPa
 			}
 			// XHTTP split 模式：downPath（下行，proxy_buffering off 流式传输）
 			if pp.DownPath != "" && pp.DownPath != pp.Path {
-				buf.WriteString(fmt.Sprintf("    # XHTTP split downPath -> 127.0.0.1:%d\n", pp.Port))
+				buf.WriteString(fmt.Sprintf("    # XHTTP split downPath -> %s://127.0.0.1:%d\n", proxyScheme, pp.Port))
 				buf.WriteString(fmt.Sprintf("    location %s {\n", pp.DownPath))
-				buf.WriteString(fmt.Sprintf("        proxy_pass http://127.0.0.1:%d;\n", pp.Port))
+				buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
+				writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 				buf.WriteString("        proxy_http_version 1.1;\n")
 				buf.WriteString("        proxy_set_header Host $host;\n")
 				buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")

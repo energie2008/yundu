@@ -32,8 +32,12 @@ func NodeInfoToNodeSpec(n *model.NodeInfo) nodespec.NodeSpec {
 				}
 			}
 		}
-		// 安全类型覆盖：CDN/Tunnel 节点 DB 列为 "none"（服务端无 TLS），
-		// 但客户端需要 TLS（CDN 边缘强制 TLS）。config_json.security_type 优先。
+		// 安全类型覆盖：argo_tunnel 节点 DB 列为 "none"（cloudflared 明文回源，服务端无 TLS），
+		// 但客户端需要 TLS（CF 边缘强制 TLS）。config_json.security_type 优先。
+		//
+		// P4: CDN 节点（nginx_plus_xray）服务端 xray 持证书后，DB=config_json=tls 一致，
+		// 此覆盖对 CDN 节点是 no-op（两者均为 tls），无需特殊处理。
+		// argo_tunnel 节点仍需此覆盖：DB=none（服务端）→ config_json=tls（客户端）双轨字段保留。
 		if st, ok := n.ConfigJSON["security_type"].(string); ok && st != "" {
 			securityType = st
 		}
@@ -469,6 +473,7 @@ func parseTLS(proto nodespec.Protocol, transportType string, cfg map[string]inte
 	tls := &nodespec.TLSConfig{}
 	nestedSNI := getNestedString(cfg, "tls", "server_name", "servername", "sni")
 	// 隧道/CDN 节点的 sni 可能存储在 config_json 顶层（非嵌套在 tls 子 map 中）
+	// P4: CDN 节点的 SNI = cdn_address（证书域名），argo_tunnel 的 SNI = cloudflared hostname
 	topSNI := getString(cfg, "sni")
 	tls.SNI = firstNonEmpty(dbSNI, nestedSNI, topSNI)
 	fp := getNestedString(cfg, "tls", "fingerprint", "fp", "client_fingerprint")

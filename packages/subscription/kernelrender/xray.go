@@ -571,8 +571,18 @@ func (r *XrayRenderer) renderStreamSettings(spec *nodespec.NodeSpec) (map[string
 		if spec.TLS.Fingerprint != "" {
 			tlsSettings["fingerprint"] = spec.TLS.Fingerprint
 		}
-		// 证书配置（P0-2: PEM-only，禁止 certificateFile/keyFile 输出）
-		if spec.TLS.Material != nil && spec.TLS.Material.InlinePEM != nil &&
+		// 证书配置
+		// P4: certificateFile 文件引用优先（nginx_plus_xray 用，证书热重载由 xray 自动完成）
+		// P0-2: Material/CertPEM 路径仍然 PEM-only（禁止 certificateFile/keyFile）
+		if spec.TLS.CertFile != "" && spec.TLS.KeyFile != "" {
+			// P4: 文件引用路径（nginx_plus_xray CDN 节点）
+			tlsSettings["certificates"] = []interface{}{
+				map[string]interface{}{
+					"certificateFile": spec.TLS.CertFile,
+					"keyFile":         spec.TLS.KeyFile,
+				},
+			}
+		} else if spec.TLS.Material != nil && spec.TLS.Material.InlinePEM != nil &&
 			len(spec.TLS.Material.InlinePEM.CertPEM) > 0 && len(spec.TLS.Material.InlinePEM.KeyPEM) > 0 {
 			// PEM-only 路径：绝不输出 certificateFile/keyFile
 			tlsSettings["certificates"] = []interface{}{

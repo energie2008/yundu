@@ -70,12 +70,14 @@ func TestShouldStripTLSForArgoTunnel(t *testing.T) {
 }
 
 func TestShouldStripTLSForNginxVhost(t *testing.T) {
+	// P4: shouldStripTLSForNginxVhost 已退役（恒返回 false）
+	// CDN 节点（nginx_plus_xray）xray 持证书，不再剥离 TLS
 	cases := []struct {
 		mode string
 		want bool
 	}{
-		{"cdn", true},
-		{"cdn_saas", true},
+		{"cdn", false},      // P4: xray 持证书，不剥离
+		{"cdn_saas", false}, // P4: xray 持证书，不剥离
 		{"argo_tunnel", false},
 		{"direct", false},
 		{"reality", false},
@@ -343,7 +345,8 @@ func TestClassifyTermination(t *testing.T) {
 					"cdn_address":   "cdn.example.com",
 				},
 			},
-			want: TerminationNginx,
+			// P4: CDN 节点改用 nginx_plus_xray（xray 持证书，nginx proxy_pass https）
+			want: TerminationNginxPlusXray,
 		},
 		{
 			name: "direct_tls",
@@ -403,6 +406,10 @@ func TestTerminationClassNeedsCertBundle(t *testing.T) {
 	if TerminationReality.NeedsCertBundle() {
 		t.Error("reality should not need cert bundle")
 	}
+	// P4: nginx_plus_xray 需要 xray 持证书（nginx proxy_pass https）
+	if !TerminationNginxPlusXray.NeedsCertBundle() {
+		t.Error("nginx_plus_xray should need cert bundle (P4: xray 持证书)")
+	}
 }
 
 func TestTerminationClassNeedsTLSStrip(t *testing.T) {
@@ -411,6 +418,14 @@ func TestTerminationClassNeedsTLSStrip(t *testing.T) {
 	}
 	if !TerminationNginx.NeedsTLSStrip() {
 		t.Error("nginx should need TLS strip")
+	}
+	// P4: nginx_plus_xray 不剥离 TLS（xray 持证书，nginx proxy_pass https）
+	if TerminationNginxPlusXray.NeedsTLSStrip() {
+		t.Error("nginx_plus_xray should NOT need TLS strip (P4: xray 持证书)")
+	}
+	// P4: nginx_plus_xray 需要 nginx vhost（proxy_pass https 路由）
+	if !TerminationNginxPlusXray.NeedsNginxVhost() {
+		t.Error("nginx_plus_xray should need nginx vhost (P4: proxy_pass https)")
 	}
 	if TerminationSelfTCP.NeedsTLSStrip() {
 		t.Error("self_tcp should not need TLS strip")
@@ -432,8 +447,9 @@ func TestGetExposurePolicy(t *testing.T) {
 	}{
 		{"direct", false, false, true, true},
 		{"reality", false, false, true, false},
-		{"cdn", true, true, true, false},
-		{"cdn_saas", true, true, true, false},
+		// P4: CDN 节点 StripTLS=false（xray 持证书），NeedsCertBundle=true（xray 需要证书 PEM）
+		{"cdn", false, true, true, true},
+		{"cdn_saas", false, true, true, true},
 		{"argo_tunnel", true, false, false, false},
 		{"none", false, false, true, false},
 		{"unknown_mode", false, false, true, true}, // 回退到 direct

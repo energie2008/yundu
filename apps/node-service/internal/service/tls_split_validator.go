@@ -13,9 +13,9 @@ import (
 //   - 客户端（config_json）：security_type = "tls"（客户端到 CF Edge 必须 TLS）
 //   - 客户端双写：config_json.security = "tls", config_json.tls = 1
 //
-// cdn/cdn_saas 节点不做 DB 字段分离（DB=config_json=tls），
-// xray inbound 的 TLS 剥离由渲染层 shouldStripTLSForNginxVhost 动态完成，
-// 与 argo_tunnel 的剥离触发条件完全独立，避免耦合。
+// P4: cdn/cdn_saas 节点不做 DB 字段分离（DB=config_json=tls），
+// xray 持证书 + nginx proxy_pass https，xray inbound 保留 TLS（security=tls）。
+// shouldStripTLSForNginxVhost 已退役（恒返回 false），CDN 节点不再剥离 TLS。
 //
 // 此函数在节点保存时做后置校验（standardizeNodeFields 已先强制设置正确值），
 // 防止字段分离不一致导致：
@@ -91,8 +91,8 @@ func validateTLSSplitFields(node *model.Node) error {
 //   - 不应出现 SecurityType=none 但 config_json.security_type=tls 的分离状态
 //   - TLS 分离状态（DB=none + config_json=tls）仅允许 argo_tunnel 节点
 //
-// 注意：cdn/cdn_saas 节点虽然在渲染层会被 shouldStripTLSForNginxVhost 剥离 xray inbound TLS，
-// 但 DB 字段层面仍然是"tls/tls 一致"状态，由渲染层动态决定是否剥离，不走 DB 字段分离。
+// P4: cdn/cdn_saas 节点（nginx_plus_xray）xray 持证书，DB 字段为 tls/tls 一致状态，
+// 渲染层不再剥离 TLS（shouldStripTLSForNginxVhost 已退役），xray inbound 保留 security=tls。
 func validateNonSplitTLSConsistency(node *model.Node) error {
 	if node == nil || node.ConfigJSON == nil {
 		return nil
