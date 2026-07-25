@@ -446,25 +446,30 @@ div.rounded-lg .bg-zinc-800 {
   color: var(--muted-foreground) !important;
 }
 
-/* Inputs */
-input.border-zinc-800,
-textarea.border-zinc-800,
-select.border-zinc-800 {
-  background: var(--card) !important;
+/* Inputs - force readable bg+text for ALL inputs/textareas/selects */
+input,
+textarea,
+select {
+  background: var(--muted) !important;
   border-color: var(--border) !important;
   color: var(--foreground) !important;
 }
-input.border-zinc-800::placeholder,
-textarea.border-zinc-800::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: var(--muted-foreground) !important;
   opacity: 1;
 }
-input.border-zinc-800:focus,
-textarea.border-zinc-800:focus,
-select.border-zinc-800:focus {
+input:focus,
+textarea:focus,
+select:focus {
   border-color: var(--primary) !important;
   outline: none !important;
   box-shadow: 0 0 0 2px var(--primary-glow) !important;
+}
+/* Select dropdown options */
+option {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
 }
 
 /* Badge variants */
@@ -541,22 +546,22 @@ button[data-state="unchecked"].bg-zinc-800 {
   color: var(--secondary-foreground) !important;
 }
 .text-zinc-500 {
-  color: var(--muted-foreground) !important;
+  color: var(--secondary-foreground) !important;
 }
 .text-zinc-600 {
-  color: var(--muted-foreground) !important;
+  color: var(--secondary-foreground) !important;
 }
 .text-zinc-700 {
-  color: var(--muted-foreground) !important;
+  color: var(--foreground) !important;
 }
 .text-slate-200 {
   color: var(--foreground) !important;
 }
 .text-slate-400 {
-  color: var(--muted-foreground) !important;
+  color: var(--secondary-foreground) !important;
 }
 .text-slate-500 {
-  color: var(--muted-foreground) !important;
+  color: var(--secondary-foreground) !important;
 }
 .hover\:text-slate-200:hover {
   color: var(--foreground) !important;

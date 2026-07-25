@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* YunDu light theme - soft lavender purple */
+/* YunDu light theme - soft lavender purple with warm accents */
 :root {
   --background: #fafbfc;
   --foreground: #1a1d29;
@@ -19,6 +19,16 @@
   --muted-foreground: #64748b;
   --accent: #f0eefe;
   --accent-foreground: #6d5fd6;
+  --accent-pink: #fce7f3;
+  --accent-pink-foreground: #be185d;
+  --accent-sky: #e0f2fe;
+  --accent-sky-foreground: #0369a1;
+  --accent-emerald: #d1fae5;
+  --accent-emerald-foreground: #047857;
+  --accent-amber: #fef3c7;
+  --accent-amber-foreground: #b45309;
+  --accent-rose: #fee2e2;
+  --accent-rose-foreground: #be123c;
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
   --border: #eef0f4;
@@ -49,6 +59,16 @@
   --muted-foreground: #8b92a5;
   --accent: #252349;
   --accent-foreground: #b0a4f8;
+  --accent-pink: #2a1a2e;
+  --accent-pink-foreground: #f472b6;
+  --accent-sky: #0c1e3a;
+  --accent-sky-foreground: #38bdf8;
+  --accent-emerald: #0a2818;
+  --accent-emerald-foreground: #34d399;
+  --accent-amber: #2a2008;
+  --accent-amber-foreground: #fbbf24;
+  --accent-rose: #2a1010;
+  --accent-rose-foreground: #fb7185;
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
   --border: #252836;

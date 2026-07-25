@@ -27,6 +27,15 @@ function formatTraffic(bytes: number): string {
   return gb >= 1024 ? `${(gb / 1024).toFixed(0)} TB` : `${gb.toFixed(0)} GB`;
 }
 
+const featureAccents = [
+  { bg: 'var(--accent)', fg: 'var(--accent-foreground)' },
+  { bg: 'var(--accent-emerald)', fg: 'var(--accent-emerald-foreground)' },
+  { bg: 'var(--accent-sky)', fg: 'var(--accent-sky-foreground)' },
+  { bg: 'var(--accent-amber)', fg: 'var(--accent-amber-foreground)' },
+  { bg: 'var(--accent-pink)', fg: 'var(--accent-pink-foreground)' },
+  { bg: 'var(--accent-rose)', fg: 'var(--accent-rose-foreground)' },
+];
+
 const features = [
   {
     icon: Zap,
@@ -143,13 +152,13 @@ function PlanCard({ plan }: { plan: PlanResponse }) {
       )}
 
       <h3 className="text-lg font-semibold text-[var(--foreground)] mb-1">{plan.name}</h3>
-      <p className="text-sm text-[var(--muted-foreground)] mb-4">
+      <p className="text-sm font-medium mb-4" style={{ color: 'var(--secondary-foreground)' }}>
         {formatTraffic(plan.traffic_bytes)} · 每月重置
       </p>
 
       <div className="mb-6">
         <span className="text-4xl font-bold text-[var(--primary)]">¥{priceCNY.toFixed(0)}</span>
-        <span className="text-[var(--muted-foreground)] text-sm ml-1">
+        <span className="text-[var(--secondary-foreground)] text-sm ml-1 font-medium">
           /{defaultPrice ? getPeriodLabel(defaultPrice.period_code) : '月'}
         </span>
       </div>
@@ -163,7 +172,7 @@ function PlanCard({ plan }: { plan: PlanResponse }) {
                 <div className="mt-0.5 w-4 h-4 rounded-full bg-[var(--accent)] flex items-center justify-center flex-shrink-0">
                   <Check className="w-2.5 h-2.5 text-[var(--accent-foreground)]" strokeWidth={3} />
                 </div>
-                <span className="text-[var(--foreground)]/80">{clean || feat}</span>
+                <span className="text-[var(--foreground)]">{clean || feat}</span>
               </div>
             );
           })
@@ -453,7 +462,7 @@ export function Landing() {
             <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight" style={{ color: 'var(--foreground)' }}>
               为什么选择 YunDu
             </h2>
-            <p className="text-base max-w-lg mx-auto" style={{ color: 'var(--muted-foreground)' }}>
+            <p className="text-base max-w-lg mx-auto" style={{ color: 'var(--secondary-foreground)' }}>
               我们致力于提供最优质的网络加速服务，让每一次连接都稳定可靠
             </p>
           </div>
@@ -466,12 +475,12 @@ export function Landing() {
               >
                 <div
                   className="w-11 h-11 rounded-xl flex items-center justify-center mb-5 transition-transform group-hover:scale-105"
-                  style={{ background: 'var(--accent)' }}
+                  style={{ background: featureAccents[i % featureAccents.length].bg }}
                 >
-                  <f.icon className="w-5 h-5" style={{ color: 'var(--accent-foreground)' }} strokeWidth={1.8} />
+                  <f.icon className="w-5 h-5" style={{ color: featureAccents[i % featureAccents.length].fg }} strokeWidth={1.8} />
                 </div>
                 <h3 className="font-semibold text-base mb-2" style={{ color: 'var(--foreground)' }}>{f.title}</h3>
-                <p className="text-sm leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>{f.desc}</p>
+                <p className="text-sm leading-relaxed" style={{ color: 'var(--secondary-foreground)' }}>{f.desc}</p>
               </div>
             ))}
           </div>
@@ -488,7 +497,7 @@ export function Landing() {
             <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight" style={{ color: 'var(--foreground)' }}>
               灵活的套餐方案
             </h2>
-            <p className="text-base max-w-lg mx-auto" style={{ color: 'var(--muted-foreground)' }}>
+            <p className="text-base max-w-lg mx-auto" style={{ color: 'var(--secondary-foreground)' }}>
               从体验到专业，总有一款适合您
             </p>
           </div>
@@ -529,7 +538,7 @@ export function Landing() {
             <h2 className="text-3xl md:text-4xl font-bold mb-4 tracking-tight" style={{ color: 'var(--foreground)' }}>
               来自全国各地的声音
             </h2>
-            <p className="text-base max-w-lg mx-auto" style={{ color: 'var(--muted-foreground)' }}>
+            <p className="text-base max-w-lg mx-auto" style={{ color: 'var(--secondary-foreground)' }}>
               听听用户们怎么说
             </p>
           </div>
@@ -589,7 +598,7 @@ export function Landing() {
                 className="p-6 rounded-2xl bg-[var(--card)]/50 border border-[var(--border)] backdrop-blur-sm transition-all hover:bg-[var(--card)] hover:border-[var(--primary)]/20"
               >
                 <h3 className="font-medium text-base mb-2" style={{ color: 'var(--foreground)' }}>{item.q}</h3>
-                <p className="text-sm leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>{item.a}</p>
+                <p className="text-sm leading-relaxed" style={{ color: 'var(--secondary-foreground)' }}>{item.a}</p>
               </div>
             ))}
           </div>

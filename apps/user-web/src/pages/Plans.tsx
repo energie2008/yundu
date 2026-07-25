@@ -141,8 +141,8 @@ export function Plans() {
               <div key={plan.id} className="xboard-card p-5 flex flex-col hover:shadow-md transition-shadow">
                 {/* Plan name + traffic highlight */}
                 <h3 className="text-base font-semibold mb-1" style={{ color: 'var(--foreground)' }}>{plan.name}</h3>
-                <div className="text-base font-bold mb-3" style={{ color: '#ef4444' }}>
-                  {formatTraffic(plan.traffic_bytes)} 每月重置
+                <div className="text-base font-bold mb-3" style={{ color: 'var(--accent-foreground)' }}>
+                  {formatTraffic(plan.traffic_bytes)} <span style={{ color: 'var(--muted-foreground)' }}>每月重置</span>
                 </div>
 
                 {/* Features */}
@@ -180,26 +180,26 @@ export function Plans() {
                 </div>
 
                 {/* Specs summary */}
-                <div className="space-y-1 mb-4 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                <div className="space-y-1.5 mb-4 text-sm" style={{ color: 'var(--secondary-foreground)' }}>
                   <div className="flex items-center gap-2">
-                    <span className="text-green-500">✓</span>
+                    <span style={{ color: 'var(--success)' }}>✓</span>
                     <span>{formatTraffic(plan.traffic_bytes)}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-green-500">✓</span>
+                    <span style={{ color: 'var(--success)' }}>✓</span>
                     <span>{plan.speed_limit_mbps && plan.speed_limit_mbps > 0 ? `${plan.speed_limit_mbps}Mbps` : '不限速'}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-green-500">✓</span>
+                    <span style={{ color: 'var(--success)' }}>✓</span>
                     <span>{plan.device_limit && plan.device_limit > 0 ? `最多${plan.device_limit}台设备` : '不限制设备数量'}</span>
                   </div>
                 </div>
 
                 {/* 查看可用节点 button - light gray, xboard style */}
-                <button
+                  <button
                   onClick={() => setNodeModalPlan(plan)}
                   className="w-full py-2 rounded-lg text-sm font-medium mb-2 transition-colors flex items-center justify-center gap-1"
-                  style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+                  style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'var(--muted)')}
                 >
@@ -209,8 +209,8 @@ export function Plans() {
                 {/* 立即购买 button - purple, xboard style */}
                 <button
                   onClick={() => handleBuy(plan, defaultPrice?.period_code)}
-                  className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-colors shadow-sm"
-                  style={{ background: 'var(--primary)' }}
+                  className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-all shadow-sm hover:shadow-md"
+                  style={{ background: 'linear-gradient(135deg, var(--primary), var(--primary-soft))' }}
                   onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
                   onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
                 >
