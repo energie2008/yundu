@@ -2,61 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
-/* YunDu xboard-style light theme (default) */
+/* YunDu light theme - soft lavender purple */
 :root {
-  --background: #f5f7fb;
-  --foreground: #1e293b;
+  --background: #fafbfc;
+  --foreground: #1a1d29;
   --card: #ffffff;
-  --card-foreground: #1e293b;
+  --card-foreground: #1a1d29;
   --popover: #ffffff;
-  --popover-foreground: #1e293b;
-  --primary: #7c5cfc;
+  --popover-foreground: #1a1d29;
+  --primary: #8b7cf6;
+  --primary-soft: #a99cf9;
   --primary-foreground: #ffffff;
-  --secondary: #f1f5f9;
-  --secondary-foreground: #334155;
-  --muted: #f1f5f9;
+  --secondary: #f6f7fb;
+  --secondary-foreground: #475569;
+  --muted: #f6f7fb;
   --muted-foreground: #64748b;
-  --accent: #f1f5f9;
-  --accent-foreground: #334155;
+  --accent: #f0eefe;
+  --accent-foreground: #6d5fd6;
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #7c5cfc;
+  --border: #eef0f4;
+  --input: #eef0f4;
+  --ring: #8b7cf6;
   --success: #22c55e;
   --warning: #f59e0b;
   --sidebar-bg: #ffffff;
-  --sidebar-border: #e2e8f0;
-  --header-bg: #ffffff;
-  --radius: 0.5rem;
+  --sidebar-border: #eef0f4;
+  --header-bg: rgba(255, 255, 255, 0.85);
+  --radius: 0.75rem;
   color-scheme: light;
 }
 
 .dark {
-  --background: #0f172a;
-  --foreground: #e2e8f0;
-  --card: #1e293b;
-  --card-foreground: #e2e8f0;
-  --popover: #1e293b;
-  --popover-foreground: #e2e8f0;
-  --primary: #7c5cfc;
+  --background: #0f1218;
+  --foreground: #e4e6eb;
+  --card: #1a1d29;
+  --card-foreground: #e4e6eb;
+  --popover: #1a1d29;
+  --popover-foreground: #e4e6eb;
+  --primary: #9b8af6;
+  --primary-soft: #b0a4f8;
   --primary-foreground: #ffffff;
-  --secondary: #334155;
-  --secondary-foreground: #e2e8f0;
-  --muted: #334155;
-  --muted-foreground: #94a3b8;
-  --accent: #334155;
-  --accent-foreground: #e2e8f0;
+  --secondary: #1e2230;
+  --secondary-foreground: #b0b5c3;
+  --muted: #1e2230;
+  --muted-foreground: #8b92a5;
+  --accent: #252349;
+  --accent-foreground: #b0a4f8;
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
-  --border: #334155;
-  --input: #334155;
-  --ring: #7c5cfc;
+  --border: #252836;
+  --input: #252836;
+  --ring: #9b8af6;
   --success: #22c55e;
   --warning: #f59e0b;
-  --sidebar-bg: #1e293b;
-  --sidebar-border: #334155;
-  --header-bg: #1e293b;
+  --sidebar-bg: #1a1d29;
+  --sidebar-border: #252836;
+  --header-bg: rgba(26, 29, 41, 0.85);
   color-scheme: dark;
 }
 
