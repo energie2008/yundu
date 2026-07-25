@@ -193,14 +193,20 @@ func (r *RoutingRenderer) renderRule(ctx context.Context, rule *RoutePolicyRule)
 
 	// 构建 xray rule
 	xrayRule := Map{
-		"type":         "field",
-		"outboundTag":  outboundTag,
+		"type":        "field",
+		"outboundTag": outboundTag,
 	}
 	if len(xrayDomains) > 0 {
 		xrayRule["domain"] = xrayDomains
 	}
 	if len(xrayIPs) > 0 {
 		xrayRule["ip"] = xrayIPs
+	}
+	// P0 修复：catch-all 规则（无 domain/ip 匹配字段）添加 network:"tcp,udp" 通配匹配。
+	// xray 要求每条 field 规则至少有一个有效字段，否则报 "this rule has no effective fields" 导致启动失败。
+	// catch-all 规则通常 outboundTag="proxy"（默认走代理），添加 network 匹配不改变语义（匹配所有 TCP/UDP）。
+	if len(xrayDomains) == 0 && len(xrayIPs) == 0 {
+		xrayRule["network"] = "tcp,udp"
 	}
 
 	// 构建 sing-box rule
