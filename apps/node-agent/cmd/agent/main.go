@@ -891,7 +891,7 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 				errMsg = fmt.Sprintf("config signature mismatch on plaintext channel: expected %s, got %s", expectedSig[:16], signature[:16])
 				a.logger.Error("config signature mismatch, rejecting config",
 					"expected", expectedSig, "got", signature)
-				a.reportDeploymentResult(ctx, targetVersion, "nack", "signature_verify", errMsg, 0)
+				a.reportDeploymentResult(ctx, targetVersion, false, "signature_verify", errMsg, 0)
 				return
 			}
 		} else if signature != "" {
@@ -1013,7 +1013,7 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 			"phase", result.Phase,
 			"rolled_back", result.RolledBack,
 			"error", result.Error)
-		a.reportDeploymentResult(ctx, targetVersion, "nack", result.Phase, errMsg, result.ApplyDurationMs)
+		a.reportDeploymentResult(ctx, targetVersion, false, result.Phase, errMsg, result.ApplyDurationMs)
 		return
 	}
 
@@ -1103,25 +1103,27 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 	errMsg = "config applied successfully"
 	a.logger.Info("config applied successfully", "version", targetVersion, "duration_ms", time.Since(start).Milliseconds())
 	// 上报 ACK：部署成功
-	a.reportDeploymentResult(ctx, targetVersion, "ack", "activate", "", time.Since(start).Milliseconds())
+	a.reportDeploymentResult(ctx, targetVersion, true, "activate", "", time.Since(start).Milliseconds())
 }
 
 // reportDeploymentResult 上报部署结果（ACK/NACK）到面板。
 //
 // 边缘自治全链路：在部署流水线各阶段结束时调用，
-// status="ack" 表示成功，status="nack" 表示失败（已触发回滚）。
+// success=true 表示成功（ack），success=false 表示失败（nack，已触发回滚）。
 // phase 标识失败阶段：precheck / activate / healthcheck。
 // 上报失败仅记录警告，不影响本地部署流程。
-func (a *Agent) reportDeploymentResult(ctx context.Context, version, status, phase, errMsg string, durationMs int64) {
+//
+// P0 修复：字段与面板端对齐（Success bool + Message string），不再使用 status/error。
+func (a *Agent) reportDeploymentResult(ctx context.Context, version string, success bool, phase, message string, durationMs int64) {
 	req := &client.DeploymentResultRequest{
 		Version:    version,
-		Status:     status,
+		Success:    success,
 		Phase:      phase,
-		Error:      errMsg,
+		Message:    message,
 		DurationMs: durationMs,
 	}
 	if err := a.httpClient.ReportDeploymentResult(ctx, req); err != nil {
-		a.logger.Warn("failed to report deployment result", "error", err, "status", status)
+		a.logger.Warn("failed to report deployment result", "error", err, "success", success)
 	}
 }
 
@@ -1769,9 +1771,9 @@ func (a *Agent) runAgent(ctx context.Context) error {
 			"lock_version", lockVersion)
 		nackReq := &client.DeploymentResultRequest{
 			Version: lockVersion,
-			Status:  "nack",
+			Success: false,
 			Phase:   "activate",
-			Error:   "agent crashed during deployment (stale deploy.lock detected on startup)",
+			Message: "agent crashed during deployment (stale deploy.lock detected on startup)",
 		}
 		if err := a.httpClient.ReportDeploymentResult(ctx, nackReq); err != nil {
 			a.logger.Warn("failed to report stale-lock NACK", "error", err)

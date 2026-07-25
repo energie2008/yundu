@@ -176,13 +176,16 @@ type PayloadManifestResponse struct {
 
 // DeploymentResultRequest 是 Agent 上报部署结果（ACK/NACK）的请求体。
 //
-// Status: "ack" 表示部署成功，"nack" 表示部署失败（已触发回滚）。
+// P0 修复：字段名与面板端 node-service/internal/model/dto.go 对齐。
+// 之前 agent 发送 status:"ack"(string) 但面板读取 success(bool)，
+// 导致面板始终认为部署失败（nack），触发配置版本循环递增。
+// Success: true 表示部署成功（ack），false 表示部署失败（nack）。
 // Phase: "precheck" / "activate" / "healthcheck" 标识失败发生在哪个阶段。
 type DeploymentResultRequest struct {
 	Version    string `json:"version"`
-	Status     string `json:"status"` // ack / nack
-	Phase      string `json:"phase"`  // precheck / activate / healthcheck
-	Error      string `json:"error,omitempty"`
+	Success    bool   `json:"success"`            // true=ack, false=nack
+	Message    string `json:"message,omitempty"`  // 错误信息（nack 时填写）
+	Phase      string `json:"phase"`              // precheck / activate / healthcheck
 	DurationMs int64  `json:"duration_ms"`
 }
 
