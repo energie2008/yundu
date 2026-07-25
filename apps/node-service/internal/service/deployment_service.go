@@ -46,8 +46,8 @@ type DeploymentService struct {
 	chainRepo      *repo.ChainRepo
 	credRepo       *repo.UserNodeCredentialRepo
 	capRepo        *repo.CapabilityRepo   // P0-6: 能力矩阵仓库
-	configPusher    *CompositeConfigPusher // P0-7: 配置推送器
-	userDeltaSvc    *UserDeltaService      // Delta Sync: 增量用户变更推送
+	configPusher   *CompositeConfigPusher // P0-7: 配置推送器
+	userDeltaSvc   *UserDeltaService      // Delta Sync: 增量用户变更推送
 	// P2-2: 能力降级策略（deny/downgrade/force_kernel）
 	// 默认 deny（与 P0 行为一致），可通过 SetDegradeStrategy 切换
 	degradeStrategy DegradeStrategy
@@ -1521,47 +1521,47 @@ func (s *DeploymentService) buildNginxVhosts(nodes []*model.Node) map[string]int
 					dlPort = int(sp)
 				}
 				// 下行 address（CDN 域名或直连 IP），用于判断走 CDN 还是直连
-			dlAddr, _ := ds["address"].(string)
-			isDlLoopback := dlAddr == "127.0.0.1" || dlAddr == "localhost"
-			// 下行 TLS 走 CDN（address 是域名，非回环/空）→ 为下行 address 生成 stream SNI 路由
-			// 注意：stream SNI 必须用下行 address（CDN 域名），不是 tlsSettings.serverName（伪装 SNI）
-			// 因为客户端连 address → CF CDN → nginx stream，nginx 按 SNI=address 匹配路由
-			// P2 TLS分离架构改造 719：不再生成 WSVhostEntry，改为 stream 透传
-			if dlSec == "tls" && dlAddr != "" && !isDlLoopback && dlPort > 0 {
-				// P2 TLS分离架构改造 719：下行 CDN TLS 也走 stream 透传，不再生成 WSVhostEntry。
-				// 客户端连 dlAddr → CF CDN → nginx stream → xray 下行端口（xray 自终止 TLS）
-				if !seenStreamSNI[dlAddr] {
-					seenStreamSNI[dlAddr] = true
-					streamEntries = append(streamEntries, StreamUpstreamEntry{
-						SNI:        dlAddr,
-						UpstreamID: "upstream_dl_" + sanitizeSNI(n.Code),
-						TargetAddr: fmt.Sprintf("127.0.0.1:%d", dlPort),
-						Mode:       "dl_stream",
-					})
+				dlAddr, _ := ds["address"].(string)
+				isDlLoopback := dlAddr == "127.0.0.1" || dlAddr == "localhost"
+				// 下行 TLS 走 CDN（address 是域名，非回环/空）→ 为下行 address 生成 stream SNI 路由
+				// 注意：stream SNI 必须用下行 address（CDN 域名），不是 tlsSettings.serverName（伪装 SNI）
+				// 因为客户端连 address → CF CDN → nginx stream，nginx 按 SNI=address 匹配路由
+				// P2 TLS分离架构改造 719：不再生成 WSVhostEntry，改为 stream 透传
+				if dlSec == "tls" && dlAddr != "" && !isDlLoopback && dlPort > 0 {
+					// P2 TLS分离架构改造 719：下行 CDN TLS 也走 stream 透传，不再生成 WSVhostEntry。
+					// 客户端连 dlAddr → CF CDN → nginx stream → xray 下行端口（xray 自终止 TLS）
+					if !seenStreamSNI[dlAddr] {
+						seenStreamSNI[dlAddr] = true
+						streamEntries = append(streamEntries, StreamUpstreamEntry{
+							SNI:        dlAddr,
+							UpstreamID: "upstream_dl_" + sanitizeSNI(n.Code),
+							TargetAddr: fmt.Sprintf("127.0.0.1:%d", dlPort),
+							Mode:       "dl_stream",
+						})
+					}
+					if !seenSNI[dlAddr] {
+						seenSNI[dlAddr] = true
+						domains = append(domains, dlAddr)
+					}
 				}
-				if !seenSNI[dlAddr] {
-					seenSNI[dlAddr] = true
-					domains = append(domains, dlAddr)
+				// 下行 SNI 和端口存在，且不是回环地址（需要对外暴露）
+				// 下行 TLS 走 CDN 时已用 dlAddr 作为 SNI 生成 stream 路由（上方分支），
+				// 不再用 dlSNI（伪装 SNI）生成 stream 路由，避免重复
+				if dlSNI != "" && dlPort > 0 && !seenStreamSNI[dlSNI] {
+					skipStream := false
+					if dlSec == "tls" && dlAddr != "" && !isDlLoopback {
+						skipStream = true
+					}
+					if !skipStream {
+						seenStreamSNI[dlSNI] = true
+						streamEntries = append(streamEntries, StreamUpstreamEntry{
+							SNI:        dlSNI,
+							UpstreamID: "upstream_dl_" + sanitizeSNI(n.Code) + "_" + sanitizeSNI(dlSNI),
+							TargetAddr: fmt.Sprintf("127.0.0.1:%d", dlPort),
+							Mode:       dlSec,
+						})
+					}
 				}
-			}
-			// 下行 SNI 和端口存在，且不是回环地址（需要对外暴露）
-			// 下行 TLS 走 CDN 时已用 dlAddr 作为 SNI 生成 stream 路由（上方分支），
-			// 不再用 dlSNI（伪装 SNI）生成 stream 路由，避免重复
-			if dlSNI != "" && dlPort > 0 && !seenStreamSNI[dlSNI] {
-				skipStream := false
-				if dlSec == "tls" && dlAddr != "" && !isDlLoopback {
-					skipStream = true
-				}
-				if !skipStream {
-					seenStreamSNI[dlSNI] = true
-					streamEntries = append(streamEntries, StreamUpstreamEntry{
-						SNI:        dlSNI,
-						UpstreamID: "upstream_dl_" + sanitizeSNI(n.Code) + "_" + sanitizeSNI(dlSNI),
-						TargetAddr: fmt.Sprintf("127.0.0.1:%d", dlPort),
-						Mode:       dlSec,
-					})
-				}
-			}
 			}
 		}
 	}
@@ -2656,7 +2656,7 @@ func pickBool(cfg map[string]interface{}, topLevelKey string, nestedKeys ...stri
 	return false
 }
 
-// isIPPortFormat 判断字符串是否为 IP:Port 格式（如 "127.0.0.1:9454" 或 "192.168.1.1:443"）。
+// isIPPortFormat 判断字符串是否为 IP:Port 格式（如 "192.168.1.1:443" 或 "10.0.0.1:8443"）。
 // 用于容错：历史数据中 REALITY 的 serverName 字段可能被误填为 dest（IP:Port），
 // 此时不应作为 SNI 使用，而应迁移到 dest 字段。
 func isIPPortFormat(s string) bool {
