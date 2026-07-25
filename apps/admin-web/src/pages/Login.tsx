@@ -1,19 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
-import { Shield } from 'lucide-react'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Button,
-  Input,
-  Label,
-  useToast,
-} from '@airport/ui'
+import { Shield, Mail, Lock, Eye, EyeOff } from 'lucide-react'
+import { useToast } from '@airport/ui'
 import { useAuthStore } from '@/lib/auth'
+import { useTheme } from '@/lib/theme-provider'
 
 interface LoginFormData {
   email: string
@@ -24,6 +15,8 @@ export default function Login() {
   const navigate = useNavigate()
   const { toast } = useToast()
   const { login, isAuthenticated, isLoading, init } = useAuthStore()
+  const { theme, toggleTheme } = useTheme()
+  const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
     init()
@@ -81,8 +74,8 @@ export default function Login() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500" />
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--primary)' }} />
       </div>
     )
   }
@@ -92,65 +85,118 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-950 p-4">
-      <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
-        <CardHeader className="text-center pb-2">
-          <div className="mx-auto w-12 h-12 rounded-xl bg-indigo-600/20 flex items-center justify-center mb-4">
-            <Shield className="w-6 h-6 text-indigo-400" />
+    <div
+      className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
+      style={{ background: 'var(--gradient-soft)', minHeight: '100vh' }}
+    >
+      {/* Decorative background elements */}
+      <div className="absolute top-0 left-0 w-96 h-96 rounded-full opacity-10" style={{ background: 'var(--gradient-primary)', filter: 'blur(80px)', transform: 'translate(-30%, -30%)' }} />
+      <div className="absolute bottom-0 right-0 w-96 h-96 rounded-full opacity-10" style={{ background: 'var(--gradient-info)', filter: 'blur(80px)', transform: 'translate(30%, 30%)' }} />
+
+      {/* Theme toggle - top right */}
+      <button
+        onClick={toggleTheme}
+        className="absolute top-4 right-4 p-2.5 rounded-xl transition-all hover:scale-105 z-10"
+        style={{
+          color: theme === 'light' ? 'var(--warning)' : 'var(--primary)',
+          backgroundColor: theme === 'light' ? 'var(--accent-amber)' : 'var(--accent)',
+        }}
+        title={theme === 'light' ? '切换黑夜模式' : '切换白天模式'}
+      >
+        {theme === 'light' ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+      </button>
+
+      <div className="w-full max-w-md relative z-10">
+        {/* Brand header */}
+        <div className="text-center mb-6">
+          <div
+            className="mx-auto w-14 h-14 rounded-xl flex items-center justify-center mb-3 shadow-lg"
+            style={{ background: 'var(--gradient-primary)', boxShadow: 'var(--shadow-glow)' }}
+          >
+            <Shield className="w-7 h-7 text-white" />
           </div>
-          <CardTitle className="text-xl text-zinc-100">Airport Panel</CardTitle>
-          <CardDescription className="text-zinc-400">
-            管理后台登录
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-4">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>Airport Panel</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>云渡 YunDu 管理后台</p>
+        </div>
+
+        {/* Login Card */}
+        <div
+          className="p-8 rounded-2xl"
+          style={{
+            backgroundColor: 'var(--card)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-lg)',
+          }}
+        >
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            {/* Email */}
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-zinc-300">
-                邮箱
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="a****@***********"
-                className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500"
-                {...register('email', {
-                  required: '请输入邮箱',
-                })}
-              />
-              {errors.email && (
-                <p className="text-sm text-red-400">{errors.email.message}</p>
-              )}
+              <label className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>邮箱</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: 'var(--muted-foreground)' }} />
+                <input
+                  type="email"
+                  placeholder="a****@***********"
+                  className="w-full h-11 pl-10 pr-3 rounded-lg text-sm outline-none transition-all focus:ring-2"
+                  style={{
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                  }}
+                  {...register('email', { required: '请输入邮箱' })}
+                />
+              </div>
+              {errors.email && <p className="text-sm" style={{ color: 'var(--destructive)' }}>{errors.email.message}</p>}
             </div>
 
+            {/* Password */}
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-zinc-300">
-                密码
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500"
-                {...register('password', {
-                  required: '请输入密码',
-                })}
-              />
-              {errors.password && (
-                <p className="text-sm text-red-400">{errors.password.message}</p>
-              )}
+              <label className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>密码</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: 'var(--muted-foreground)' }} />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  className="w-full h-11 pl-10 pr-10 rounded-lg text-sm outline-none transition-all focus:ring-2"
+                  style={{
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                  }}
+                  {...register('password', { required: '请输入密码' })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors"
+                  style={{ color: 'var(--muted-foreground)' }}
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+              {errors.password && <p className="text-sm" style={{ color: 'var(--destructive)' }}>{errors.password.message}</p>}
             </div>
 
-            <Button
+            {/* Submit */}
+            <button
               type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white"
-              isLoading={isSubmitting}
+              disabled={isSubmitting}
+              className="w-full h-11 text-base text-white rounded-lg transition-all hover:scale-[1.01] disabled:opacity-60"
+              style={{
+                background: 'var(--gradient-primary)',
+                boxShadow: 'var(--shadow-md)',
+              }}
             >
-              登录
-            </Button>
+              {isSubmitting ? '登录中...' : '登录'}
+            </button>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* Footer */}
+        <p className="text-center text-xs mt-6" style={{ color: 'var(--muted-foreground)' }}>
+          © 2026 YunDu Cloud · 管理控制台
+        </p>
+      </div>
     </div>
   )
 }

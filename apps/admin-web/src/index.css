@@ -2,10 +2,160 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================
+   YunDu Admin - Light Theme (白天模式)
+   简约而不简单 - Soft lavender with rich accents
+   ============================================ */
 :root {
+  --background: #f4f5fb;
+  --foreground: #1a1d2e;
+  --card: #ffffff;
+  --card-foreground: #1a1d2e;
+  --card-hover: #f8f8fc;
+  --popover: #ffffff;
+  --popover-foreground: #1a1d2e;
+
+  --primary: #6366f1;
+  --primary-soft: #818cf8;
+  --primary-foreground: #ffffff;
+  --primary-glow: rgba(99, 102, 241, 0.12);
+
+  --secondary: #f0f1f7;
+  --secondary-foreground: #475569;
+  --muted: #f0f1f7;
+  --muted-foreground: #6b7280;
+
+  --accent: #ede9fe;
+  --accent-foreground: #6d28d9;
+  --accent-pink: #fce7f3;
+  --accent-pink-foreground: #be185d;
+  --accent-sky: #e0f2fe;
+  --accent-sky-foreground: #0369a1;
+  --accent-emerald: #d1fae5;
+  --accent-emerald-foreground: #047857;
+  --accent-amber: #fef3c7;
+  --accent-amber-foreground: #b45309;
+  --accent-rose: #fee2e2;
+  --accent-rose-foreground: #be123c;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --success: #10b981;
+  --success-foreground: #ffffff;
+  --warning: #f59e0b;
+  --warning-foreground: #ffffff;
+  --info: #0ea5e9;
+  --info-foreground: #ffffff;
+
+  --border: #e5e7eb;
+  --border-hover: #c7c9d1;
+  --input: #e5e7eb;
+  --ring: #6366f1;
+
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e5e7eb;
+  --sidebar-active: rgba(99, 102, 241, 0.08);
+  --sidebar-active-text: #4f46e5;
+  --sidebar-text: #6b7280;
+  --sidebar-header: #f9fafb;
+
+  --header-bg: rgba(255, 255, 255, 0.88);
+  --header-border: #e5e7eb;
+
+  --gradient-primary: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  --gradient-soft: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(168,85,247,0.06) 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+  --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+  --gradient-danger: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+  --gradient-info: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.06), 0 4px 6px rgba(0, 0, 0, 0.04);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+
+  --radius: 0.75rem;
+  color-scheme: light;
+}
+
+/* ============================================
+   YunDu Admin - Dark Theme (黑夜模式)
+   Deep navy with vibrant neon accents
+   ============================================ */
+.dark {
+  --background: #0a0e1a;
+  --foreground: #e4e7f0;
+  --card: #131a2e;
+  --card-foreground: #e4e7f0;
+  --card-hover: #1a2340;
+  --popover: #131a2e;
+  --popover-foreground: #e4e7f0;
+
+  --primary: #818cf8;
+  --primary-soft: #a5b4fc;
+  --primary-foreground: #ffffff;
+  --primary-glow: rgba(129, 140, 248, 0.15);
+
+  --secondary: #1e2540;
+  --secondary-foreground: #b0b5c8;
+  --muted: #1e2540;
+  --muted-foreground: #8b92a8;
+
+  --accent: #252a4a;
+  --accent-foreground: #a5b4fc;
+  --accent-pink: #2a1a2e;
+  --accent-pink-foreground: #f472b6;
+  --accent-sky: #0c1e3a;
+  --accent-sky-foreground: #38bdf8;
+  --accent-emerald: #0a2818;
+  --accent-emerald-foreground: #34d399;
+  --accent-amber: #2a2008;
+  --accent-amber-foreground: #fbbf24;
+  --accent-rose: #2a1010;
+  --accent-rose-foreground: #fb7185;
+
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
+  --success: #34d399;
+  --success-foreground: #0a0e1a;
+  --warning: #fbbf24;
+  --warning-foreground: #0a0e1a;
+  --info: #38bdf8;
+  --info-foreground: #0a0e1a;
+
+  --border: rgba(99, 102, 241, 0.12);
+  --border-hover: rgba(99, 102, 241, 0.25);
+  --input: rgba(99, 102, 241, 0.15);
+  --ring: #818cf8;
+
+  --sidebar-bg: #0d1326;
+  --sidebar-border: rgba(99, 102, 241, 0.1);
+  --sidebar-active: rgba(99, 102, 241, 0.15);
+  --sidebar-active-text: #a5b4fc;
+  --sidebar-text: #8b92a8;
+  --sidebar-header: #0f1629;
+
+  --header-bg: rgba(10, 14, 26, 0.85);
+  --header-border: rgba(99, 102, 241, 0.1);
+
+  --gradient-primary: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  --gradient-soft: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(168,85,247,0.08) 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+  --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+  --gradient-danger: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+  --gradient-info: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3), 0 4px 6px rgba(0, 0, 0, 0.2);
+  --shadow-glow: 0 0 20px rgba(129, 140, 248, 0.2);
+
   color-scheme: dark;
 }
 
+/* ============================================
+   Base Styles
+   ============================================ */
 html,
 body,
 #root {
@@ -14,11 +164,207 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+* {
+  border-color: var(--border);
+}
+
+/* ============================================
+   Scrollbar Styling
+   ============================================ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* ============================================
+   Custom Utility Classes
+   ============================================ */
+.bg-card { background-color: var(--card); }
+.bg-card-hover { background-color: var(--card-hover); }
+.bg-sidebar { background-color: var(--sidebar-bg); }
+.bg-header { background-color: var(--header-bg); }
+.bg-muted { background-color: var(--muted); }
+.bg-accent { background-color: var(--accent); }
+.text-fg { color: var(--foreground); }
+.text-muted-fg { color: var(--muted-foreground); }
+.text-secondary-fg { color: var(--secondary-foreground); }
+.text-primary { color: var(--primary); }
+.text-accent { color: var(--accent-foreground); }
+.text-success { color: var(--success); }
+.text-warning { color: var(--warning); }
+.text-danger { color: var(--destructive); }
+.text-info { color: var(--info); }
+.border-app { border-color: var(--border); }
+.border-sidebar { border-color: var(--sidebar-border); }
+.border-primary { border-color: var(--primary); }
+.bg-primary { background-color: var(--primary); }
+.bg-gradient-primary { background-image: var(--gradient-primary); }
+.bg-gradient-soft { background-image: var(--gradient-soft); }
+.bg-gradient-success { background-image: var(--gradient-success); }
+.bg-gradient-warning { background-image: var(--gradient-warning); }
+.bg-gradient-danger { background-image: var(--gradient-danger); }
+.bg-gradient-info { background-image: var(--gradient-info); }
+
+/* ============================================
+   Card Component
+   ============================================ */
+.yundu-card {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+.yundu-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-hover);
+}
+
+/* ============================================
+   Status Dot
+   ============================================ */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-dot.online { background-color: var(--success); }
+.status-dot.offline { background-color: var(--destructive); }
+
+/* ============================================
+   Protocol Tag
+   ============================================ */
+.proto-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  margin-left: 4px;
+}
+
+/* ============================================
+   Badge Styles
+   ============================================ */
+.badge-success {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-emerald);
+  color: var(--accent-emerald-foreground);
+}
+.badge-warning {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-amber);
+  color: var(--accent-amber-foreground);
+}
+.badge-danger {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-rose);
+  color: var(--accent-rose-foreground);
+}
+.badge-info {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-sky);
+  color: var(--accent-sky-foreground);
+}
+.badge-primary {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.badge-pink {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-pink);
+  color: var(--accent-pink-foreground);
+}
+
+/* ============================================
+   Modal Overlay
+   ============================================ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 5px var(--primary-glow); }
+  50% { box-shadow: 0 0 20px var(--primary-glow); }
+}
+.animate-fade-in { animation: fadeIn 0.2s ease; }
+.animate-slide-up { animation: slideUp 0.3s ease; }
+
+/* ============================================
+   Safe Area
+   ============================================ */
 @layer utilities {
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom);
@@ -26,4 +372,236 @@ body {
   .safe-top {
     padding-top: env(safe-area-inset-top);
   }
+}
+
+/* ============================================
+   Override @airport/ui zinc colors for theme support
+   ============================================ */
+
+/* Buttons */
+button.border-zinc-800 {
+  border-color: var(--border) !important;
+  background: transparent !important;
+  color: var(--foreground) !important;
+}
+button.border-zinc-800:hover {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+button.bg-zinc-800 {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+button.bg-zinc-800:hover {
+  background: var(--border) !important;
+}
+button.bg-zinc-900 {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+}
+
+/* Focus ring */
+*:focus-visible {
+  --tw-ring-color: var(--primary) !important;
+}
+
+/* Dialog */
+[role="dialog"].border-zinc-800,
+div.border-zinc-800.bg-zinc-900 {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+.fixed.inset-0.bg-black {
+  background: rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(4px) !important;
+}
+h2.text-zinc-100 {
+  color: var(--foreground) !important;
+}
+p.text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+button .text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+
+/* Tabs */
+div.rounded-lg.bg-zinc-800 {
+  background: var(--muted) !important;
+}
+div.rounded-lg .bg-zinc-800 {
+  background: var(--muted) !important;
+}
+.text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+.hover\:text-zinc-100:hover {
+  color: var(--foreground) !important;
+}
+
+/* Badges */
+.bg-zinc-800.text-zinc-200 {
+  background: var(--muted) !important;
+  color: var(--muted-foreground) !important;
+}
+
+/* Inputs */
+input.border-zinc-800,
+textarea.border-zinc-800,
+select.border-zinc-800 {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+input.border-zinc-800::placeholder,
+textarea.border-zinc-800::placeholder {
+  color: var(--muted-foreground) !important;
+  opacity: 1;
+}
+input.border-zinc-800:focus,
+textarea.border-zinc-800:focus,
+select.border-zinc-800:focus {
+  border-color: var(--primary) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px var(--primary-glow) !important;
+}
+
+/* Badge variants */
+.badge-secondary,
+div.bg-zinc-800.text-zinc-100 {
+  background: var(--muted) !important;
+  color: var(--muted-foreground) !important;
+}
+div.border-zinc-700.text-zinc-100 {
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+
+/* Spinner */
+svg.text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+
+/* Table */
+table .border-zinc-800 {
+  border-color: var(--border) !important;
+}
+table th, table td {
+  color: var(--foreground) !important;
+}
+table thead {
+  background: var(--muted) !important;
+}
+
+/* Select dropdown */
+[role="listbox"].bg-zinc-900 {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+
+/* Label */
+label.text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+
+/* Separator */
+hr.bg-zinc-800 {
+  background: var(--border) !important;
+}
+
+/* Skeleton */
+.bg-zinc-800.animate-pulse {
+  background: var(--muted) !important;
+}
+
+/* Switch */
+button[data-state="checked"].bg-zinc-800 {
+  background: var(--primary) !important;
+}
+button[data-state="unchecked"].bg-zinc-800 {
+  background: var(--muted) !important;
+}
+
+/* Loading screen */
+.bg-zinc-950 {
+  background-color: var(--background) !important;
+}
+.bg-zinc-900 {
+  background-color: var(--card) !important;
+}
+.border-zinc-800 {
+  border-color: var(--border) !important;
+}
+.text-zinc-100 {
+  color: var(--foreground) !important;
+}
+.text-zinc-300 {
+  color: var(--secondary-foreground) !important;
+}
+.text-zinc-500 {
+  color: var(--muted-foreground) !important;
+}
+.text-zinc-600 {
+  color: var(--muted-foreground) !important;
+}
+.text-zinc-700 {
+  color: var(--muted-foreground) !important;
+}
+.text-slate-200 {
+  color: var(--foreground) !important;
+}
+.text-slate-400 {
+  color: var(--muted-foreground) !important;
+}
+.text-slate-500 {
+  color: var(--muted-foreground) !important;
+}
+.hover\:text-slate-200:hover {
+  color: var(--foreground) !important;
+}
+.hover\:text-slate-300:hover {
+  color: var(--foreground) !important;
+}
+.hover\:bg-white\/5:hover {
+  background: var(--muted) !important;
+}
+.bg-white\/5 {
+  background: var(--muted) !important;
+}
+.bg-white\/\[0\.03\] {
+  background: var(--muted) !important;
+}
+.hover\:bg-white\/\[0\.03\]:hover {
+  background: var(--muted) !important;
+}
+
+/* Indigo color overrides for theme support */
+.text-indigo-300 {
+  color: var(--primary) !important;
+}
+.text-indigo-400 {
+  color: var(--primary) !important;
+}
+.bg-indigo-600\/20 {
+  background: var(--primary-glow) !important;
+}
+.border-indigo-500\/20 {
+  border-color: var(--primary-glow) !important;
+}
+.from-indigo-500\/15 {
+  --tw-gradient-from: var(--primary-glow) var(--tw-gradient-from-position) !important;
+}
+.to-purple-500\/10 {
+  --tw-gradient-to: var(--primary-glow) var(--tw-gradient-to-position) !important;
+}
+.shadow-indigo-500\/5 {
+  box-shadow: 0 0 10px var(--primary-glow) !important;
+}
+.shadow-indigo-500\/20 {
+  box-shadow: 0 0 10px var(--primary-glow) !important;
+}
+.ring-indigo-500 {
+  --tw-ring-color: var(--primary) !important;
 }

@@ -4,7 +4,6 @@ import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
 import { Header } from './Header'
 import { useAuthStore } from '@/lib/auth'
-import { ADMIN_BG } from '@/lib/theme'
 
 export function Layout() {
   const location = useLocation()
@@ -21,7 +20,7 @@ export function Layout() {
   }, [location.pathname])
 
   return (
-    <div className="min-h-screen text-slate-200" style={{ backgroundColor: ADMIN_BG }}>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}>
       <Sidebar />
 
       <div className="tablet:pl-60">
