@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -102,6 +103,54 @@ type VersionInfo struct {
 	ForceUpdate bool   `json:"force_update"`
 }
 
+// isNewerVersion 比较语义化版本号，返回 true 表示 v1 > v2。
+// 支持格式: "0.3.7" / "v0.3.7" / "0.3.7-beta"（非数字部分按 0 处理）。
+// 用于防降级保护：只允许升级到更高版本。
+func isNewerVersion(v1, v2 string) bool {
+	p1 := parseVersionParts(v1)
+	p2 := parseVersionParts(v2)
+	maxLen := len(p1)
+	if len(p2) > maxLen {
+		maxLen = len(p2)
+	}
+	for i := 0; i < maxLen; i++ {
+		var n1, n2 int
+		if i < len(p1) {
+			n1 = p1[i]
+		}
+		if i < len(p2) {
+			n2 = p2[i]
+		}
+		if n1 > n2 {
+			return true
+		}
+		if n1 < n2 {
+			return false
+		}
+	}
+	return false // 相等，不算更新
+}
+
+// parseVersionParts 解析版本号为数字切片。
+// "v0.3.7" → [0, 3, 7]；非数字段按 0 处理。
+func parseVersionParts(v string) []int {
+	v = strings.TrimPrefix(v, "v")
+	// 只取第一个非数字分隔符之前的部分（忽略 -beta 等后缀）
+	if idx := strings.IndexAny(v, "-+_"); idx >= 0 {
+		v = v[:idx]
+	}
+	parts := strings.Split(v, ".")
+	result := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			n = 0
+		}
+		result = append(result, n)
+	}
+	return result
+}
+
 // Start 启动后台升级检查循环。
 func (u *SelfUpgrader) Start(ctx context.Context) {
 	if !u.running.CompareAndSwap(false, true) {
@@ -166,6 +215,18 @@ func (u *SelfUpgrader) checkAndUpgrade(ctx context.Context) error {
 	}
 
 	if info.Version == u.currentVersion {
+		return nil
+	}
+
+	// 防降级保护：非 ForceUpdate 场景下，只允许升级到更高版本。
+	// 修复 v0.3.7→v0.2.12 降级 bug：原逻辑只检查版本相等，不等就升级，
+	// 导致面板 binary-spec 返回旧版本时 agent 被降级（P3 部署后回退到 0.2.12）。
+	if !info.ForceUpdate && !isNewerVersion(info.Version, u.currentVersion) {
+		u.logger.Info("skipping upgrade, target version is not newer (anti-downgrade)",
+			"current", u.currentVersion,
+			"target", info.Version,
+			"force", info.ForceUpdate,
+		)
 		return nil
 	}
 
