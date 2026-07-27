@@ -47,7 +47,7 @@ export function BottomNav() {
               const Icon = item.icon
               return (
                 <>
-                  {Icon && <Icon className={cn('w-5 h-5')} style={{ color: isActive ? 'var(--primary)' : 'var(--muted-foreground)' }} />}
+                  {Icon && <Icon className={cn('w-5 h-5', isActive ? 'text-primary' : 'text-muted-fg')} />}
                   <span className="text-[10px] truncate">{item.label}</span>
                 </>
               )

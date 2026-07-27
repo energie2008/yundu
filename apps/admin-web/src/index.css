@@ -610,3 +610,108 @@ button[data-state="unchecked"].bg-zinc-800 {
 .ring-indigo-500 {
   --tw-ring-color: var(--primary) !important;
 }
+
+/* ============================================
+   全局统一风格覆盖（仪表盘/系统配置风格）
+   文字一律黑色，输入框灰色，消除花哨的暗色 zinc 类
+   ============================================ */
+
+/* --- 所有 text-zinc-* 文字颜色统一映射 --- */
+.text-zinc-200 { color: var(--foreground) !important; }
+.text-zinc-300 { color: var(--muted-foreground) !important; }
+.text-zinc-900 { color: var(--foreground) !important; }
+
+/* --- 带透明度的 zinc 背景统一映射 --- */
+.bg-zinc-800\/50,
+.bg-zinc-800\/30,
+.bg-zinc-800\/20,
+.bg-zinc-700\/50,
+.bg-zinc-700\/30,
+.bg-zinc-900\/50 {
+  background-color: var(--muted) !important;
+}
+
+/* --- 带透明度的 zinc 边框统一映射 --- */
+.border-zinc-700\/50,
+.border-zinc-700\/30,
+.border-zinc-800\/50,
+.border-zinc-800\/30 {
+  border-color: var(--border) !important;
+}
+
+/* --- 带透明度的 hover zinc 背景统一映射 --- */
+.hover\:bg-zinc-800\/50:hover,
+.hover\:bg-zinc-800\/30:hover,
+.hover\:bg-zinc-800:hover {
+  background-color: var(--muted) !important;
+}
+
+/* --- zinc-700 边框（无透明度） --- */
+.border-zinc-700 {
+  border-color: var(--border) !important;
+}
+
+/* --- zinc-200 文字（详情页常用） --- */
+.text-zinc-200 {
+  color: var(--foreground) !important;
+}
+
+/* --- 强制 Dialog Content 统一风格 --- */
+[role="dialog"] .bg-zinc-900 {
+  background-color: var(--card) !important;
+}
+[role="dialog"] .text-zinc-100 {
+  color: var(--foreground) !important;
+}
+[role="dialog"] .text-zinc-300 {
+  color: var(--muted-foreground) !important;
+}
+[role="dialog"] .text-zinc-400 {
+  color: var(--muted-foreground) !important;
+}
+[role="dialog"] .text-zinc-500 {
+  color: var(--muted-foreground) !important;
+}
+
+/* --- 强制 Input/Select/Textarea 在 Dialog 中统一灰色背景 + 黑色文字 --- */
+[role="dialog"] input,
+[role="dialog"] textarea,
+[role="dialog"] select {
+  background-color: var(--muted) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+
+/* --- Badge 暗色类在浅色主题下统一映射 --- */
+.bg-blue-900\/50 { background-color: var(--accent-sky) !important; }
+.text-blue-300 { color: var(--accent-sky-foreground) !important; }
+.border-blue-800\/50 { border-color: var(--accent-sky) !important; }
+
+.bg-purple-900\/50 { background-color: var(--accent) !important; }
+.text-purple-300 { color: var(--accent-foreground) !important; }
+.border-purple-800\/50 { border-color: var(--accent) !important; }
+
+.bg-rose-900\/50 { background-color: var(--accent-rose) !important; }
+.text-rose-300 { color: var(--accent-rose-foreground) !important; }
+.border-rose-800\/50 { border-color: var(--accent-rose) !important; }
+
+.bg-emerald-900\/50 { background-color: var(--accent-emerald) !important; }
+.text-emerald-300 { color: var(--accent-emerald-foreground) !important; }
+.border-emerald-800\/50 { border-color: var(--accent-emerald) !important; }
+
+.bg-amber-900\/50 { background-color: var(--accent-amber) !important; }
+.text-amber-300 { color: var(--accent-amber-foreground) !important; }
+.border-amber-800\/50 { border-color: var(--accent-amber) !important; }
+
+/* --- hover 状态的 zinc 文字颜色 --- */
+.hover\:text-zinc-300:hover {
+  color: var(--muted-foreground) !important;
+}
+
+/* --- 行内 code 块统一风格 --- */
+code.bg-zinc-800\/50,
+code.bg-zinc-800 {
+  background-color: var(--muted) !important;
+  color: var(--foreground) !important;
+  border-color: var(--border) !important;
+}

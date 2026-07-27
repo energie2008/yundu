@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	mrand "math/rand"
+	"os"
 	"runtime"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/airport-panel/node-agent/internal/client"
@@ -41,6 +45,8 @@ func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus
 		chanState = pb.ChannelState_CHANNEL_STATE_UNKNOWN
 	}
 
+	load := collectServerLoad()
+
 	hb := &pb.AgentMessage{
 		Seq:       a.nextSeq(),
 		Timestamp: time.Now().UnixMilli(),
@@ -56,6 +62,7 @@ func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus
 				Channel: &pb.ChannelHealth{
 					State: chanState,
 				},
+				Load: load,
 			},
 		},
 	}
@@ -224,19 +231,41 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 	xrayPort := parsePortFromEndpoint(a.cfg.XrayAPIEndpoint)
 	singboxPort := parsePortFromEndpoint(a.cfg.SingboxClashEndpoint)
 
+	httpLoad := collectServerLoad()
+	cpuPct := float64(httpLoad.CpuPercent)
+	memPct := float64(httpLoad.MemPercent)
+	diskPct := float64(httpLoad.DiskPercent)
+
 	hbReq := &client.HeartbeatRequest{
-		ServerCode:      a.cfg.ServerCode,
-		Timestamp:       time.Now(),
-		ConfigVersion:   a.currentVersion,
-		XrayAPIPort:     xrayPort,
+		ServerCode:       a.cfg.ServerCode,
+		Timestamp:        time.Now(),
+		ConfigVersion:    a.currentVersion,
+		XrayAPIPort:      xrayPort,
 		SingboxClashPort: singboxPort,
-		ChannelHealth:   channelHealthReport,
-		OS:              runtime.GOOS,
-		Arch:            runtime.GOARCH,
-		AgentVersion:    AgentVersion,
-		RuntimeStatus:   runtimeStatusStr,
-		RuntimeVersion:  runtimeVersionStr,
-		Pid:             pid,
+		ChannelHealth:    channelHealthReport,
+		OS:               runtime.GOOS,
+		Arch:             runtime.GOARCH,
+		AgentVersion:     AgentVersion,
+		RuntimeStatus:    runtimeStatusStr,
+		RuntimeVersion:   runtimeVersionStr,
+		Pid:              pid,
+		CPUPercent:       &cpuPct,
+		MemPercent:       &memPct,
+		DiskPercent:      &diskPct,
+		Metrics: map[string]interface{}{
+			"cpu_percent":      httpLoad.CpuPercent,
+			"mem_percent":      httpLoad.MemPercent,
+			"mem_total_mb":     httpLoad.MemTotalMb,
+			"mem_used_mb":      httpLoad.MemUsedMb,
+			"disk_percent":     httpLoad.DiskPercent,
+			"disk_total_gb":    httpLoad.DiskTotalGb,
+			"disk_used_gb":     httpLoad.DiskUsedGb,
+			"network_in_kbps":  httpLoad.NetworkInKbps,
+			"network_out_kbps": httpLoad.NetworkOutKbps,
+			"uptime_seconds":   httpLoad.UptimeSeconds,
+			"load_1":           httpLoad.Load_1,
+			"goroutines":       httpLoad.Goroutines,
+		},
 	}
 
 	var hbResp *pb.HeartbeatAck
@@ -279,4 +308,79 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 	for _, ea := range extraActions {
 		a.processHeartbeatResponse(ctx, &pb.HeartbeatAck{Action: ea, LatestConfigVersion: hbResp.LatestConfigVersion, ServerTime: hbResp.ServerTime}, &a.currentVersion)
 	}
+}
+
+// collectServerLoad 收集服务器系统负载指标（CPU/内存/磁盘/网络/uptime/loadavg/goroutines）
+// 纯标准库实现，读取 /proc 文件系统，不依赖外部包
+func collectServerLoad() *pb.ServerLoad {
+	load := &pb.ServerLoad{}
+
+	// 读取 /proc/loadavg 获取系统负载
+	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) >= 3 {
+			var load1, load5, load15 float32
+			fmt.Sscanf(fields[0], "%f", &load1)
+			fmt.Sscanf(fields[1], "%f", &load5)
+			fmt.Sscanf(fields[2], "%f", &load15)
+			load.Load_1 = load1
+			load.Load_5 = load5
+			load.Load_15 = load15
+			// 近似 CPU 使用率: load1 / CPU 核心数 * 100
+			numCPU := float32(runtime.NumCPU())
+			if numCPU > 0 {
+				cpuPct := load1 * 100 / numCPU
+				if cpuPct > 100 {
+					cpuPct = 100
+				}
+				load.CpuPercent = cpuPct
+			}
+		}
+	}
+
+	// 读取 /proc/meminfo 获取内存信息
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		var memTotal, memAvailable int64
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "MemTotal:") {
+				fmt.Sscanf(line, "MemTotal: %d", &memTotal)
+			} else if strings.HasPrefix(line, "MemAvailable:") {
+				fmt.Sscanf(line, "MemAvailable: %d", &memAvailable)
+			}
+		}
+		memTotalMB := memTotal / 1024
+		memUsedMB := (memTotal - memAvailable) / 1024
+		load.MemTotalMb = memTotalMB
+		load.MemUsedMb = memUsedMB
+		if memTotal > 0 {
+			load.MemPercent = float32(memUsedMB) * 100 / float32(memTotalMB)
+		}
+	}
+
+	// 磁盘使用率（根分区）
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs("/", &stat); err == nil {
+		diskTotalGB := int64(stat.Blocks) * int64(stat.Bsize) / (1024 * 1024 * 1024)
+		diskFreeGB := int64(stat.Bfree) * int64(stat.Bsize) / (1024 * 1024 * 1024)
+		diskUsedGB := diskTotalGB - diskFreeGB
+		load.DiskTotalGb = diskTotalGB
+		load.DiskUsedGb = diskUsedGB
+		if diskTotalGB > 0 {
+			load.DiskPercent = float32(diskUsedGB) * 100 / float32(diskTotalGB)
+		}
+	}
+
+	// uptime（秒）
+	if data, err := os.ReadFile("/proc/uptime"); err == nil {
+		var uptime float64
+		fmt.Sscanf(string(data), "%f", &uptime)
+		load.UptimeSeconds = int64(uptime)
+	}
+
+	// goroutines
+	load.Goroutines = int64(runtime.NumGoroutine())
+
+	return load
 }
