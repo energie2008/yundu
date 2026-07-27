@@ -128,13 +128,15 @@ func ClientToRenderer(ct model.ClientType) string {
 	switch ct {
 	case model.ClientTypeClashMeta, model.ClientTypeMihomo, model.ClientTypeMihomoParty,
 		model.ClientTypeClashVerge, model.ClientTypeVergeRev, model.ClientTypeNyanpasu,
-		model.ClientTypeClashForAndroid, model.ClientTypeFlClash, model.ClientTypeKaring,
-		model.ClientTypeHiddify, model.ClientTypeHiddifyNext:
+		model.ClientTypeClashForAndroid, model.ClientTypeFlClash:
 		return "clashmeta"
 	case model.ClientTypeClash, model.ClientTypeClashX, model.ClientTypeClashXPro,
 		model.ClientTypeCFW:
 		return "clash"
-	case model.ClientTypeSingBox, model.ClientTypeSFA, model.ClientTypeSFI, model.ClientTypeSFM:
+	// Hiddify / Karing 基于 sing-box 内核，对齐 Xboard SingBox.php $flags = ['sing-box','hiddify','sfm']
+	// 返回 sing-box JSON 格式（而非 Clash Meta YAML），否则客户端无法解析。
+	case model.ClientTypeSingBox, model.ClientTypeSFA, model.ClientTypeSFI, model.ClientTypeSFM,
+		model.ClientTypeHiddify, model.ClientTypeHiddifyNext, model.ClientTypeKaring:
 		return "singbox"
 	case model.ClientTypeSurge, model.ClientTypeSurgeMac, model.ClientTypeSurgeiOS:
 		return "surge"

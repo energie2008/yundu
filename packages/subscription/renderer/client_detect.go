@@ -196,9 +196,11 @@ func ClientToRenderer(ct ClientType) string {
 	switch ct {
 	case ClientClash:
 		return "clash"
-	case ClientClashMeta, ClientClashVerge, ClientStash, ClientMihomo, ClientKaring, ClientHiddify:
+	case ClientClashMeta, ClientClashVerge, ClientStash, ClientMihomo:
 		return "clashmeta"
-	case ClientSingBox:
+	// Hiddify / Karing 基于 sing-box 内核，对齐 Xboard SingBox.php $flags = ['sing-box','hiddify','sfm']
+	// 返回 sing-box JSON 格式（而非 Clash Meta YAML），否则客户端无法解析。
+	case ClientSingBox, ClientHiddify, ClientKaring:
 		return "singbox"
 	case ClientSurge, ClientSurge2, ClientSurge3, ClientSurge4:
 		return "surge"

@@ -519,12 +519,13 @@ func clientTypeToCompatCode(ct model.ClientType) string {
 	case model.ClientTypeClashMeta, model.ClientTypeMihomo, model.ClientTypeMihomoParty,
 		model.ClientTypeClashVerge, model.ClientTypeVergeRev, model.ClientTypeNyanpasu,
 		model.ClientTypeClashForAndroid, model.ClientTypeClashXPro, model.ClientTypeCFW,
-		model.ClientTypeFlClash, model.ClientTypeKaring, model.ClientTypeStash,
-		model.ClientTypeHiddify, model.ClientTypeHiddifyNext:
+		model.ClientTypeFlClash, model.ClientTypeStash:
 		return "clash-meta"
 	case model.ClientTypeClash, model.ClientTypeClashX:
 		return "clash"
-	case model.ClientTypeSingBox, model.ClientTypeSFA, model.ClientTypeSFI, model.ClientTypeSFM:
+	// Hiddify / Karing 基于 sing-box 内核，兼容性按 sing-box 协议要求过滤。
+	case model.ClientTypeSingBox, model.ClientTypeSFA, model.ClientTypeSFI, model.ClientTypeSFM,
+		model.ClientTypeHiddify, model.ClientTypeHiddifyNext, model.ClientTypeKaring:
 		return "sing-box"
 	case model.ClientTypeShadowrocket:
 		return "shadowrocket"

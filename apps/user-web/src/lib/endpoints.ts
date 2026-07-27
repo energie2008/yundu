@@ -92,7 +92,8 @@ const CLIENT_SCHEMES: Record<string, DetectedClient> = {
   surge: { id: 'surge', name: 'Surge', scheme: 'surge:///install-config?url=' },
   loon: { id: 'loon', name: 'Loon', scheme: 'loon://import?sub=' },
   stash: { id: 'stash', name: 'Stash', scheme: 'stash://install-config?url=' },
-  karing: { id: 'karing', name: 'Karing', scheme: 'clash://install-config?url=' },
+  karing: { id: 'karing', name: 'Karing', scheme: 'karing://import-sub?url=' },
+  hiddify: { id: 'hiddify', name: 'Hiddify', scheme: 'hiddify://import/?url=' },
 }
 
 export function detectClientFromUA(): DetectedClient | null {
@@ -122,6 +123,7 @@ export function detectClientFromUA(): DetectedClient | null {
     ['loon', 'loon'],
     ['stash', 'stash'],
     ['karing', 'karing'],
+    ['hiddify', 'hiddify'],
   ]
   for (const [keyword, id] of mappings) {
     if (ua.includes(keyword)) {
@@ -146,6 +148,8 @@ export const ALL_IMPORT_CLIENTS: DetectedClient[] = [
   CLIENT_SCHEMES.surge,
   CLIENT_SCHEMES.loon,
   CLIENT_SCHEMES.stash,
+  CLIENT_SCHEMES.karing,
+  CLIENT_SCHEMES.hiddify,
 ].filter(Boolean)
 
 export const TOKEN_KEYS = {
