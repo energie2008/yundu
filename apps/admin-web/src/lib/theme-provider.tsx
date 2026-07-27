@@ -9,18 +9,18 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: 'dark',
+  theme: 'light',
   setTheme: () => {},
   toggleTheme: () => {},
 })
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return 'dark'
-    const stored = localStorage.getItem('yundu-admin-theme')
+    if (typeof window === 'undefined') return 'light'
+    const stored = localStorage.getItem('yundu-admin-theme-v2')
     if (stored === 'light' || stored === 'dark') return stored
-    // Default to dark for admin panel
-    return 'dark'
+    // Default to light (clean minimal theme)
+    return 'light'
   })
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     } else {
       root.classList.remove('dark')
     }
-    localStorage.setItem('yundu-admin-theme', theme)
+    localStorage.setItem('yundu-admin-theme-v2', theme)
   }, [theme])
 
   const setTheme = (t: Theme) => setThemeState(t)
