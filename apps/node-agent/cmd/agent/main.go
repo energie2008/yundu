@@ -1643,7 +1643,8 @@ func (a *Agent) runAgent(ctx context.Context) error {
 		// 启动定期状态上报 goroutine（每 5 分钟）
 		go a.runWarpStatusReporter(ctx)
 	} else {
-		a.logger.Info("warp-cli not detected, WARP outbound disabled (sing-box native wireguard still available)")
+		a.logger.Info("warp sidecar not detected, WARP outbound disabled (sing-box native wireguard still available)",
+			"warp_mode", os.Getenv("WARP_MODE"))
 	}
 
 	token := resolveToken(a.cfg, a.logger)

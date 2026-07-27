@@ -132,14 +132,19 @@ func renderXrayOutbound(p *OutboundPolicy) (Map, error) {
 			},
 		}, nil
 	case "warp":
-		// WARP 在 xray 中表现为 socks 出站到本地 warp 客户端
+		// WARP 在 xray 中表现为 socks 出站到本地 warp 客户端（wireproxy / warp-cli）
+		// Fallback 端口选择：wireproxy 模式默认 40001，warp-cli 模式默认 40000
 		server, _ := p.ConfigJSON["server"].(string)
 		if server == "" {
 			server = "127.0.0.1"
 		}
 		port := toInt(p.ConfigJSON["port"])
 		if port == 0 {
-			port = 40000
+			if wireproxyMode, _ := p.ConfigJSON["wireproxy"].(bool); wireproxyMode {
+				port = 40001
+			} else {
+				port = 40000
+			}
 		}
 		return Map{
 			"tag":      tag,
@@ -193,19 +198,28 @@ func renderSingBoxOutbound(p *OutboundPolicy) (Map, error) {
 		}
 		return out, nil
 	case "warp":
-		// P3-A: sing-box 原生 wireguard outbound（替代 socks5 兜底）
+		// P3-A: sing-box 原生 wireguard outbound（主路径）
 		// 性能优势：原生 wireguard 比 socks5 转发少一跳，延迟降低 5-15ms，吞吐提升 10-20%
-		// 如果 private_key 缺失，回退到 socks5（warp-cli 本地代理）
+		// 如果 private_key 缺失，回退到 socks5（wireproxy / warp-cli 本地代理）
+		//
+		// Fallback 端口选择：
+		//   - 默认 40000（warp-cli）
+		//   - 若 config_json.wireproxy=true，用 40001（wireproxy，~4MB 轻量侧车）
+		//   - config_json.port 可显式覆盖端口
 		privateKey, _ := p.ConfigJSON["private_key"].(string)
 		if privateKey == "" {
-			// fallback: warp-cli SOCKS5 代理
 			server, _ := p.ConfigJSON["server"].(string)
 			if server == "" {
 				server = "127.0.0.1"
 			}
 			port := toInt(p.ConfigJSON["port"])
 			if port == 0 {
-				port = 40000
+				// wireproxy 模式：默认 40001；warp-cli 模式：默认 40000
+				if wireproxyMode, _ := p.ConfigJSON["wireproxy"].(bool); wireproxyMode {
+					port = 40001
+				} else {
+					port = 40000
+				}
 			}
 			return Map{
 				"type":   "socks",
