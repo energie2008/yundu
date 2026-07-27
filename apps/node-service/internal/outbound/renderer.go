@@ -44,6 +44,21 @@ func RenderOutbounds(policies []*OutboundPolicy) (*ApplyAllResponse, error) {
 				singBoxRules = append(singBoxRules, r)
 			}
 		}
+
+		// P3-F: WARP 路由规则自动注入
+		// 如果 warp policy 未配置任何 routing_rules，自动注入常见流媒体解锁规则。
+		// 设计原则：仅在用户未自定义路由时注入默认规则，避免覆盖用户显式配置。
+		// outbound tag 由 renderXrayRoutingRule/renderSingBoxRoutingRule 通过 policyTag(p) 自动设置。
+		if p.PolicyType == "warp" && len(p.RoutingRules) == 0 {
+			for _, rule := range defaultWarpRoutingRules() {
+				if r := renderXrayRoutingRule(p, rule); r != nil {
+					xrayRules = append(xrayRules, r)
+				}
+				if r := renderSingBoxRoutingRule(p, rule); r != nil {
+					singBoxRules = append(singBoxRules, r)
+				}
+			}
+		}
 	}
 
 	// 确保每个 runtime 都有默认 direct（freedom）出站
@@ -396,4 +411,43 @@ func buildSingBoxSocksUser(cfg Map) (string, string) {
 	user, _ := cfg["username"].(string)
 	pwd, _ := cfg["password"].(string)
 	return user, pwd
+}
+
+// defaultWarpRoutingRules P3-F: WARP 默认路由规则（常见流媒体解锁）。
+// 仅在 warp policy 未配置任何 routing_rules 时自动注入，避免覆盖用户显式配置。
+//
+// 规则内容：将常见受地区限制的流媒体域名路由到 WARP 出口，利用 Cloudflare WARP IP 解锁。
+// 包含：Netflix / ChatGPT / Disney+ / YouTube Premium / Hulu / HBO Max / Spotify / TikTok 等。
+//
+// 返回的 rule Map 仅包含匹配条件（domains/ip_cidr），
+// outbound tag 由 renderXrayRoutingRule/renderSingBoxRoutingRule 通过 policyTag(p) 自动设置。
+func defaultWarpRoutingRules() []Map {
+	return []Map{
+		// 流媒体域名（domain 匹配，含子域名）
+		{
+			"domains": []interface{}{
+				"netflix.com",
+				"nflxvideo.net",
+				"nflximg.net",
+				"chatgpt.com",
+				"openai.com",
+				"disneyplus.com",
+				"disney-plus.net",
+				"hulu.com",
+				"hbo.com",
+				"hbomax.com",
+				"spotify.com",
+				"tiktok.com",
+				"youtube.com",
+				"googlevideo.com",
+				"ytimg.com",
+				"bbc.co.uk",
+				"bbc.com",
+				"abema.tv",
+				"dazn.com",
+				"primevideo.com",
+				"amazonaws.com",
+			},
+		},
+	}
 }

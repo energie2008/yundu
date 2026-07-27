@@ -2587,19 +2587,22 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 			if cbID, err := uuid.Parse(cbIDStr); err == nil {
 				cb, err := s.capRepo.GetCertBundle(ctx, cbID)
 				if err == nil && cb != nil && cb.CertPEM != "" && cb.KeyPEM != "" {
-					if n.ConfigJSON == nil {
-						n.ConfigJSON = make(map[string]interface{})
-					}
-					n.ConfigJSON["cert_pem"] = cb.CertPEM
-					n.ConfigJSON["key_pem"] = cb.KeyPEM
-					// P2-3: 成功注入精确匹配证书，Info 级别日志
-					if s.logger != nil {
-						s.logger.Info("injectCertFromBundle: injected cert via cert_bundle_id",
-							"node_code", n.Code, "sni", sni,
-							"cert_bundle_id", cbIDStr, "termination_class", tc.String())
-					}
-					return
+				if n.ConfigJSON == nil {
+					n.ConfigJSON = make(map[string]interface{})
 				}
+				n.ConfigJSON["cert_pem"] = cb.CertPEM
+				n.ConfigJSON["key_pem"] = cb.KeyPEM
+				// P1-D: 证书来源标记（面板可观测性，stripMetaFields 会剥离此字段不进入内核配置）
+				n.ConfigJSON["_cert_source"] = "cert_bundle_id"
+				// P2-3: 成功注入精确匹配证书，Info 级别日志
+				if s.logger != nil {
+					s.logger.Info("injectCertFromBundle: injected cert via cert_bundle_id",
+						"node_code", n.Code, "sni", sni,
+						"cert_bundle_id", cbIDStr, "termination_class", tc.String(),
+						"cert_source", "cert_bundle_id")
+				}
+				return
+			}
 			}
 		}
 		// 回退：按 SNI 域名匹配 cert_bundles.SAN
@@ -2611,19 +2614,22 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 				}
 				for _, san := range cb.SAN {
 					if strings.EqualFold(san, sni) {
-						if n.ConfigJSON == nil {
-							n.ConfigJSON = make(map[string]interface{})
-						}
-						n.ConfigJSON["cert_pem"] = cb.CertPEM
-						n.ConfigJSON["key_pem"] = cb.KeyPEM
-						// P2-3: SAN 匹配回退注入，Info 级别日志
-						if s.logger != nil {
-							s.logger.Info("injectCertFromBundle: injected cert via SAN fallback match",
-								"node_code", n.Code, "sni", sni,
-								"matched_san", san, "termination_class", tc.String())
-						}
-						return
+					if n.ConfigJSON == nil {
+						n.ConfigJSON = make(map[string]interface{})
 					}
+					n.ConfigJSON["cert_pem"] = cb.CertPEM
+					n.ConfigJSON["key_pem"] = cb.KeyPEM
+					// P1-D: 证书来源标记（SAN 模糊回退）
+					n.ConfigJSON["_cert_source"] = "cert_bundle_san"
+					// P2-3: SAN 匹配回退注入，Info 级别日志
+					if s.logger != nil {
+						s.logger.Info("injectCertFromBundle: injected cert via SAN fallback match",
+							"node_code", n.Code, "sni", sni,
+							"matched_san", san, "termination_class", tc.String(),
+							"cert_source", "cert_bundle_san")
+					}
+					return
+				}
 				}
 			}
 		}
@@ -2639,10 +2645,13 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 			}
 			n.ConfigJSON["cert_pem"] = certPEM
 			n.ConfigJSON["key_pem"] = keyPEM
+			// P1-D: 证书来源标记（tls_certificates 表 SNI 匹配）
+			n.ConfigJSON["_cert_source"] = "tls_certificates"
 			if s.logger != nil {
 				s.logger.Info("injectCertFromBundle: injected cert via tls_certificates SNI match",
 					"node_code", n.Code, "sni", sni,
-					"termination_class", tc.String())
+					"termination_class", tc.String(),
+					"cert_source", "tls_certificates")
 			}
 			return
 		}
@@ -2659,6 +2668,8 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 		}
 		n.ConfigJSON["cert_pem"] = certPEM
 		n.ConfigJSON["key_pem"] = keyPEM
+		// P1-D: 证书来源标记（自签兜底）
+		n.ConfigJSON["_cert_source"] = "self_signed"
 		// P1-D: 自签兜底增加 SHA256 指纹输出和高敏感告警
 		fingerprint := crypto.CertSHA256Fingerprint(certPEM)
 		if s.logger != nil {
@@ -2667,6 +2678,7 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 				"termination_class", tc.String(),
 				"protocol", n.ProtocolType,
 				"cert_fingerprint_sha256", fingerprint,
+				"cert_source", "self_signed",
 				"hint", "客户端需配置 insecure=true 或 pinnedPeerCertSha256",
 				"action", "请通过 cert_bundle_id 绑定正式 ACME 证书")
 		}
