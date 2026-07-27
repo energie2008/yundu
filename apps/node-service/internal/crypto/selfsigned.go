@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -110,4 +111,19 @@ func GenerateSelfSignedCertPEM(domain string) (certPEM, keyPEM string, err error
 	})
 
 	return string(certPEMBytes), string(keyPEMBytes), nil
+}
+
+// CertSHA256Fingerprint 计算 PEM 编码证书的 SHA256 指纹。
+// 用于自签兜底证书的高敏感告警日志（Trojan+TLS/AnyTLS/ShadowTLS 节点）。
+// 返回十六进制字符串（小写），解析失败返回空字符串。
+func CertSHA256Fingerprint(certPEM string) string {
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil {
+		return ""
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(cert.Raw))
 }

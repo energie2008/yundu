@@ -21,7 +21,8 @@ import (
 //   - NeedsNginxVhost:   是否需要生成 nginx 8445 HTTP vhost（location 路由）
 //   - NeedsStreamSNI:    是否需要 nginx 443 stream SNI 分流
 //   - NeedsCertBundle:   是否需要从 cert_bundles 注入证书 PEM 到 xray
-//   - CertHeldBy:        证书持有方（"xray" / "nginx" / "cf_edge" / "none"）
+//   - CertHeldBy:        证书持有方（"runtime" / "nginx" / "cf_edge" / "none"）
+//     "runtime" 表示内核运行时持有（内核无关，sing-box 或 xray 均可）
 type ExposurePolicy struct {
 	ListenAddress    string
 	StripTLS         bool // 兼容字段，等价于 NeedsTLSStrip
@@ -37,7 +38,7 @@ type ExposurePolicy struct {
 // 新增 exposure_mode 时只需在此表添加一行，所有渲染决策自动更新。
 //
 // 映射规则（与 TerminationClass 一致）：
-//   - direct:      xray 自终止 TLS，公网监听，证书由 xray 持有
+//   - direct:      runtime 自终止 TLS，公网监听，证书由内核运行时持有
 //   - reality:     xray REALITY 握手，公网监听，无传统证书
 //   - cdn:         回退 P4：nginx 持证书 + TLS 剥离 + proxy_pass http 回源，xray security=none，本地回环
 //   - cdn_saas:    同 cdn
@@ -49,7 +50,7 @@ var exposurePolicyMap = map[string]ExposurePolicy{
 		NeedsNginxVhost: false,
 		NeedsStreamSNI:  true,
 		NeedsCertBundle: true,
-		CertHeldBy:      "xray",
+		CertHeldBy:      "runtime", // P1-E: 内核无关，sing-box 或 xray 均可持有
 	},
 	"reality": {
 		ListenAddress:   "0.0.0.0",
@@ -102,7 +103,7 @@ var defaultExposurePolicy = ExposurePolicy{
 	NeedsNginxVhost: false,
 	NeedsStreamSNI:  true,
 	NeedsCertBundle: true,
-	CertHeldBy:      "xray",
+	CertHeldBy:      "runtime", // P1-E: 内核无关
 }
 
 // GetExposurePolicy P2-4: 根据 exposure_mode 查询渲染策略。

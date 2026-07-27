@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,15 +65,17 @@ type CertBundleSyncStore interface {
 
 // CertificateService 封装证书与 TLS Profile 的业务逻辑
 type CertificateService struct {
-	certRepo     CertificateStore
-	profileRepo  ProfileStore
-	deployRepo   DeployStore
-	audit        AuditWriter
-	logger       *slog.Logger
-	acmeRegistry *ACMERegistry
-	echGen       ECHGenerator
-	nodeSNIReader NodeSNIReader
+	certRepo        CertificateStore
+	profileRepo     ProfileStore
+	deployRepo      DeployStore
+	audit           AuditWriter
+	logger          *slog.Logger
+	acmeRegistry    *ACMERegistry
+	echGen          ECHGenerator
+	nodeSNIReader   NodeSNIReader
 	bundleSyncStore CertBundleSyncStore // 阶段 C1: ACME 续期后同步到 cert_bundles
+	// P6: SAN 同步并发控制 — 防止并发 SyncSANFromNodes 导致数据竞争
+	sanSyncMu sync.Mutex
 }
 
 func NewCertificateService(certRepo CertificateStore, profileRepo ProfileStore, deployRepo DeployStore, audit AuditWriter, logger *slog.Logger) *CertificateService {
@@ -928,6 +931,10 @@ func (s *CertificateService) ObtainCertificate(ctx context.Context, id uuid.UUID
 // serverID 参数：非 nil 时仅扫描该 server 下的节点（per-server 证书场景）；
 // 为 nil 时扫描所有节点。返回 (合并后SAN, 新增数量, error)。
 func (s *CertificateService) SyncSANFromNodes(ctx context.Context, certID uuid.UUID, serverID *uuid.UUID) (*Certificate, int, error) {
+	// P6: SAN 同步并发控制 — 防止并发调用导致 SAN 丢失或重复
+	s.sanSyncMu.Lock()
+	defer s.sanSyncMu.Unlock()
+
 	if s.nodeSNIReader == nil {
 		return nil, 0, ErrNodeSNIReaderNotInjected
 	}
@@ -999,4 +1006,56 @@ func (s *CertificateService) SyncSANFromNodes(ctx context.Context, certID uuid.U
 		s.audit.Audit(ctx, "sync_san", "tls_certificate", before, cert)
 	}
 	return cert, added, nil
+}
+
+// StartSANSyncJob P6: 每 24 小时批量同步所有证书的 SAN。
+// 确保新增节点的 SNI 能定期同步到 tls_certificates 表的 sans 数组。
+// 使用 sanSyncMu 防止与事件驱动的 SyncSANFromNodes 并发冲突。
+func (s *CertificateService) StartSANSyncJob(ctx context.Context) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	// 启动时立即执行一次
+	s.batchSyncAllSANs(ctx)
+	for {
+		select {
+		case <-ticker.C:
+			s.batchSyncAllSANs(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// batchSyncAllSANs 批量同步所有证书的 SAN（P6 内部方法）。
+func (s *CertificateService) batchSyncAllSANs(ctx context.Context) {
+	if s.logger != nil {
+		s.logger.Info("P6: batch SAN sync job started")
+	}
+	// 查询所有证书（分页，避免一次加载过多）
+	page := 1
+	pageSize := 100
+	for {
+		certs, total, err := s.certRepo.List(ctx, page, pageSize, "", 0)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("P6: batch SAN sync List failed", "page", page, "error", err)
+			}
+			return
+		}
+		for _, c := range certs {
+			if _, _, err := s.SyncSANFromNodes(ctx, c.ID, nil); err != nil {
+				if s.logger != nil {
+					s.logger.Warn("P6: batch SAN sync cert failed",
+						"cert_id", c.ID, "code", c.Code, "error", err)
+				}
+			}
+		}
+		if page*pageSize >= total {
+			break
+		}
+		page++
+	}
+	if s.logger != nil {
+		s.logger.Info("P6: batch SAN sync job completed")
+	}
 }

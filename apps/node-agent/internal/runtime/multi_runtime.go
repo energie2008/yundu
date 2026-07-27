@@ -1,15 +1,15 @@
 // Package runtime 提供双内核并行运行时支持。
 //
 // MultiRuntimePlugin 是双内核一等公民架构的核心实现（手册 §5 P2 原则）。
-// 它同时持有 xray 和 sing-box 两个 RuntimePlugin 实例，对外暴露统一接口，
+// 它同时持有 sing-box 和 xray 两个 RuntimePlugin 实例，对外暴露统一接口，
 // 实现以下能力：
 //   - 配置应用：根据 runtime_type 分发到对应内核
 //   - 流量统计：合并两个内核的 per-user 流量数据
 //   - 热重载：两个内核独立热重载，互不影响
 //   - 状态查询：返回两个内核的合并状态
 //
-// 设计要点：
-//   - xray 始终运行（主内核），sing-box 按需启动（有 sing-box 节点时才启动）
+// 设计要点（P2 翻转后）：
+//   - sing-box 始终运行（主内核），xray 按需启动（仅 XHTTP 节点时才启动）
 //   - 两个内核监听不同端口，互不冲突
 //   - 流量数据合并时，同用户的流量累加（不同内核可能有同一用户的节点）
 package runtime
@@ -26,21 +26,22 @@ import (
 
 // MultiRuntimePlugin 双内核并行运行时插件。
 //
-// 同时管理 xray 和 sing-box 两个内核实例，对外提供统一的 RuntimePlugin 接口。
+// 同时管理 sing-box 和 xray 两个内核实例，对外提供统一的 RuntimePlugin 接口。
 // 配置应用时根据配置内容的 runtime_type 字段分发到对应内核；
 // 流量统计时合并两个内核的数据。
+//
+// P2 主辅翻转：sing-box 为主内核（始终存在），xray 为辅内核（懒加载，仅 XHTTP 时启用）。
 type MultiRuntimePlugin struct {
 	mu sync.Mutex
 
-	// xrayPlugin 始终存在（主内核）
-	xrayPlugin *NativeXray
-	// xrayStarted 标记 xray 是否已启动（通过 Start 方法触发）
-	// 不能用 xrayPlugin != nil 判断，因为构造函数中 xrayPlugin 始终被赋值
-	xrayStarted bool
-	// singboxPlugin 按需创建（首次收到 sing-box 配置时）
+	// singboxPlugin 始终存在（主内核）— P2 翻转
 	singboxPlugin *NativeSingbox
 	// singboxStarted 标记 sing-box 是否已启动
 	singboxStarted bool
+	// xrayPlugin 按需创建（仅 XHTTP 配置时懒加载）— P2 翻转
+	xrayPlugin *NativeXray
+	// xrayStarted 标记 xray 是否已启动
+	xrayStarted bool
 	// singboxClashEndpoint 是分配给 sing-box Clash API 的端点
 	singboxClashEndpoint string
 	// singboxSpeedLimiter 存储 sing-box 的限速器，在 singboxPlugin 创建时注入
@@ -54,34 +55,49 @@ type MultiRuntimePlugin struct {
 }
 
 // NewMultiRuntimePlugin 创建双内核并行运行时插件。
-// xrayPlugin 必须非 nil（主内核），singboxClashEndpoint 为 sing-box Clash API 端点（Machine模式使用）。
+// P2 翻转：sing-box 为主内核（始终存在），xray 为辅内核（懒加载）。
+// singboxClashEndpoint 为 sing-box Clash API 端点（Machine模式使用）。
+// xrayPlugin 参数保留以兼容现有调用，但 xray 不再在构造函数中强制创建（改为懒加载）。
 func NewMultiRuntimePlugin(xrayPlugin *NativeXray, singboxClashEndpoint string, logger *slog.Logger) *MultiRuntimePlugin {
-	return &MultiRuntimePlugin{
-		xrayPlugin:           xrayPlugin,
+	m := &MultiRuntimePlugin{
 		singboxClashEndpoint: singboxClashEndpoint,
 		logger:               logger,
 	}
+	// P2: sing-box 为主内核，在构造函数中立即创建
+	m.singboxPlugin = NewNativeSingbox(logger, singboxClashEndpoint)
+	// 兼容：如果传入了 xrayPlugin，保留（但不再是主内核）
+	m.xrayPlugin = xrayPlugin
+	return m
 }
 
-// ensureSingboxPlugin 确保 sing-box 插件实例存在（懒初始化）。
+// ensureXrayPlugin 确保 xray 插件实例存在（懒初始化）— P2 翻转。
+func (m *MultiRuntimePlugin) ensureXrayPlugin() *NativeXray {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.xrayPlugin == nil {
+		m.xrayPlugin = NewNativeXray(m.logger, "") // apiEndpoint 留空使用默认值
+		m.logger.Info("xray plugin initialized (lazy, secondary)", "component", "multi-runtime")
+	}
+	return m.xrayPlugin
+}
+
+// ensureSingboxPlugin 返回 sing-box 插件实例。P2 翻转：已在构造函数中创建，此方法仅返回引用。
 func (m *MultiRuntimePlugin) ensureSingboxPlugin() *NativeSingbox {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// P2: sing-box 在构造函数中已创建，但防御性检查
 	if m.singboxPlugin == nil {
 		m.singboxPlugin = NewNativeSingbox(m.logger, m.singboxClashEndpoint)
 		// 注入已存储的限速器
 		if m.singboxSpeedLimiter != nil {
 			m.singboxPlugin.SetSpeedLimiter(m.singboxSpeedLimiter)
 		}
-		// 注入已存储的设备检查器
 		if m.singboxDeviceChecker != nil {
 			m.singboxPlugin.SetDeviceChecker(m.singboxDeviceChecker)
 		}
-		// 注入已存储的 IP 限制检查器
 		if m.singboxIPChecker != nil {
 			m.singboxPlugin.SetIPLimiter(m.singboxIPChecker)
 		}
-		m.logger.Info("sing-box plugin initialized (lazy)", "component", "multi-runtime")
 	}
 	return m.singboxPlugin
 }
@@ -125,10 +141,10 @@ func (m *MultiRuntimePlugin) SetSingboxIPLimiter(ic IPChecker) {
 // Start 应用配置到对应内核。
 //
 // 配置内容的 runtime_type 通过 detectRuntimeType 检测：
-//   - xray 配置 → xrayPlugin.Start
-//   - sing-box 配置 → singboxPlugin.Start（首次调用时懒初始化）
+//   - xray 配置 → xrayPlugin.Start（懒初始化，仅 XHTTP 时触发）
+//   - sing-box 配置 → singboxPlugin.Start（主内核，始终已初始化）
 //
-// 两个内核独立启动，互不影响。如果一个内核启动失败，另一个不受影响。
+// P2 翻转：sing-box 为 default 分支，xray 为显式 case。
 func (m *MultiRuntimePlugin) Start(ctx context.Context, configBytes []byte) error {
 	rtType := detectRuntimeType(configBytes)
 	m.logger.Info("multi-runtime Start",
@@ -137,25 +153,25 @@ func (m *MultiRuntimePlugin) Start(ctx context.Context, configBytes []byte) erro
 		"component", "multi-runtime")
 
 	switch rtType {
-	case "sing-box":
-		sb := m.ensureSingboxPlugin()
-		if err := sb.Start(ctx, configBytes); err != nil {
-			return fmt.Errorf("sing-box start failed: %w", err)
-		}
-		m.mu.Lock()
-		m.singboxStarted = true
-		m.mu.Unlock()
-		m.logger.Info("sing-box started successfully", "component", "multi-runtime")
-		return nil
-
-	default: // xray
-		if err := m.xrayPlugin.Start(ctx, configBytes); err != nil {
+	case "xray":
+		xp := m.ensureXrayPlugin()
+		if err := xp.Start(ctx, configBytes); err != nil {
 			return fmt.Errorf("xray start failed: %w", err)
 		}
 		m.mu.Lock()
 		m.xrayStarted = true
 		m.mu.Unlock()
-		m.logger.Info("xray started successfully", "component", "multi-runtime")
+		m.logger.Info("xray started successfully (secondary)", "component", "multi-runtime")
+		return nil
+
+	default: // sing-box（主内核）
+		if err := m.singboxPlugin.Start(ctx, configBytes); err != nil {
+			return fmt.Errorf("sing-box start failed: %w", err)
+		}
+		m.mu.Lock()
+		m.singboxStarted = true
+		m.mu.Unlock()
+		m.logger.Info("sing-box started successfully (primary)", "component", "multi-runtime")
 		return nil
 	}
 }
@@ -304,21 +320,35 @@ func (m *MultiRuntimePlugin) GetTrafficStatsNoReset(ctx context.Context) (map[st
 	return merged, nil
 }
 
-// Status 返回主内核（xray）的状态。
-// sing-box 状态作为辅助信息记录在日志中。
+// Status 返回主内核（sing-box）的状态。P2 翻转补改。
+// sing-box 未启动时回退到 xray 状态（兼容过渡期）。
 func (m *MultiRuntimePlugin) Status(ctx context.Context) (*PluginStatus, error) {
-	return m.xrayPlugin.Status(ctx)
+	m.mu.Lock()
+	sbStarted := m.singboxStarted
+	m.mu.Unlock()
+	if sbStarted && m.singboxPlugin != nil {
+		return m.singboxPlugin.Status(ctx)
+	}
+	// fallback: sing-box 未启动时查 xray
+	m.mu.Lock()
+	xrayStarted := m.xrayStarted
+	m.mu.Unlock()
+	if xrayStarted && m.xrayPlugin != nil {
+		return m.xrayPlugin.Status(ctx)
+	}
+	return nil, fmt.Errorf("no runtime started")
 }
 
 // Validate 校验配置内容（自动检测 runtime_type 分发到对应内核）。
+// P2 翻转补改：default 分支走 sing-box（主内核）。
 func (m *MultiRuntimePlugin) Validate(configBytes []byte) error {
 	rtType := detectRuntimeType(configBytes)
 	switch rtType {
-	case "sing-box":
-		sb := m.ensureSingboxPlugin()
-		return sb.Validate(configBytes)
-	default:
-		return m.xrayPlugin.Validate(configBytes)
+	case "xray":
+		xp := m.ensureXrayPlugin()
+		return xp.Validate(configBytes)
+	default: // sing-box（主内核）
+		return m.singboxPlugin.Validate(configBytes)
 	}
 }
 
@@ -342,7 +372,7 @@ func (m *MultiRuntimePlugin) IsSingboxStarted() bool {
 //  1. sing-box 配置有 "log" + "inbounds" + "outbounds" 顶层字段，且 inbound 用 "type" 而非 "protocol"
 //  2. xray 配置有 "inbounds" 但 inbound 用 "protocol" 字段
 //  3. 尝试 sing-box option.Options 解析，成功则为 sing-box
-//  4. 默认 xray
+//  4. 默认 sing-box（P2 翻转：sing-box 为主内核）
 //
 // P9-FIX: 旧版 containsSingboxMarker 用字符串匹配 `"type": "vless"` 等会误判 xray 配置
 // （xray outbound/routing 中也可能出现这些字符串）。改用结构化检测：
@@ -351,7 +381,7 @@ func (m *MultiRuntimePlugin) IsSingboxStarted() bool {
 //   - sing-box 专属协议（hysteria2/tuic/anytls）仍可用字符串匹配作为辅助判据
 func detectRuntimeType(configBytes []byte) string {
 	if len(configBytes) == 0 {
-		return "xray"
+		return "sing-box" // P2 翻转补改：空配置默认返回 sing-box（主内核）
 	}
 
 	// 结构化检测：解析 JSON 顶层字段
@@ -401,7 +431,7 @@ func detectRuntimeType(configBytes []byte) string {
 			return "sing-box"
 		}
 	}
-	return "xray"
+	return "sing-box" // P2 翻转：默认 sing-box（主内核）
 }
 
 // stringContains 简单字符串包含检测（避免引入 strings 包的依赖）。

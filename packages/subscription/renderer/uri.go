@@ -499,7 +499,12 @@ func (r *URIRenderer) renderSS(n nodespec.NodeSpec, addr string, port int) strin
 			q.Set("alpn", strings.Join(n.TLS.ALPN, ","))
 		}
 		if n.TLS.AllowInsecure {
-			q.Set("allowInsecure", "1")
+			// P4-A: 修正 allowInsecure 混乱 — SS 协议也支持 PinSHA256 证书锁定
+			if n.TLS.PinSHA256 != "" {
+				q.Set("pinnedPeerCertSha256", n.TLS.PinSHA256)
+			} else {
+				q.Set("allowInsecure", "1")
+			}
 		}
 	} else if n.Security == nodespec.SecurityReality && n.Reality != nil {
 		q.Set("security", "reality")

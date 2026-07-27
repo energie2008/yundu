@@ -87,6 +87,8 @@ type Agent struct {
 	useNative bool
 	// runtimePlugin 原生内嵌运行时插件（useNative=true 时有效）
 	runtimePlugin agentruntime.RuntimePlugin
+	// P3-E: WARP 侧车管理器（Detect/Connect/状态上报闭环）
+	warpMgr warp.Manager
 	// pluginAdapter 将 RuntimePlugin 适配为 RuntimeExecutor 接口
 	pluginAdapter *agentruntime.PluginAdapter
 	// 边缘自治全链路：LKG 回滚状态机 + deploy.lock + 健康探活 + 边缘预检
@@ -129,9 +131,9 @@ type Agent struct {
 	// 上报失败时保留未上报流量到 pending，Agent 重启后从 traffic_buffer.json 恢复
 	trafficBuffer  *agentruntime.TrafficBuffer
 	trafficSaveDeb *agentruntime.SaveDebouncer
-	// 双内核：缓存最近成功应用的 sing-box 配置，供 debounced restart 后重新启动 sing-box 内核
-	// （Reload 从文件加载的配置已剥离 _singbox_config，无法自动恢复 sing-box）
-	lastSingboxConfig map[string]interface{}
+	// P2 翻转：缓存最近成功应用的 xray 配置，供 debounced restart 后重新启动 xray 内核
+	// （Reload 从文件加载的配置已剥离 _xray_config，无法自动恢复 xray）
+	lastXrayConfig map[string]interface{}
 	// fetchedViaPayload 标记本次applyConfig是否走加密Payload通道（由fetchConfigViaPayload设置）
 	// 用于签名校验策略选择：Payload通道AES-GCM已认证，hash不匹配时warn不阻断
 	fetchedViaPayload bool
@@ -909,31 +911,33 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 	limiterMeta := configMap["_limiter"]
 	delete(configMap, "_limiter")
 
-	// 双内核架构：提取 _singbox_config 字段（面板将 sing-box 配置嵌入 xray 配置中）
-	// 提取后单独应用到 sing-box 内核，避免 xray 验证失败
-	singboxConfig, hasSingboxConfig := configMap["_singbox_config"].(map[string]interface{})
-	if hasSingboxConfig {
-		delete(configMap, "_singbox_config")
-		a.logger.Info("extracted _singbox_config from xray config, will apply to sing-box kernel",
-			"sb_inbounds", len(singboxConfig["inbounds"].([]interface{})))
+	// P2 翻转：双内核架构 — 提取 _xray_config 字段（面板将 xray 配置嵌入 sing-box 配置中）
+	// 提取后单独应用到 xray 内核（懒加载），避免 sing-box 验证失败
+	xrayConfig, hasXrayConfig := configMap["_xray_config"].(map[string]interface{})
+	if hasXrayConfig {
+		delete(configMap, "_xray_config")
+		xrayInboundCount := 0
+		if inbs, ok := xrayConfig["inbounds"].([]interface{}); ok {
+			xrayInboundCount = len(inbs)
+		}
+		a.logger.Info("extracted _xray_config from sing-box config, will apply to xray kernel",
+			"xray_inbounds", xrayInboundCount)
 	}
 
 	// 端口跳跃元数据提取：sing-box 不支持原生 hop_ports 字段，
 	// kernelrender 将 port_hopping 配置写入每个 inbound 的 _port_hopping 元数据字段。
 	// 此处从 sing-box inbounds 中剥离并收集，用于后续 iptables DNAT 自动应用。
 	// 必须在 StartNative 之前剥离，否则 sing-box 解析 JSON 会报 "unknown field _port_hopping"。
-	portHoppingRules := firewall.ExtractPortHoppingFromSingboxConfig(singboxConfig, a.logger)
+	portHoppingRules := firewall.ExtractPortHoppingFromSingboxConfig(configMap, a.logger)
 
 	// P-Chain-Bridge: 提取 _chain_bridges 字段（自签证书/insecure 链式桥接配置）
-	// 面板在 xray runtime 下遇到 insecure=1 时自动生成 sing-box 桥接配置，
-	// xray chain outbound 为 socks5 指向本地桥接端口，sing-box 桥接用 insecure:true 连接上游。
-	// 合并到 singboxConfig 中作为一个 sing-box 实例运行（或单独注入如果没有 _singbox_config）。
+	// 面板在 sing-box runtime 下遇到 insecure=1 时自动生成桥接配置，
+	// 合并到主 sing-box 配置中（P2 翻转后主配置即为 sing-box）。
 	chainBridges, hasChainBridges := configMap["_chain_bridges"].(map[string]interface{})
 	if hasChainBridges {
 		delete(configMap, "_chain_bridges")
-		a.logger.Info("extracted _chain_bridges from xray config, will merge into sing-box kernel")
-		singboxConfig = mergeChainBridges(singboxConfig, chainBridges, a.logger)
-		hasSingboxConfig = true
+		a.logger.Info("extracted _chain_bridges, will merge into sing-box kernel")
+		configMap = mergeChainBridges(configMap, chainBridges, a.logger)
 	}
 
 	// P2-9: 审计规则动态下发（_audit_rules）
@@ -943,9 +947,10 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 	if err := audit.ApplyToConfig(configMap, a.cfg.RuntimeType, auditRules, a.logger); err != nil {
 		a.logger.Warn("audit rule injection failed", "error", err)
 	}
-	if hasSingboxConfig {
-		if err := audit.ApplyToConfig(singboxConfig, "sing-box", auditRules, a.logger); err != nil {
-			a.logger.Warn("sing-box audit rule injection failed", "error", err)
+	// P2 翻转：如果有 xray 配置，也应用审计规则
+	if hasXrayConfig {
+		if err := audit.ApplyToConfig(xrayConfig, "xray", auditRules, a.logger); err != nil {
+			a.logger.Warn("xray audit rule injection failed", "error", err)
 		}
 	}
 
@@ -1056,19 +1061,19 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 	// P1-8: 启动设备限制执行器（首次成功应用配置后启动一次）
 	a.maybeStartDeviceEnforcer(ctx, configMap)
 
-	// 双内核架构：如果有 sing-box 配置，应用到 sing-box 内核
-	if hasSingboxConfig && a.useNative && a.pluginAdapter != nil {
-		sbConfigBytes, sbErr := json.Marshal(singboxConfig)
-		if sbErr != nil {
-			a.logger.Error("marshal sing-box config failed", "error", sbErr)
+	// P2 翻转：如果有 xray 配置，应用到 xray 内核（懒加载辅内核）
+	if hasXrayConfig && a.useNative && a.pluginAdapter != nil {
+		xrayConfigBytes, xrayErr := json.Marshal(xrayConfig)
+		if xrayErr != nil {
+			a.logger.Error("marshal xray config failed", "error", xrayErr)
 		} else {
-			if sbErr := a.pluginAdapter.StartNative(ctx, sbConfigBytes); sbErr != nil {
-				a.logger.Error("apply sing-box config failed", "error", sbErr)
+			if xrayErr := a.pluginAdapter.StartNative(ctx, xrayConfigBytes); xrayErr != nil {
+				a.logger.Error("apply xray config failed", "error", xrayErr)
 			} else {
-				a.logger.Info("sing-box config applied successfully via dual-kernel injection",
-					"sb_config_size", len(sbConfigBytes))
-				// 缓存 sing-box 配置，供 debounced restart 后重新启动 sing-box
-				a.lastSingboxConfig = singboxConfig
+				a.logger.Info("xray config applied successfully via dual-kernel injection",
+					"xray_config_size", len(xrayConfigBytes))
+				// P2 翻转：缓存 xray 配置，供 debounced restart 后重新启动 xray
+				a.lastXrayConfig = xrayConfig
 			}
 		}
 	}
@@ -1235,16 +1240,16 @@ func (a *Agent) scheduleDebouncedRestart(ctx context.Context, configPath string)
 		} else {
 			a.logger.Info("debounced restart completed successfully")
 		}
-		// 双内核：Reload 只恢复了 xray（文件已剥离 _singbox_config），需手动重启 sing-box
-		if a.lastSingboxConfig != nil && a.useNative && a.pluginAdapter != nil {
-			sbBytes, sbErr := json.Marshal(a.lastSingboxConfig)
-			if sbErr != nil {
-				a.logger.Error("debounced restart: marshal sing-box config failed", "error", sbErr)
-			} else if sbErr := a.pluginAdapter.StartNative(ctx, sbBytes); sbErr != nil {
-				a.logger.Error("debounced restart: restart sing-box failed", "error", sbErr)
+		// P2 翻转：Reload 只恢复了 sing-box（文件已剥离 _xray_config），需手动重启 xray
+		if a.lastXrayConfig != nil && a.useNative && a.pluginAdapter != nil {
+			xrayBytes, xrayErr := json.Marshal(a.lastXrayConfig)
+			if xrayErr != nil {
+				a.logger.Error("debounced restart: marshal xray config failed", "error", xrayErr)
+			} else if xrayErr := a.pluginAdapter.StartNative(ctx, xrayBytes); xrayErr != nil {
+				a.logger.Error("debounced restart: restart xray failed", "error", xrayErr)
 			} else {
-				a.logger.Info("debounced restart: sing-box restarted successfully",
-					"sb_config_size", len(sbBytes))
+				a.logger.Info("debounced restart: xray restarted successfully",
+					"xray_config_size", len(xrayBytes))
 			}
 		}
 	})
@@ -1623,9 +1628,22 @@ func (a *Agent) runAgent(ctx context.Context) error {
 		}
 	}
 
+	// P3-E: WARP 侧车生命周期增强 — 从仅检测升级为 Detect/Connect/状态上报闭环
 	warpMgr := warp.NewManager(nil, a.logger)
+	a.warpMgr = warpMgr
 	if warpMgr.DetectWarp() {
-		a.logger.Info("warp sidecar detected", "socks_addr", warpMgr.SocksAddr())
+		a.logger.Info("warp sidecar detected, attempting connect", "socks_addr", warpMgr.SocksAddr())
+		// 尝试连接 WARP
+		if err := warpMgr.Connect(); err != nil {
+			a.logger.Warn("warp connect failed, WARP outbound may be unavailable", "error", err)
+		} else {
+			status := warpMgr.GetStatus()
+			a.logger.Info("warp connected", "status", status.Status, "warp_ip", status.WarpIP, "latency_ms", status.LatencyMs)
+		}
+		// 启动定期状态上报 goroutine（每 5 分钟）
+		go a.runWarpStatusReporter(ctx)
+	} else {
+		a.logger.Info("warp-cli not detected, WARP outbound disabled (sing-box native wireguard still available)")
 	}
 
 	token := resolveToken(a.cfg, a.logger)

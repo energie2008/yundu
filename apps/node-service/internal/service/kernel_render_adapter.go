@@ -99,9 +99,7 @@ func determineInboundExposureMode(node *model.Node, inbMap map[string]interface{
 
 	// 下行 inbound：优先显式 _inbound_role 字段（P1正式方案），tag后缀仅fallback
 	if isDownstreamInboundFromMap(inbMap) {
-		if node.DownstreamExposureMode != nil && *node.DownstreamExposureMode != "" {
-			return *node.DownstreamExposureMode
-		}
+		// P1-A: config_json.downstream_exposure_mode 是唯一真相源，独立列仅为 DB 索引投影
 		if node.ConfigJSON != nil {
 			if v, ok := node.ConfigJSON["downstream_exposure_mode"].(string); ok && v != "" {
 				return v
@@ -111,9 +109,7 @@ func determineInboundExposureMode(node *model.Node, inbMap map[string]interface{
 	}
 
 	// 上行/普通 inbound
-	if node.ExposureMode != nil && *node.ExposureMode != "" {
-		return *node.ExposureMode
-	}
+	// P1-A: config_json.exposure_mode 是唯一真相源，独立列仅为 DB 索引投影
 	if node.ConfigJSON != nil {
 		if v, ok := node.ConfigJSON["exposure_mode"].(string); ok && v != "" {
 			return v

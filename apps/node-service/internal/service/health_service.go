@@ -151,7 +151,7 @@ func (s *HealthService) ReportHeartbeat(ctx context.Context, serverCode string, 
 		}
 	}
 
-	// 主runtime：node-agent双核架构下，xray runtime是主配置通道（承载_singbox_config嵌入）
+	// 主runtime：node-agent双核架构下，sing-box runtime是主配置通道（承载_xray_config嵌入）
 	// 优先找xray runtime（ProviderRef=nil的那个，或类型为xray的）
 	var primaryRT *model.Runtime
 	for _, r := range agentRTs {

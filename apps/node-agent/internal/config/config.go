@@ -274,7 +274,8 @@ func (c *Config) ConfigFilePath() string {
 	case "sing-box":
 		return c.ConfigDir + "/config/sing-box.json"
 	default:
-		return c.ConfigDir + "/config.json"
+		// P2 翻转：默认返回 sing-box.json（sing-box 为主内核）
+		return c.ConfigDir + "/config/sing-box.json"
 	}
 }
 

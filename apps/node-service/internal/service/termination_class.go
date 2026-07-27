@@ -51,10 +51,8 @@ func ClassifyTermination(node *model.Node) TerminationClass {
 	}
 
 	// 2. argo_tunnel → CF 边缘终止
+	// P1-A: config_json.exposure_mode 是唯一真相源，独立列仅为 DB 索引投影
 	em := determineExposureMode(node)
-	if node.ExposureMode != nil && *node.ExposureMode != "" {
-		em = *node.ExposureMode
-	}
 	if em == "argo_tunnel" {
 		return TerminationCFEdge
 	}

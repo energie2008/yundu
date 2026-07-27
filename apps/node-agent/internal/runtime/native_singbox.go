@@ -235,6 +235,7 @@ func (s *NativeSingbox) startDrainingLocked(oldBox *box.Box) {
 }
 
 // drainAndClose 监控老实例连接排空，完成后优雅关闭。
+// P6: 增加 drain 耗时监控 — 记录实际断流窗口，>10s 输出告警日志。
 func (s *NativeSingbox) drainAndClose(db *drainingBox) {
 	ticker := time.NewTicker(s.drainCheckInterval)
 	defer ticker.Stop()
@@ -252,8 +253,15 @@ func (s *NativeSingbox) drainAndClose(db *drainingBox) {
 			s.logger.Debug("draining sing-box instance", "age", age.String())
 			// 排空策略：等待到超时时间后关闭，让 TCP 连接自然结束
 		case <-timer.C:
+			drainDuration := time.Since(db.startedAt)
 			s.logger.Info("draining sing-box instance timeout, closing gracefully",
-				"age", time.Since(db.startedAt).String())
+				"age", drainDuration.String())
+			// P6: drain 耗时监控 — 实际断流窗口可能达几十到几百毫秒（非"微秒级"）
+			if drainDuration > 10*time.Second {
+				s.logger.Warn("P6: blue-green drain took longer than 10s, possible connection disruption",
+					"drain_duration_ms", drainDuration.Milliseconds(),
+					"hint", "consider reducing drain_timeout or checking for long-lived connections")
+			}
 			safeCloseBox(db.box, s.logger, "draining box on timeout")
 			close(db.closed)
 			s.removeFromDrainingList(db)

@@ -375,6 +375,9 @@ func Run() {
 	certDeployRepo := cert.NewCertDeployRepo(pool)
 	certService := cert.NewCertificateService(certRepo, tlsProfileRepo, certDeployRepo, nil, logger)
 
+	// P1-C: 注入 TLSCertReader 到 DeploymentService（证书四级回退第3级）
+	deploymentService.SetTLSCertReader(service.NewTLSCertReaderAdapter(certRepo))
+
 	// 注入 ECH 密钥对生成器（依赖本地 xray 二进制；未安装时 GenerateECH 返回错误）
 	certService.SetECHGenerator(cert.NewXrayECHGenerator(os.Getenv("XRAY_BINARY_PATH")))
 
@@ -432,10 +435,13 @@ func Run() {
 		acmeDirURL := os.Getenv("ACME_DIR_URL")
 		acmeRegistry := cert.NewACMERegistry(acmeEmail, acmeDirURL, logger)
 		certService.SetACMERegistry(acmeRegistry)
-		// 启动证书续期定时任务（每 6 小时检查一次）
-		go certService.StartRenewalJob(ctx)
-		logger.Info("ACME registry injected and renewal job started",
-			"email", acmeEmail, "dir_url", acmeDirURL)
+	// 启动证书续期定时任务（每 6 小时检查一次）
+	go certService.StartRenewalJob(ctx)
+	logger.Info("ACME registry injected and renewal job started",
+		"email", acmeEmail, "dir_url", acmeDirURL)
+	// P6: 启动 SAN 24h 批量同步定时任务
+	go certService.StartSANSyncJob(ctx)
+	logger.Info("SAN batch sync job started (24h interval)")
 	}
 
 	exposureRepo := exposure.NewExposureRepo(pool)
@@ -505,6 +511,9 @@ func Run() {
 	warpProfileRepo := outbound.NewWarpProfileRepo(pool)
 	outboundService := outbound.NewOutboundService(outboundPolicyRepo, logger)
 	warpProfileService := outbound.NewWarpProfileService(warpProfileRepo, logger)
+
+	// P3-C: 注入 outbound 策略服务到 DeploymentService（WARP 出口接入）
+	deploymentService.SetOutboundService(outboundService)
 
 	upgradeRepo := upgrade.NewUpgradeTaskRepo(pool)
 	upgradeService := upgrade.NewUpgradeService(upgradeRepo, runtimeRepo, nil, logger)

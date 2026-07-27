@@ -200,6 +200,28 @@ func (r *CertificateRepo) ListExpiringSoon(ctx context.Context, days int) ([]*Ce
 	return certs, rows.Err()
 }
 
+// FindActiveBySNI P1-C: 按 SNI 域名查询 tls_certificates 表中 status='active' 的证书。
+// 匹配逻辑：SANs 数组包含 SNI（大小写不敏感），cert_pem 非 NULL。
+// 用于 injectCertFromBundle 证书四级回退第3级。
+func (r *CertificateRepo) FindActiveBySNI(ctx context.Context, sni string) (*Certificate, error) {
+	if sni == "" {
+		return nil, nil
+	}
+	query := fmt.Sprintf(`
+		SELECT %s FROM tls_certificates
+		WHERE status = 'active' AND cert_pem IS NOT NULL
+		AND EXISTS (SELECT 1 FROM unnest(sans) AS s WHERE lower(s) = lower($1))
+		ORDER BY created_at DESC LIMIT 1`, certColumns)
+	c := &Certificate{}
+	if err := scanCertificate(r.pool.QueryRow(ctx, query, sni), c); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return c, nil
+}
+
 // CertDeployRepo 处理 cert_deploy_records 数据访问
 type CertDeployRepo struct {
 	pool *pgxpool.Pool

@@ -280,8 +280,9 @@ func (a *PluginAdapter) StartNative(ctx context.Context, configBytes []byte) err
 	return nil
 }
 
-// stripMetaFields 从配置 JSON 中剥离 _nginx_vhosts / _limiter / _traffic_quota / _singbox_config / _chain_bridges / _port_hopping 等元数据字段，
+// stripMetaFields 从配置 JSON 中剥离 _nginx_vhosts / _limiter / _traffic_quota / _xray_config / _chain_bridges / _port_hopping 等元数据字段，
 // 防止内核 JSON 解析失败。
+// P2 翻转：sing-box 为主内核，xray 配置嵌入为 _xray_config（替代旧的 _singbox_config）。
 // 注意：_port_hopping 嵌套在 sing-box inbound 内部，由 firewall.ExtractPortHoppingFromSingboxConfig
 // 在调用 StartNative 之前剥离；此处顶层 delete 是双重保险，处理边缘情况。
 func stripMetaFields(data []byte) ([]byte, error) {
@@ -292,7 +293,8 @@ func stripMetaFields(data []byte) ([]byte, error) {
 	delete(cfg, "_nginx_vhosts")
 	delete(cfg, "_limiter")
 	delete(cfg, "_traffic_quota")
-	delete(cfg, "_singbox_config")
+	delete(cfg, "_xray_config") // P2 翻转：剥离嵌入的 xray 配置
+	delete(cfg, "_singbox_config") // 兼容：同时剥离旧字段（过渡期安全）
 	delete(cfg, "_chain_bridges")
 	delete(cfg, "_port_hopping")
 	// 同时剥离 sing-box inbounds 内嵌的 _port_hopping（双重保险）

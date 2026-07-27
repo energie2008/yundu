@@ -331,6 +331,35 @@ func injectNginxIncludes(logger *slog.Logger, nginxConfPath string) error {
 			"path", yunduNginxVhostsDir)
 	}
 
+	// 2.5 P4-C: 确保 80 端口 server block 存在（ACME 验证 + HTTP→HTTPS 重定向）
+	if !strings.Contains(newContent, "listen 80") {
+		http80Block := fmt.Sprintf(`
+    # YunDu P4-C: 80 端口骨架（ACME 验证 + HTTP→HTTPS 重定向）
+    server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        server_name _;
+
+        location ^~ /.well-known/acme-challenge/ {
+            root %s;
+            default_type "text/plain";
+            try_files $uri =404;
+        }
+
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }
+`, acmeChallengeDir)
+		// 注入到 http 块末尾
+		idx, ok := findBlockEnd(newContent, "http")
+		if ok {
+			newContent = newContent[:idx] + http80Block + newContent[idx:]
+			httpInjected = true
+			logger.Info("injected HTTP 80 server block (ACME + redirect)")
+		}
+	}
+
 	// 3. 无变更：直接返回
 	if !streamInjected && !httpInjected {
 		logger.Info("all standard includes already present, no injection needed",

@@ -258,10 +258,10 @@ func TestECHForcesTLS13(t *testing.T) {
 	}
 }
 
-// TestRenderXHTTPDownloadSettings 测试 XHTTP split mode downloadSettings 在服务端不渲染
-// xray 26.3.27 存在 downloadSettings 静默失败 bug，服务端 inbound 配置应跳过该字段。
-// 客户端 share link 仍正常生成 downloadSettings（由 uri/clash 渲染器独立处理）。
-func TestRenderXHTTPDownloadSettings(t *testing.T) {
+// TestXHTTPDownloadSettingsNotRendered 测试 XHTTP split mode downloadSettings 在服务端不渲染
+// P0-2: downloadSettings 渲染函数已永久删除，downloadSettings 是客户端侧概念。
+// 服务端使用独立的 renderDownloadInbound()，客户端 share link 仍正常生成（uri/clash 独立处理）。
+func TestXHTTPDownloadSettingsNotRendered(t *testing.T) {
 	spec := &nodespec.NodeSpec{
 		Code:     "p07-xhttp-split",
 		Protocol: nodespec.ProtocolVLESS,
@@ -315,17 +315,17 @@ func TestRenderXHTTPDownloadSettings(t *testing.T) {
 		t.Errorf("期望 xhttp.mode=stream-up, got %v", xhttp["mode"])
 	}
 
-	// downloadSettings 在服务端 inbound 配置中不应渲染（xray 26.3.27 静默失败 bug）
+	// downloadSettings 在服务端 inbound 配置中不应渲染（P0-2: 渲染函数已删除）
 	if extra, ok := xhttp["extra"].(map[string]interface{}); ok {
 		if _, exists := extra["downloadSettings"]; exists {
-			t.Errorf("downloadSettings 不应出现在服务端 inbound 配置中（xray 26.3.27 bug），got %v", extra["downloadSettings"])
+			t.Errorf("downloadSettings 不应出现在服务端 inbound 配置中（P0-2 已删除渲染函数），got %v", extra["downloadSettings"])
 		}
 	}
 }
 
-// TestRenderXHTTPDownloadSettingsPortDefault 测试 downloadSettings 在服务端不渲染
-// （原测试验证 port 默认 443，因 xray 26.3.27 downloadSettings 静默失败 bug 已跳过渲染）
-func TestRenderXHTTPDownloadSettingsPortDefault(t *testing.T) {
+// TestXHTTPDownloadPortDefaultNotRendered 测试 downloadSettings 在服务端不渲染
+// P0-2: downloadSettings 渲染函数已永久删除，服务端 inbound 永不渲染 downloadSettings。
+func TestXHTTPDownloadPortDefaultNotRendered(t *testing.T) {
 	spec := &nodespec.NodeSpec{
 		Code:     "p17-xhttp-default-port",
 		Protocol: nodespec.ProtocolVLESS,
@@ -359,10 +359,10 @@ func TestRenderXHTTPDownloadSettingsPortDefault(t *testing.T) {
 	stream := inbound["streamSettings"].(map[string]interface{})
 	xhttp := stream["xhttpSettings"].(map[string]interface{})
 
-	// downloadSettings 在服务端 inbound 配置中不应渲染（xray 26.3.27 静默失败 bug）
+	// downloadSettings 在服务端 inbound 配置中不应渲染（P0-2: 渲染函数已删除）
 	if extra, ok := xhttp["extra"].(map[string]interface{}); ok {
 		if _, exists := extra["downloadSettings"]; exists {
-			t.Errorf("downloadSettings 不应出现在服务端 inbound 配置中（xray 26.3.27 bug），got %v", extra["downloadSettings"])
+			t.Errorf("downloadSettings 不应出现在服务端 inbound 配置中（P0-2 已删除渲染函数），got %v", extra["downloadSettings"])
 		}
 	}
 }

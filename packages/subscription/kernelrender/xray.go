@@ -680,14 +680,8 @@ func (r *XrayRenderer) renderStreamSettings(spec *nodespec.NodeSpec) (map[string
 		if len(spec.Transport.XHTTP.Headers) > 0 {
 			extra["headers"] = spec.Transport.XHTTP.Headers
 		}
-		// downloadSettings 暂时不渲染：xray 26.3.27 存在 downloadSettings 静默失败 bug
-		// （配置写入后不生效且无错误日志），项目约束要求从服务端 inbound 配置中移除
-		// downloadSettings，直到上游修复。仅影响服务端 inbound 配置，不影响客户端
-		// share link 生成（uri/clash 渲染器各自独立处理 downloadSettings）。
-		// 上游修复后，取消下方注释即可恢复：
-		// if ds := spec.Transport.XHTTP.DownloadSettings; ds != nil && ds.Address != "" {
-		// 	extra["downloadSettings"] = r.renderXHTTPDownload(ds)
-		// }
+		// P0-2: downloadSettings 永久移除 — 服务端 inbound 不渲染 downloadSettings。
+		// downloadSettings 是客户端侧概念（下行节点定义），服务端使用独立的 renderDownloadInbound()。
 		if len(extra) > 0 {
 			xhttp["extra"] = extra
 		}
@@ -735,74 +729,6 @@ func (r *XrayRenderer) realityShortIDs(spec *nodespec.NodeSpec) []string {
 		return []string{spec.Reality.ShortID}
 	}
 	return []string{""}
-}
-
-// renderXHTTPDownload 渲染 XHTTP downloadSettings（split mode 上下行分离）
-// 当前未被调用：xray 26.3.27 的 downloadSettings 静默失败 bug 导致该配置不生效，
-// 已在 renderStreamSettings 中暂时跳过。上游修复后恢复调用即可。
-func (r *XrayRenderer) renderXHTTPDownload(ds *nodespec.XHTTPDownloadConfig) map[string]interface{} {
-	download := map[string]interface{}{
-		"address": ds.Address,
-		"port":    ds.Port,
-	}
-	if ds.Port == 0 {
-		download["port"] = 443
-	}
-	network := string(ds.Network)
-	if network == "" {
-		network = "xhttp"
-	}
-	download["network"] = network
-
-	if ds.Path != "" || ds.Host != "" || ds.Mode != "" || ds.NoGRPCHeader {
-		xh := map[string]interface{}{}
-		if ds.Path != "" {
-			xh["path"] = ds.Path
-		}
-		if ds.Host != "" {
-			xh["host"] = ds.Host
-		}
-		if ds.Mode != "" {
-			xh["mode"] = ds.Mode
-		}
-		if ds.NoGRPCHeader {
-			xh["noGRPCHeader"] = true
-		}
-		download["xhttpSettings"] = xh
-	}
-
-	security := string(ds.Security)
-	if ds.Reality != nil {
-		security = "reality"
-		reality := map[string]interface{}{
-			"publicKey":  ds.Reality.PublicKey,
-			"shortId":    ds.Reality.ShortID,
-			"serverName": ds.Reality.SNI,
-		}
-		if ds.Reality.Fingerprint != "" {
-			reality["fingerprint"] = ds.Reality.Fingerprint
-		}
-		download["realitySettings"] = reality
-	} else if ds.TLS != nil {
-		security = "tls"
-		tls := map[string]interface{}{}
-		if ds.TLS.SNI != "" {
-			tls["serverName"] = ds.TLS.SNI
-		}
-		if ds.TLS.Fingerprint != "" {
-			tls["fingerprint"] = ds.TLS.Fingerprint
-		}
-		if len(ds.TLS.ALPN) > 0 {
-			tls["alpn"] = ds.TLS.ALPN
-		}
-		if len(tls) > 0 {
-			download["tlsSettings"] = tls
-		}
-	}
-	if security != "" {
-		download["security"] = security
-	}
-	return download
 }
 
 // renderDownloadInbound 为 XHTTP split mode (上下行分离) 渲染下行独立 inbound。

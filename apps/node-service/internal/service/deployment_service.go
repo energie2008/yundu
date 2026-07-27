@@ -18,6 +18,7 @@ import (
 	"github.com/airport-panel/node-service/internal/crypto"
 	"github.com/airport-panel/node-service/internal/exposure"
 	"github.com/airport-panel/node-service/internal/model"
+	"github.com/airport-panel/node-service/internal/outbound"
 	"github.com/airport-panel/node-service/internal/pkg"
 	"github.com/airport-panel/node-service/internal/repo"
 	"github.com/airport-panel/node-service/internal/routing"
@@ -31,6 +32,42 @@ import (
 // defaultPayloadKey 是 YUNDU_PAYLOAD_KEY 未设置时的回退密钥（仅开发环境）。
 // 安全修复 S4：生产环境必须设置 YUNDU_PAYLOAD_KEY 环境变量。
 const defaultPayloadKey = "yundu-default-payload-key-v1"
+
+// P5: Agent 版本强约束 — 内核翻转后旧 Agent 无法处理 _xray_config。
+// 低于此版本的 Agent 将被拒绝下发配置（拒绝下发而非静默失败）。
+// 注意：版本号格式必须与 git tag 一致（major.minor.patch），v0.7.0 → "0.7.0"。
+const MinAgentVersionForP2 = "0.7.0"
+
+// compareVersion 比较两个语义化版本字符串（格式 "major.minor.patch"）。
+// 返回 -1 表示 v1 < v2，0 表示相等，1 表示 v1 > v2。
+// 非 semver 格式（如 git commit hash）视为 0 版本。
+func compareVersion(v1, v2 string) int {
+	p1 := parseSemver(v1)
+	p2 := parseSemver(v2)
+	for i := 0; i < 3; i++ {
+		if p1[i] < p2[i] {
+			return -1
+		}
+		if p1[i] > p2[i] {
+			return 1
+		}
+	}
+	return 0
+}
+
+// parseSemver 将 "major.minor.patch" 解析为 [3]int。
+// 解析失败的部分视为 0。
+func parseSemver(v string) [3]int {
+	var result [3]int
+	parts := strings.Split(v, ".")
+	for i := 0; i < 3 && i < len(parts); i++ {
+		n, err := strconv.Atoi(parts[i])
+		if err == nil {
+			result[i] = n
+		}
+	}
+	return result
+}
 
 // isProduction 检测当前是否为生产环境。
 // 当 YUNDU_ENV=production 或 GO_ENV=production 时返回 true。
@@ -60,7 +97,19 @@ type DeploymentService struct {
 	// auditConfig 控制审计路由规则（S8）的注入：BlockBT / BlockPrivateIP。
 	// 为 nil 时使用 DefaultAuditConfig()（BT + SSRF 防护全部启用）。
 	auditConfig *kernelrender.AuditConfig
-	logger      *slog.Logger
+	// P1-C: tls_certificates 表查询接口（证书四级回退第3级）
+	tlsCertReader TLSCertReader
+	// P3-C: outbound 策略服务（WARP 出口接入）
+	outboundService *outbound.OutboundService
+	logger         *slog.Logger
+}
+
+// TLSCertReader P1-C: tls_certificates 表查询接口（证书四级回退第3级）。
+// 由 cert.CertificateRepo 实现（通过适配器）。
+type TLSCertReader interface {
+	// FindCertPEMBySNI 按 SNI 域名查询 tls_certificates 表，返回匹配的证书 PEM 和私钥 PEM。
+	// 匹配逻辑：SANs 数组包含 SNI（大小写不敏感），且 status='active'，cert_pem 非 NULL。
+	FindCertPEMBySNI(ctx context.Context, sni string) (certPEM, keyPEM string, ok bool)
 }
 
 func NewDeploymentService(deploymentRepo *repo.DeploymentRepo, nodeRepo *repo.NodeRepo, runtimeRepo *repo.RuntimeRepo, serverRepo *repo.ServerRepo, chainRepo *repo.ChainRepo) *DeploymentService {
@@ -144,6 +193,76 @@ func (s *DeploymentService) SetDegradeStrategy(strategy DegradeStrategy) {
 // cfg 为 nil 时使用 DefaultAuditConfig()（BT + SSRF 防护全部启用）。
 func (s *DeploymentService) SetAuditConfig(cfg *kernelrender.AuditConfig) {
 	s.auditConfig = cfg
+}
+
+// SetTLSCertReader P1-C: 注入 tls_certificates 表查询接口（证书四级回退第3级）。
+// 注入后，injectCertFromBundle 在 cert_bundles SAN 回退之后、自签兜底之前查询 tls_certificates 表。
+func (s *DeploymentService) SetTLSCertReader(r TLSCertReader) {
+	s.tlsCertReader = r
+}
+
+// SetOutboundService P3-C: 注入 outbound 策略服务（WARP 出口接入）。
+// 注入后，配置构建时自动聚合节点绑定的 outbound 策略（warp/socks5/chain）到内核配置。
+func (s *DeploymentService) SetOutboundService(svc *outbound.OutboundService) {
+	s.outboundService = svc
+}
+
+// injectOutboundPolicies P3-C: 将节点绑定的 outbound 策略渲染结果注入到内核配置。
+// 在 buildConfigViaKernelRender 之后调用，将 warp/socks5/chain outbound 追加到 config.outbounds。
+func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config map[string]interface{}, nodes []*model.Node, runtimeType string) {
+	if s.outboundService == nil || len(nodes) == 0 {
+		return
+	}
+	isSingbox := runtimeType == "sing-box" || runtimeType == "singbox"
+	for _, node := range nodes {
+		resp, err := s.outboundService.ApplyAll(ctx, node.ID)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("injectOutboundPolicies: ApplyAll failed",
+					"node_id", node.ID, "error", err)
+			}
+			continue
+		}
+		var renderedOutbounds []outbound.Map
+		var renderedRules []outbound.Map
+		if isSingbox {
+			renderedOutbounds = resp.SingBox.Outbounds
+			renderedRules = resp.SingBox.RoutingRules
+		} else {
+			renderedOutbounds = resp.Xray.Outbounds
+			renderedRules = resp.Xray.RoutingRules
+		}
+		if len(renderedOutbounds) > 0 {
+			var outbounds []interface{}
+			if existing, ok := config["outbounds"].([]interface{}); ok {
+				outbounds = existing
+			}
+			for _, ob := range renderedOutbounds {
+				outbounds = append(outbounds, ob)
+			}
+			config["outbounds"] = outbounds
+		}
+		if len(renderedRules) > 0 {
+			routing, ok := config["routing"].(map[string]interface{})
+			if !ok {
+				routing = map[string]interface{}{}
+				config["routing"] = routing
+			}
+			var rules []interface{}
+			if existing, ok := routing["rules"].([]interface{}); ok {
+				rules = existing
+			}
+			for _, rule := range renderedRules {
+				rules = append(rules, rule)
+			}
+			routing["rules"] = rules
+		}
+		if s.logger != nil {
+			s.logger.Info("injectOutboundPolicies: outbound policies injected",
+				"node_id", node.ID, "outbound_count", len(renderedOutbounds),
+				"rule_count", len(renderedRules), "runtime", runtimeType)
+		}
+	}
 }
 
 // getAuditConfig 返回生效的审计配置，nil 时回退到默认值。
@@ -845,8 +964,8 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 	// Agent 在写入内核配置前会剥离这些字段。
 	s.injectNginxVhosts(freshConfig, nodes)
 	s.injectTrafficQuota(freshConfig, nodes)
-	// 双内核架构：xray 配置中嵌入 sing-box 配置，Agent 拉取后分发到 sing-box 内核
-	s.injectSingboxConfig(ctx, freshConfig, rt)
+	// P2 翻转：sing-box 配置中嵌入 xray 配置，Agent 拉取后分发到 xray 内核（懒加载）
+	s.injectXrayConfig(ctx, freshConfig, rt)
 	freshHash := pkg.HashContent(freshConfig)
 
 	cv, err := s.deploymentRepo.GetLatestActiveConfigVersion(ctx, model.ScopeTypeRuntime, runtimeID)
@@ -928,8 +1047,8 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 	s.injectNginxVhosts(cloned, nodes)
 	// P3-N: 配置未变化时也注入流量限额元数据
 	s.injectTrafficQuota(cloned, nodes)
-	// 双内核架构：配置未变化时也注入 sing-box 配置
-	s.injectSingboxConfig(ctx, cloned, rt)
+	// P2 翻转：配置未变化时也注入 xray 配置
+	s.injectXrayConfig(ctx, cloned, rt)
 	// 注入 _audit_rules 禁用 agent 端错误的 SSRF 规则（把域名放在 ip 字段导致 xray 报错），
 	// SSRF/BT 阻断已由服务端 kernelrender.InjectAuditRules 正确注入（IP CIDR 格式）。
 	s.injectAuditRulesCompat(cloned)
@@ -954,6 +1073,16 @@ func (s *DeploymentService) pushConfigToRuntime(ctx context.Context, runtimeID u
 	if err != nil || server == nil {
 		s.logger.Warn("pushConfig: server not found", "server_id", rt.ServerID, "error", err)
 		return fmt.Errorf("server not found: %w", err)
+	}
+	// P5: Agent 版本强约束 — 旧 Agent 无法处理 _xray_config（P2 内核翻转）
+	if agentVer, ok := server.Metadata["agent_version"].(string); ok && agentVer != "" {
+		if compareVersion(agentVer, MinAgentVersionForP2) < 0 {
+			errMsg := fmt.Sprintf("agent version %s below minimum %s (P2 kernel flip requires _xray_config support)",
+				agentVer, MinAgentVersionForP2)
+			s.logger.Error("pushConfig: agent version too old, rejecting config push",
+				"server_code", server.Code, "agent_version", agentVer, "min_version", MinAgentVersionForP2)
+			return fmt.Errorf(errMsg)
+		}
 	}
 	if err := s.configPusher.PushConfig(ctx, server.Code, cv); err != nil {
 		s.logger.Warn("pushConfig: push failed, agent will fallback to heartbeat",
@@ -1256,9 +1385,21 @@ func (s *DeploymentService) buildRuntimeConfig(ctx context.Context, runtimeType 
 	// P0-1: 统一走 IR→Compiler 链路（kernelrender），替代 exposure 直拼
 	switch runtimeType {
 	case "xray", "xray-core":
-		return s.buildXrayConfigViaKernelRender(ctx, nodes, listenHost, creds)
+		config, err := s.buildXrayConfigViaKernelRender(ctx, nodes, listenHost, creds)
+		if err != nil {
+			return nil, err
+		}
+		// P3-C: 注入 outbound 策略（WARP/socks5/chain）
+		s.injectOutboundPolicies(ctx, config, nodes, runtimeType)
+		return config, nil
 	case "sing-box", "singbox":
-		return s.buildSingboxConfigViaKernelRender(ctx, nodes, listenHost, creds)
+		config, err := s.buildSingboxConfigViaKernelRender(ctx, nodes, listenHost, creds)
+		if err != nil {
+			return nil, err
+		}
+		// P3-C: 注入 outbound 策略（WARP/socks5/chain）
+		s.injectOutboundPolicies(ctx, config, nodes, runtimeType)
+		return config, nil
 	default:
 		return s.buildDefaultRuntimeConfig(nodes), nil
 	}
@@ -1661,58 +1802,59 @@ func (s *DeploymentService) injectAuditRulesCompat(config map[string]interface{}
 	}
 }
 
-// injectSingboxConfig 双内核架构：当渲染 xray 配置时，查询同 server 下的 sing-box runtime，
-// 如果存在 sing-box 节点，渲染 sing-box 配置并嵌入到 xray 配置的 _singbox_config 字段。
-// Agent 拉取 xray 配置后，提取 _singbox_config 并应用到 sing-box 内核。
+// injectXrayConfig 双内核架构（P2 翻转）：当渲染 sing-box 配置时，查询同 server 下的 xray runtime，
+// 如果存在 xray 节点，渲染 xray 配置并嵌入到 sing-box 配置的 _xray_config 字段。
+// Agent 拉取 sing-box 配置后，提取 _xray_config 并应用到 xray 内核（懒加载）。
 // 这避免了需要修改心跳协议支持多 runtime 配置同步的复杂性。
-func (s *DeploymentService) injectSingboxConfig(ctx context.Context, config map[string]interface{}, xrayRT *model.Runtime) {
-	if config == nil || xrayRT == nil {
+func (s *DeploymentService) injectXrayConfig(ctx context.Context, config map[string]interface{}, sbRT *model.Runtime) {
+	if config == nil || sbRT == nil {
 		return
 	}
-	if !isXrayRuntime(xrayRT.RuntimeType) {
+	// P2 翻转：当前 runtime 必须是 sing-box（主内核），才嵌入 xray 配置
+	if normalizeRuntimeType(sbRT.RuntimeType) != "sing-box" {
 		return
 	}
-	runtimes, err := s.runtimeRepo.ListByServer(ctx, xrayRT.ServerID)
+	runtimes, err := s.runtimeRepo.ListByServer(ctx, sbRT.ServerID)
 	if err != nil {
-		s.logger.Warn("injectSingboxConfig: ListByServer failed", "error", err)
+		s.logger.Warn("injectXrayConfig: ListByServer failed", "error", err)
 		return
 	}
-	var sbRT *model.Runtime
+	var xrayRT *model.Runtime
 	for _, rt := range runtimes {
-		if normalizeRuntimeType(rt.RuntimeType) == "sing-box" {
-			sbRT = rt
+		if isXrayRuntime(rt.RuntimeType) {
+			xrayRT = rt
 			break
 		}
 	}
-	if sbRT == nil {
+	if xrayRT == nil {
 		return
 	}
-	// 查询 sing-box runtime 下的节点
-	sbNodes, err := s.nodeRepo.ListByRuntimeID(ctx, sbRT.ID)
+	// 查询 xray runtime 下的节点
+	xrayNodes, err := s.nodeRepo.ListByRuntimeID(ctx, xrayRT.ID)
 	if err != nil {
-		s.logger.Warn("injectSingboxConfig: ListByRuntimeID for sing-box failed", "error", err)
+		s.logger.Warn("injectXrayConfig: ListByRuntimeID for xray failed", "error", err)
 		return
 	}
-	if len(sbNodes) == 0 {
-		return // sing-box runtime 无节点
+	if len(xrayNodes) == 0 {
+		return // xray runtime 无节点
 	}
-	// 渲染 sing-box 配置
-	sbListenHost := ""
-	if sbRT.ListenHost != nil {
-		sbListenHost = *sbRT.ListenHost
+	// 渲染 xray 配置
+	xrayListenHost := ""
+	if xrayRT.ListenHost != nil {
+		xrayListenHost = *xrayRT.ListenHost
 	}
-	sbCreds := s.fetchNodeCredsForBuild(ctx, sbNodes)
-	sbConfig, err := s.buildSingboxConfigViaKernelRender(ctx, sbNodes, sbListenHost, sbCreds)
+	xrayCreds := s.fetchNodeCredsForBuild(ctx, xrayNodes)
+	xrayConfig, err := s.buildXrayConfigViaKernelRender(ctx, xrayNodes, xrayListenHost, xrayCreds)
 	if err != nil {
-		s.logger.Warn("injectSingboxConfig: buildSingboxConfig failed", "error", err)
+		s.logger.Warn("injectXrayConfig: buildXrayConfig failed", "error", err)
 		return
 	}
-	// 注入 nginx vhosts 和 traffic quota 到 sing-box 配置
-	s.injectNginxVhosts(sbConfig, sbNodes)
-	s.injectTrafficQuota(sbConfig, sbNodes)
-	config["_singbox_config"] = sbConfig
-	s.logger.Info("injectSingboxConfig: sing-box config embedded into xray config",
-		"sb_runtime_id", sbRT.ID, "sb_node_count", len(sbNodes))
+	// 注入 nginx vhosts 和 traffic quota 到 xray 配置
+	s.injectNginxVhosts(xrayConfig, xrayNodes)
+	s.injectTrafficQuota(xrayConfig, xrayNodes)
+	config["_xray_config"] = xrayConfig
+	s.logger.Info("injectXrayConfig: xray config embedded into sing-box config",
+		"xray_runtime_id", xrayRT.ID, "xray_node_count", len(xrayNodes))
 }
 
 // GetNodesByRuntimeID D7 修复: 返回指定 runtime 下的所有节点。
@@ -2487,6 +2629,25 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 		}
 	}
 
+	// P1-C: 证书四级回退第3级 — tls_certificates 表 SNI 匹配
+	// 如果管理员上传了正式证书到 tls_certificates 表但尚未同步到 cert_bundles，
+	// 此层兜底确保证书仍能被注入。
+	if s.tlsCertReader != nil {
+		if certPEM, keyPEM, ok := s.tlsCertReader.FindCertPEMBySNI(ctx, sni); ok && certPEM != "" && keyPEM != "" {
+			if n.ConfigJSON == nil {
+				n.ConfigJSON = make(map[string]interface{})
+			}
+			n.ConfigJSON["cert_pem"] = certPEM
+			n.ConfigJSON["key_pem"] = keyPEM
+			if s.logger != nil {
+				s.logger.Info("injectCertFromBundle: injected cert via tls_certificates SNI match",
+					"node_code", n.Code, "sni", sni,
+					"termination_class", tc.String())
+			}
+			return
+		}
+	}
+
 	// 自签名证书兜底：cert_bundles 中找不到匹配证书时，
 	// 自动生成 ECDSA P-256 自签名证书，确保节点首次创建即可工作。
 	// 正式 ACME 证书签发后可通过 cert_bundle_id 更新覆盖。
@@ -2498,10 +2659,15 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 		}
 		n.ConfigJSON["cert_pem"] = certPEM
 		n.ConfigJSON["key_pem"] = keyPEM
+		// P1-D: 自签兜底增加 SHA256 指纹输出和高敏感告警
+		fingerprint := crypto.CertSHA256Fingerprint(certPEM)
 		if s.logger != nil {
-			s.logger.Warn("using self-signed certificate as fallback (no cert_bundle found)",
+			s.logger.Warn("self-signed cert generated (Trojan+TLS/AnyTLS/ShadowTLS high-sensitivity node)",
 				"node_code", n.Code, "sni", sni,
 				"termination_class", tc.String(),
+				"protocol", n.ProtocolType,
+				"cert_fingerprint_sha256", fingerprint,
+				"hint", "客户端需配置 insecure=true 或 pinnedPeerCertSha256",
 				"action", "请通过 cert_bundle_id 绑定正式 ACME 证书")
 		}
 	} else if s.logger != nil {

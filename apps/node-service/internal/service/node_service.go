@@ -548,6 +548,14 @@ func (s *NodeService) UpdateNode(ctx context.Context, id uuid.UUID, req *model.U
 		node.IsSplitMode = *req.IsSplitMode
 	}
 
+	// P0-3: XHTTP mode 空值校验前移 — 更新时拦截，而非渲染时报错
+	if node.TransportType == string(nodespec.TransportXHTTP) && node.ConfigJSON != nil {
+		mode, _ := node.ConfigJSON["mode"].(string)
+		if mode == "" || mode == "auto" {
+			return nil, fmt.Errorf("%w: xhttp mode 禁止为空或 auto，必须显式指定 packet-up/stream-up/stream-down", ErrConfigValidation)
+		}
+	}
+
 	if err := s.standardizeNodeFields(ctx, node); err != nil {
 		return nil, err
 	}
@@ -760,6 +768,14 @@ func validateProtocolCombo(req *model.CreateNodeRequest) error {
 	// 3. 端口范围校验
 	if req.Port < 1 || req.Port > 65535 {
 		return fmt.Errorf("%w: invalid port %d (must be 1-65535)", ErrConfigValidation, req.Port)
+	}
+
+	// 4. P0-3: XHTTP mode 空值校验前移 — 保存时拦截，而非渲染时报错
+	if transport == nodespec.TransportXHTTP && req.ConfigJSON != nil {
+		mode, _ := req.ConfigJSON["mode"].(string)
+		if mode == "" || mode == "auto" {
+			return fmt.Errorf("%w: xhttp mode 禁止为空或 auto，必须显式指定 packet-up/stream-up/stream-down", ErrConfigValidation)
+		}
 	}
 
 	return nil
@@ -1055,12 +1071,17 @@ func (s *NodeService) standardizeNodeFields(ctx context.Context, node *model.Nod
 	}
 
 	// 6. exposure_mode 三级判定（标准化零 SSH 架构核心逻辑）
-	// 优先级：前端显式设置(node.ExposureMode) > config_json.exposure_mode > tunnel 凭证 > cdn_address > direct
-	// 同步写入独立列 node.ExposureMode 和 config_json.exposure_mode 保持双写一致
-	em := determineExposureMode(node)
-	if node.ExposureMode != nil && *node.ExposureMode != "" {
-		em = *node.ExposureMode
+	// P1-A: config_json.exposure_mode 是唯一真相源，独立列仅为 DB 索引投影。
+	// 如果独立列有值但 config_json 没有，先同步到 config_json（API 可能只设了独立列）。
+	if node.ConfigJSON == nil {
+		node.ConfigJSON = make(map[string]interface{})
 	}
+	if _, ok := node.ConfigJSON["exposure_mode"].(string); !ok {
+		if node.ExposureMode != nil && *node.ExposureMode != "" {
+			node.ConfigJSON["exposure_mode"] = *node.ExposureMode
+		}
+	}
+	em := determineExposureMode(node)
 	if em != "" {
 		node.ConfigJSON["exposure_mode"] = em
 		emCopy := em
@@ -1282,10 +1303,8 @@ func validateExposureMode(node *model.Node) error {
 	if certType != "self_signed" {
 		return nil
 	}
+	// P1-A: config_json.exposure_mode 是唯一真相源，独立列仅为 DB 索引投影
 	em := determineExposureMode(node)
-	if node.ExposureMode != nil && *node.ExposureMode != "" {
-		em = *node.ExposureMode
-	}
 	switch em {
 	case "cdn", "cdn_saas", "argo_tunnel":
 		return fmt.Errorf("自签证书节点 %s 只能使用 direct 模式（当前=%s），CDN/Tunnel 模式需使用可信 CA 签发的证书", node.Code, em)
@@ -1718,19 +1737,18 @@ func (s *NodeService) routeNodeToCorrectRuntime(ctx context.Context, node *model
 	return nil
 }
 
-// detectRequiredKernel 根据节点协议/传输/安全配置，判断需要哪个内核
+// detectRequiredKernel 根据节点协议/传输/安全配置，判断需要哪个内核。
+// P2 翻转：sing-box 为主内核，仅 XHTTP/ECH 走 xray。
 func detectRequiredKernel(protocol, transport, security string, cfg map[string]interface{}) string {
-	// P0: sing-box only 协议
+	// xray only：XHTTP 传输（sing-box 不支持 XHTTP/XMUX）
+	if transport == "xhttp" {
+		return "xray"
+	}
+
+	// sing-box only 协议
 	switch protocol {
 	case "hysteria2", "tuic", "anytls", "naive":
 		return "sing-box"
-	}
-
-	// XHTTP split mode（downloadSettings）→ xray only
-	if transport == "xhttp" {
-		if ds := extractXHTTPDownloadSettings(cfg); ds != nil && len(ds) > 0 {
-			return "xray"
-		}
 	}
 
 	// ECH (Encrypted Client Hello) → xray only
@@ -1738,8 +1756,8 @@ func detectRequiredKernel(protocol, transport, security string, cfg map[string]i
 		return "xray"
 	}
 
-	// 默认：xray（主内核）
-	return "xray"
+	// P2 翻转：默认 sing-box（主内核）
+	return "sing-box"
 }
 
 // isECHInConfig 直接从 config_json 检测 ECH 是否启用

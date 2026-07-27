@@ -72,9 +72,17 @@ coverage/
 # --- IDE / OS ---
 .idea/
 .vscode/
+.trae/
 .vs/
 *.swp
 *.swo
 *~
 .DS_Store
 Thumbs.db
+
+# --- 本地编译产物（非 CI）---
+dist-local/
+
+# --- 本地敏感文档（含密钥/VPS信息，禁止提交）---
+文档/
+docs-local/
