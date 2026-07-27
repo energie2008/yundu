@@ -113,20 +113,26 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         <div
           className={cn(
-            'absolute inset-0 bg-black/80 transition-opacity duration-200',
+            'absolute inset-0 transition-opacity duration-200',
             isAnimating ? 'opacity-100' : 'opacity-0'
           )}
+          style={{ background: 'rgba(0, 0, 0, 0.5)', backdropFilter: 'blur(4px)' }}
           onClick={() => setOpen(false)}
         />
         <div
           ref={ref}
           className={cn(
-            'relative z-50 w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-lg transition-all duration-200',
+            'relative z-50 w-full max-w-lg rounded-xl p-6 shadow-lg transition-all duration-200',
             isAnimating
               ? 'opacity-100 scale-100 translate-y-0'
               : 'opacity-0 scale-95 translate-y-2',
             className
           )}
+          style={{
+            backgroundColor: 'var(--card)',
+            border: '1px solid var(--border)',
+            color: 'var(--foreground)',
+          }}
           role="dialog"
           aria-modal="true"
           onClick={(e) => e.stopPropagation()}
@@ -135,10 +141,11 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
           {children}
           {showCloseButton && (
             <button
-              className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-zinc-950 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:pointer-events-none"
+              className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none disabled:pointer-events-none"
+              style={{ color: 'var(--muted-foreground)' }}
               onClick={() => setOpen(false)}
             >
-              <X className="h-4 w-4 text-zinc-400" />
+              <X className="h-4 w-4" />
               <span className="sr-only">Close</span>
             </button>
           )}
@@ -178,7 +185,8 @@ const DialogTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <h2
     ref={ref}
-    className={cn('text-lg font-semibold leading-none tracking-tight text-zinc-100', className)}
+    className={cn('text-lg font-semibold leading-none tracking-tight', className)}
+    style={{ color: 'var(--foreground)' }}
     {...props}
   />
 ))
@@ -190,7 +198,8 @@ const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn('text-sm text-zinc-400', className)}
+    className={cn('text-sm', className)}
+    style={{ color: 'var(--muted-foreground)' }}
     {...props}
   />
 ))
