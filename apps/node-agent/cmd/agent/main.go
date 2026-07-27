@@ -1657,6 +1657,9 @@ func (a *Agent) runAgent(ctx context.Context) error {
 	wsCh := transport.NewWSChannel(wsURL, a.cfg.ServerCode, token, a.cfg.HMACSecret)
 	httpCh := transport.NewHTTPChannel(a.cfg.PanelURL, token, a.cfg.HMACSecret)
 	a.httpClient = client.New(a.cfg.PanelURL, a.cfg.ServerCode, token, a.cfg.HMACSecret, a.logger)
+	// P2 翻转修复：设置 runtime reference，让面板识别 agent 所需 runtime 类型并下发对应配置。
+	// X-Runtime-Ref 头缺失会导致面板无法识别 agent 期望的内核，sing-box 配置无法生成。
+	a.httpClient.SetRuntimeRef(a.cfg.RuntimeType)
 
 	edgeValidator := validator.NewEdgeValidator(a.logger)
 	deployPipeline := pipeline.NewPipeline(edgeValidator, a.cfg.ConfigDir, a.logger)

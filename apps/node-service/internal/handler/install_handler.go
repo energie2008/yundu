@@ -305,8 +305,8 @@ fetch_runtime_type() {
     # 解析 runtime_type（使用 grep/sed 避免依赖 jq）
     RUNTIME_TYPE="$(echo "$resp" | grep -o '"runtime_type"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"runtime_type"[[:space:]]*:[[:space:]]*"//;s/"//')"
     if [[ -z "$RUNTIME_TYPE" ]]; then
-        warn "Bootstrap 响应中未找到 runtime_type，默认使用 xray"
-        RUNTIME_TYPE="xray"
+        warn "Bootstrap 响应中未找到 runtime_type，默认使用 sing-box（P2 主内核）"
+        RUNTIME_TYPE="sing-box"
     fi
 
     info "运行时类型: ${BOLD}${RUNTIME_TYPE}${NC}"

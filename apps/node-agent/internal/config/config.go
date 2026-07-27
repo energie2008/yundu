@@ -53,7 +53,8 @@ func Load() *Config {
 		AgentAPITokenSalt: getEnv("AGENT_API_TOKEN_SALT", "node-agent-default-salt-change-me"),
 		HMACSecret:        getEnv("HMAC_SECRET", "node-agent-hmac-default-secret-change-me"),
 		GRPCAddr:          getEnv("GRPC_ADDR", ""),
-		RuntimeType:       getEnv("RUNTIME_TYPE", "xray"),
+		// P2 翻转：sing-box 为默认主内核，xray 为辅内核（仅 XHTTP/ECH 节点时懒加载）
+		RuntimeType:       getEnv("RUNTIME_TYPE", "sing-box"),
 		ListenHost:        getEnv("LISTEN_HOST", "0.0.0.0"),
 		ListenPort:        getEnvInt("LISTEN_PORT", 10000),
 		ConfigDir:         getEnv("CONFIG_DIR", "/etc/yundu"),
@@ -109,7 +110,7 @@ func LoadFromCLI() *Config {
 		ConfigDir:   flags.ConfigDir,
 	}
 	if cfg.RuntimeType == "" {
-		cfg.RuntimeType = "xray"
+		cfg.RuntimeType = "sing-box"
 	}
 	if cfg.ConfigDir == "" {
 		cfg.ConfigDir = "/etc/yundu"
