@@ -11,7 +11,7 @@ const Separator = React.forwardRef<HTMLDivElement, SeparatorProps>(
       ref={ref}
       role="separator"
       className={cn(
-        'shrink-0 bg-zinc-800',
+        'shrink-0 bg-zinc-200',
         orientation === 'horizontal' ? 'h-[1px] w-full' : 'h-full w-[1px]',
         className
       )}

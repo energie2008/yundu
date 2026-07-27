@@ -9,9 +9,9 @@ const toastVariants = cva(
   {
     variants: {
       variant: {
-        default: 'border-zinc-800 bg-zinc-900 text-zinc-100',
-        destructive: 'border-red-900/50 bg-red-950/80 text-red-200',
-        success: 'border-emerald-900/50 bg-emerald-950/80 text-emerald-200',
+        default: 'border-zinc-200 bg-white text-zinc-900',
+        destructive: 'border-red-200 bg-red-50 text-red-700',
+        success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
       },
     },
     defaultVariants: {
@@ -53,7 +53,7 @@ const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
           <div className="flex-1">
             {title && <div className="text-sm font-medium">{title}</div>}
             {description && (
-              <div className={cn('text-sm mt-0.5', variant === 'destructive' ? 'text-red-300' : variant === 'success' ? 'text-emerald-300' : 'text-zinc-400')}>
+              <div className={cn('text-sm mt-0.5', variant === 'destructive' ? 'text-red-600' : variant === 'success' ? 'text-emerald-600' : 'text-zinc-500')}>
                 {description}
               </div>
             )}

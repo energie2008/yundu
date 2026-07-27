@@ -10,10 +10,18 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
       <label
         className={cn(
           'relative inline-flex h-4 w-4 flex-shrink-0 cursor-pointer items-center justify-center rounded border transition-colors',
-          checked ? 'bg-indigo-600 border-indigo-600' : 'bg-zinc-800 border-zinc-600 hover:border-zinc-500',
+          checked && 'bg-indigo-600 border-indigo-600',
           disabled && 'cursor-not-allowed opacity-50',
           className
         )}
+        style={
+          checked
+            ? undefined
+            : {
+                backgroundColor: 'var(--card)',
+                borderColor: 'var(--border-hover, #d4d4d8)',
+              }
+        }
       >
         <input
           type="checkbox"

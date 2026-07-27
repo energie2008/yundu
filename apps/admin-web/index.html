@@ -3,8 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0a0e1a" />
+    <meta name="theme-color" content="#fafafa" />
     <title>Airport Panel - Admin</title>
+    <script>
+      // 强制 light 主题在 React 加载前生效，避免 dark 闪烁/缓存
+      (function () {
+        try {
+          var t = localStorage.getItem('yundu-admin-theme-v2');
+          if (t === 'dark') {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+            if (t !== 'light') localStorage.setItem('yundu-admin-theme-v2', 'light');
+          }
+        } catch (e) {
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+    </script>
   </head>
   <body class="min-h-screen antialiased">
     <div id="root"></div>

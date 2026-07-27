@@ -4,7 +4,7 @@ import { cn } from '../lib/utils'
 import { Spinner } from './spinner'
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]',
+  'inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]',
   {
     variants: {
       variant: {
@@ -13,11 +13,11 @@ const buttonVariants = cva(
         destructive:
           'bg-red-600 text-white shadow-sm hover:bg-red-500',
         outline:
-          'border border-zinc-800 bg-transparent shadow-sm hover:bg-zinc-800 hover:text-zinc-50',
+          'border border-zinc-300 bg-transparent shadow-sm hover:bg-zinc-100 hover:text-zinc-900',
         secondary:
-          'bg-zinc-800 text-zinc-100 shadow-sm hover:bg-zinc-700',
-        ghost: 'hover:bg-zinc-800 hover:text-zinc-50',
-        link: 'text-indigo-400 underline-offset-4 hover:underline',
+          'bg-zinc-100 text-zinc-900 shadow-sm hover:bg-zinc-200',
+        ghost: 'hover:bg-zinc-100 hover:text-zinc-900',
+        link: 'text-indigo-600 underline-offset-4 hover:underline',
       },
       size: {
         default: 'h-9 px-4 py-2',
