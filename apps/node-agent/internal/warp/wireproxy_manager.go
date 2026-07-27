@@ -203,7 +203,7 @@ func (m *WireProxyManager) Connect() error {
 
 // writeConfig 生成 wireproxy 配置文件（INI 格式）。
 func (m *WireProxyManager) writeConfig(privateKey string) error {
-	publicKey := getEnvDefault("WARP_PUBLIC_KEY", "bmXOC+F1FxEMF9JiI6ZmJj5fPprl4T7v5n2+5s2E2c=")
+	publicKey := getEnvDefault("WARP_PUBLIC_KEY", "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=")
 	endpoint := getEnvDefault("WARP_ENDPOINT", "engage.cloudflareclient.com:2408")
 	localAddr := getEnvDefault("WARP_LOCAL_ADDRESS", "172.16.0.2/32")
 	mtu := getEnvDefault("WARP_MTU", "1280")
@@ -221,7 +221,7 @@ Endpoint = %s
 AllowedIPs = 0.0.0.0/0
 
 [Socks5]
-Bind = %s
+BindAddress = %s
 `, privateKey, localAddr, mtu, publicKey, endpoint, m.socksAddr)
 
 	return os.WriteFile(m.confPath, []byte(conf), 0600)
