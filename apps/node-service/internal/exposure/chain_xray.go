@@ -43,6 +43,27 @@ func fetchPinnedCertSHA256(address string, port int, sni string) (string, error)
 	return hex.EncodeToString(hash[:]), nil
 }
 
+// DefaultXrayRouting 返回 xray 默认 routing 模板（chain 渲染专用）。
+// P0 删除 xray_config.go 僵尸代码时该函数被移除，但 buildChainRuntimeConfig 仍需引用，
+// 故就近放在 chain_xray.go（chain 渲染仍在使用，P6 后续迁移到 kernelrender）。
+func DefaultXrayRouting() map[string]interface{} {
+	return map[string]interface{}{
+		"domainStrategy": "AsIs",
+		"rules": []interface{}{
+			map[string]interface{}{
+				"type":        "field",
+				"inboundTag":  []string{"api"},
+				"outboundTag": "api",
+			},
+			map[string]interface{}{
+				"type":        "field",
+				"outboundTag": "block",
+				"ip":          []string{"geoip:private"},
+			},
+		},
+	}
+}
+
 // BuildXrayChainOutbounds 构建订阅侧多跳链式代理的完整 xray outbounds + routing。
 // 保留原签名供订阅服务消费；内部调用 BuildXrayOutboundFromNodeSpec（IR 层统一提取）。
 func BuildXrayChainOutbounds(c *chain.ChainSpec) ([]map[string]interface{}, map[string]interface{}, error) {

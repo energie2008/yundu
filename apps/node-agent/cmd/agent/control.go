@@ -154,7 +154,7 @@ func (a *Agent) ctrlRestart(w http.ResponseWriter, r *http.Request) {
 		if err := a.runtimeExec.Reload(context.Background(), configPath); err != nil {
 			a.logger.Error("ctrl restart: reload failed", "error", err)
 		}
-		a.maybeRestartSingbox(context.Background())
+		a.maybeRestartXray(context.Background())
 	}()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"result": "restart triggered"})
