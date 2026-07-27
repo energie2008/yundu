@@ -715,3 +715,83 @@ code.bg-zinc-800 {
   color: var(--foreground) !important;
   border-color: var(--border) !important;
 }
+
+/* ============================================
+   统一灰底黑字风格覆盖
+   把所有彩色 badge / proto-tag 统一映射为浅灰底 + 近黑字
+   保留状态点(.status-dot)、按钮、渐变不变，仅消除彩色标签的色系混乱
+   ============================================ */
+.badge-success,
+.badge-warning,
+.badge-danger,
+.badge-info,
+.badge-primary,
+.badge-pink {
+  background-color: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+
+/* 协议标签统一灰底黑字 */
+.proto-tag {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+}
+
+/* 暗色 accent-900/50 系列彩色块（页面 tsx 中直接使用的 Tailwind 彩色 class）
+   统一映射为灰底黑字，消除红/绿/蓝/黄/紫/粉等多色搭配 */
+.bg-emerald-900\/50,
+.bg-amber-900\/50,
+.bg-rose-900\/50,
+.bg-blue-900\/50,
+.bg-purple-900\/50 {
+  background-color: var(--muted) !important;
+}
+.text-emerald-300,
+.text-amber-300,
+.text-rose-300,
+.text-blue-300,
+.text-purple-300 {
+  color: var(--foreground) !important;
+}
+.border-emerald-800\/50,
+.border-amber-800\/50,
+.border-rose-800\/50,
+.border-blue-800\/50,
+.border-purple-800\/50 {
+  border-color: var(--border) !important;
+}
+
+/* Tailwind 常见彩色实心背景标签统一去色（节点协议/套餐周期/用户状态等） */
+.bg-red-500, .bg-red-600, .bg-red-700,
+.bg-green-500, .bg-green-600,
+.bg-blue-500, .bg-blue-600,
+.bg-yellow-500, .bg-yellow-600,
+.bg-orange-500, .bg-orange-600,
+.bg-purple-500, .bg-purple-600,
+.bg-cyan-500, .bg-cyan-600,
+.bg-lime-500,
+.bg-rose-500, .bg-rose-600,
+.bg-violet-500, .bg-violet-600,
+.bg-sky-500, .bg-sky-600,
+.bg-emerald-500, .bg-emerald-600,
+.bg-amber-500, .bg-amber-600 {
+  background-color: var(--muted) !important;
+}
+.text-red-300, .text-red-400, .text-red-500,
+.text-green-300, .text-green-400, .text-green-700,
+.text-blue-300, .text-blue-400, .text-blue-700,
+.text-yellow-300, .text-yellow-400, .text-yellow-700,
+.text-orange-300, .text-orange-400,
+.text-purple-300, .text-purple-400,
+.text-cyan-300, .text-cyan-400,
+.text-lime-400,
+.text-rose-300, .text-rose-400,
+.text-violet-300, .text-violet-400,
+.text-sky-300, .text-sky-400,
+.text-emerald-300, .text-emerald-400,
+.text-amber-300, .text-amber-400,
+.text-pink-400,
+.text-fuchsia-300 {
+  color: var(--foreground) !important;
+}
+
