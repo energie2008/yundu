@@ -350,7 +350,11 @@ func (r *SingBoxRenderer) outboundFromNode(n nodespec.NodeSpec) (*SBOutbound, er
 		return nil, fmt.Errorf("singbox: unsupported protocol %s", n.Protocol)
 	}
 
-	if n.Transport.Type != nodespec.TransportTCP {
+	// TCP 和 QUIC 不需要 transport 字段：
+	// - TCP: 无传输层封装
+	// - QUIC: Hysteria2/TUIC 内置 QUIC，transport 字段应为空
+	// 其他传输类型（WS/gRPC/HTTPUpgrade/XHTTP/HTTP2）需要渲染 transport 字段
+	if n.Transport.Type != nodespec.TransportTCP && n.Transport.Type != nodespec.TransportQUIC {
 		tr := &SBTransport{}
 		switch n.Transport.Type {
 		case nodespec.TransportWS:

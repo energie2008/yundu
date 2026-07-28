@@ -212,6 +212,10 @@ func (s *SubscriptionService) ValidateToken(ctx context.Context, tokenValue stri
 
 var versionRegex = regexp.MustCompile(`/([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
 
+// singBoxCoreVersionRe 匹配 UA 中 sing-box 内核版本号。
+// 兼容 "sing-box/1.12.3"、"SFI/1.10.0"、"SFA 1.11.0" 等格式。
+var singBoxCoreVersionRe = regexp.MustCompile(`(?i)(?:sing-?box|\b(?:sfi|sfa|sfm|sgm|sgt)\b)[\s/]+v?(\d+(?:\.\d+){0,2})`)
+
 func extractClientVersion(userAgent string) string {
 	matches := versionRegex.FindStringSubmatch(userAgent)
 	if len(matches) > 1 {
@@ -219,6 +223,25 @@ func extractClientVersion(userAgent string) string {
 	}
 	return ""
 }
+
+// extractSingBoxCoreVersion 从 UA 中提取 sing-box 内核版本号。
+// 用于 Karing/Hiddify 等基于 sing-box 内核的第三方客户端。
+// 返回形如 "1.12.3" 的字符串；无法识别时返回空串。
+func extractSingBoxCoreVersion(userAgent string) string {
+	if userAgent == "" {
+		return ""
+	}
+	m := singBoxCoreVersionRe.FindStringSubmatch(userAgent)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	return ""
+}
+
+// defaultSingBoxVersion 是 Karing/Hiddify 等第三方客户端的默认 sing-box 内核版本。
+// 这些客户端通常内置较新版本的 sing-box 内核，但 UA 中不包含内核版本号。
+// 使用一个保守的较高版本号，确保 WS/gRPC/REALITY/XHTTP 等功能不被错误过滤。
+const defaultSingBoxVersion = "1.12.0"
 
 func nodeInfoToCompatMap(n *model.NodeInfo) map[string]interface{} {
 	m := make(map[string]interface{})
@@ -336,6 +359,20 @@ func (s *SubscriptionService) GetSubscription(ctx context.Context, tokenValue st
 	ct := client.NormalizeClientType(string(clientType))
 	clientCode := clientTypeToCompatCode(ct)
 	clientVersion := extractClientVersion(userAgent)
+
+	// Karing/Hiddify 等基于 sing-box 内核的第三方客户端：
+	// UA 中的版本号是客户端 APP 版本（如 karing/1.2.3），不是 sing-box 内核版本。
+	// 兼容性矩阵中的 supported_since_version 是 sing-box 内核版本（如 WS 需 1.9.0），
+	// 直接比较会导致 1.2.3 < 1.9.0，WS/REALITY/XHTTP 等功能被错误过滤。
+	// 修复：对 sing-box 系客户端，优先从 UA 提取 sing-box 内核版本；
+	// 若提取不到，使用默认版本号（这些客户端内置较新的 sing-box 内核）。
+	if clientCode == "sing-box" {
+		if sbVer := extractSingBoxCoreVersion(userAgent); sbVer != "" {
+			clientVersion = sbVer
+		} else {
+			clientVersion = defaultSingBoxVersion
+		}
+	}
 
 	if cached, ok := s.cache.Get(tokenValue, string(ct)); ok {
 		s.writeAccessLogAsync(ctx, tokenValue, ct, clientIP, userAgent, httpStatusOK, "", 0, true)
