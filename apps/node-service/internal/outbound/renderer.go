@@ -1,5 +1,7 @@
 package outbound
 
+import "strings"
+
 // RenderOutbounds 把一组 outbound policies 渲染成 xray + sing-box 的 outbounds + routing rules JSON。
 // 仅处理 is_enabled=true 的策略，按 priority 升序排列。
 // 每种 policy_type 对应一个生成函数：
@@ -140,8 +142,8 @@ func renderXrayOutbound(p *OutboundPolicy) (Map, error) {
 			"protocol": "socks",
 			"settings": Map{
 				"servers": []Map{{
-					"address":  server,
-					"port":     port,
+					"address": server,
+					"port":    port,
 					"users":   buildSocksUsers(p.ConfigJSON),
 				}},
 			},
@@ -202,10 +204,10 @@ func renderSingBoxOutbound(p *OutboundPolicy) (Map, error) {
 		server, _ := p.ConfigJSON["server"].(string)
 		port := toInt(p.ConfigJSON["port"])
 		out := Map{
-			"type":    "socks",
-			"tag":     tag,
-			"server":  server,
-			"port":    port,
+			"type":   "socks",
+			"tag":    tag,
+			"server": server,
+			"port":   port,
 		}
 		if u, p := buildSingBoxSocksUser(p.ConfigJSON); u != "" {
 			out["username"] = u
@@ -256,7 +258,7 @@ func renderSingBoxOutbound(p *OutboundPolicy) (Map, error) {
 		// Cloudflare WARP 公钥（well-known）
 		peerPublicKey, _ := p.ConfigJSON["public_key"].(string)
 		if peerPublicKey == "" {
-			peerPublicKey = "bmXOC+F1FxEMF9JiI6ZmJj5fPprl4T7v5n2+5s2E2c="
+			peerPublicKey = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
 		}
 		// local_address: WARP 分配的本地地址
 		localAddr, _ := p.ConfigJSON["local_address"].(string)
@@ -272,7 +274,7 @@ func renderSingBoxOutbound(p *OutboundPolicy) (Map, error) {
 			"tag":             tag,
 			"server":          serverAddr,
 			"server_port":     serverPort,
-			"local_address":   []string{localAddr},
+			"local_address":   splitLocalAddresses(localAddr),
 			"private_key":     privateKey,
 			"peer_public_key": peerPublicKey,
 			"mtu":             mtu,
@@ -298,7 +300,7 @@ func renderSingBoxOutbound(p *OutboundPolicy) (Map, error) {
 // renderXrayRoutingRule 把 policy 的 routing_rule 转为 xray 规则
 func renderXrayRoutingRule(p *OutboundPolicy, rule Map) Map {
 	out := Map{
-		"type":         "field",
+		"type":        "field",
 		"outboundTag": policyTag(p),
 	}
 	if domains, ok := rule["domains"].([]interface{}); ok && len(domains) > 0 {
@@ -450,4 +452,23 @@ func defaultWarpRoutingRules() []Map {
 			},
 		},
 	}
+}
+
+// splitLocalAddresses 将 local_address 字符串按逗号拆分为多个 CIDR。
+// 支持双栈输入如 "172.16.0.2/32, 2606:4700:xxx/128"，输出 ["172.16.0.2/32","2606:4700:xxx/128"]。
+// sing-box wireguard outbound 的 local_address 期望每个 CIDR 为独立数组元素，
+// 不能把含逗号的整个字符串作为单个元素，否则双栈地址解析失败。
+func splitLocalAddresses(addr string) []string {
+	parts := strings.Split(addr, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []string{addr}
+	}
+	return out
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"strconv"
 	"time"
 
@@ -14,12 +15,19 @@ import (
 	"github.com/google/uuid"
 )
 
+// KernelRestarter 重启内核的抽象接口（由 aidiag.GRPCDispatcher 实现）
+type KernelRestarter interface {
+	RestartKernel(ctx context.Context, serverID uuid.UUID, reason string) error
+	ReloadConfig(ctx context.Context, serverID uuid.UUID) error
+}
+
 type AdminServerHandler struct {
-	serverService  *service.ServerService
-	runtimeService *service.RuntimeService
-	tokenSalt      string
-	panelURL       string
-	logStore       *grpcserver.LogStore
+	serverService   *service.ServerService
+	runtimeService  *service.RuntimeService
+	tokenSalt       string
+	panelURL        string
+	logStore        *grpcserver.LogStore
+	kernelRestarter KernelRestarter
 }
 
 func NewAdminServerHandler(serverService *service.ServerService, runtimeService *service.RuntimeService, tokenSalt, panelURL string, logStore *grpcserver.LogStore) *AdminServerHandler {
@@ -32,6 +40,11 @@ func NewAdminServerHandler(serverService *service.ServerService, runtimeService 
 	}
 }
 
+// SetKernelRestarter 注入内核重启器（在 app.go 中 gRPC server 启动后调用）
+func (h *AdminServerHandler) SetKernelRestarter(r KernelRestarter) {
+	h.kernelRestarter = r
+}
+
 func (h *AdminServerHandler) RegisterRoutesWithGroup(admin *gin.RouterGroup, rbac *middleware.RBACMiddleware) {
 	servers := admin.Group("/servers")
 	{
@@ -42,6 +55,8 @@ func (h *AdminServerHandler) RegisterRoutesWithGroup(admin *gin.RouterGroup, rba
 		servers.POST("/:id/runtimes", rbac.RequirePermission("nodes.write"), h.RegisterRuntime)
 		servers.GET("/:id/runtimes", rbac.RequirePermission("nodes.read"), h.ListRuntimes)
 		servers.GET("/:id/logs", rbac.RequirePermission("nodes.read"), h.GetServerLogs)
+		servers.POST("/:id/restart-kernel", rbac.RequirePermission("nodes.write"), h.RestartKernel)
+		servers.POST("/:id/reload-config", rbac.RequirePermission("nodes.write"), h.ReloadConfig)
 	}
 }
 
@@ -191,6 +206,62 @@ func (h *AdminServerHandler) ListRuntimes(c *gin.Context) {
 	}
 
 	server.OK(c, items)
+}
+
+// RestartKernel POST /admin/servers/:id/restart-kernel
+// 通过 gRPC MaintenanceCommand 向 node-agent 下发 ACTION_RESTART 指令
+func (h *AdminServerHandler) RestartKernel(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		server.BadRequest(c, "invalid server id")
+		return
+	}
+
+	if h.kernelRestarter == nil {
+		server.InternalError(c, "kernel restarter not available (gRPC server not initialized)")
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.Reason = "manual restart from admin panel"
+	}
+	if req.Reason == "" {
+		req.Reason = "manual restart from admin panel"
+	}
+
+	if err := h.kernelRestarter.RestartKernel(c.Request.Context(), id, req.Reason); err != nil {
+		server.Fail(c, config.ErrorCodeInternal, fmt.Sprintf("failed to restart kernel: %v", err))
+		return
+	}
+
+	server.OK(c, gin.H{"result": "restart command dispatched", "server_id": id})
+}
+
+// ReloadConfig POST /admin/servers/:id/reload-config
+// 通过 gRPC MaintenanceCommand 向 node-agent 下发配置重新加载指令
+func (h *AdminServerHandler) ReloadConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		server.BadRequest(c, "invalid server id")
+		return
+	}
+
+	if h.kernelRestarter == nil {
+		server.InternalError(c, "kernel restarter not available (gRPC server not initialized)")
+		return
+	}
+
+	if err := h.kernelRestarter.ReloadConfig(c.Request.Context(), id); err != nil {
+		server.Fail(c, config.ErrorCodeInternal, fmt.Sprintf("failed to reload config: %v", err))
+		return
+	}
+
+	server.OK(c, gin.H{"result": "reload config command dispatched", "server_id": id})
 }
 
 func (h *AdminServerHandler) GetServerLogs(c *gin.Context) {
