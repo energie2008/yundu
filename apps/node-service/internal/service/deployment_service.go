@@ -26,6 +26,7 @@ import (
 	"github.com/airport-panel/subscription/kernelrender"
 	"github.com/airport-panel/subscription/nginxrender"
 	"github.com/airport-panel/subscription/nodespec"
+	"github.com/airport-panel/subscription/validator"
 	"github.com/google/uuid"
 )
 
@@ -35,8 +36,8 @@ const defaultPayloadKey = "yundu-default-payload-key-v1"
 
 // P5: Agent 版本强约束 — 内核翻转后旧 Agent 无法处理 _xray_config。
 // 低于此版本的 Agent 将被拒绝下发配置（拒绝下发而非静默失败）。
-// 注意：版本号格式必须与 git tag 一致（major.minor.patch），v0.7.0 → "0.7.0"。
-const MinAgentVersionForP2 = "0.7.0"
+// P3-1: 统一为当前实际 agent 版本 0.7.5，确保所有 agent 支持双内核翻转 + P2-3 自动清理。
+const MinAgentVersionForP2 = "0.7.5"
 
 // compareVersion 比较两个语义化版本字符串（格式 "major.minor.patch"）。
 // 返回 -1 表示 v1 < v2，0 表示相等，1 表示 v1 > v2。
@@ -101,7 +102,10 @@ type DeploymentService struct {
 	tlsCertReader TLSCertReader
 	// P3-C: outbound 策略服务（WARP 出口接入）
 	outboundService *outbound.OutboundService
-	logger         *slog.Logger
+	// P1-2: 双内核校验器，在 GetRuntimeConfig 中持久化前调用 ValidateBoth
+	// 阻断无效配置进入 config_versions 表
+	dualKernelValidator *validator.DualKernelValidator
+	logger              *slog.Logger
 }
 
 // TLSCertReader P1-C: tls_certificates 表查询接口（证书四级回退第3级）。
@@ -201,6 +205,13 @@ func (s *DeploymentService) SetTLSCertReader(r TLSCertReader) {
 	s.tlsCertReader = r
 }
 
+// SetDualKernelValidator P1-2: 注入双内核校验器。
+// 注入后，GetRuntimeConfig 在配置持久化前会对每个启用节点执行 ValidateBoth，
+// 校验失败（LevelError）时阻断下发，防止无效配置进入 config_versions 表。
+func (s *DeploymentService) SetDualKernelValidator(v *validator.DualKernelValidator) {
+	s.dualKernelValidator = v
+}
+
 // SetOutboundService P3-C: 注入 outbound 策略服务（WARP 出口接入）。
 // 注入后，配置构建时自动聚合节点绑定的 outbound 策略（warp/socks5/chain）到内核配置。
 func (s *DeploymentService) SetOutboundService(svc *outbound.OutboundService) {
@@ -241,6 +252,31 @@ func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config m
 				outbounds = append(outbounds, ob)
 			}
 			config["outbounds"] = outbounds
+
+			// LB-3: 检测 load_balance outbound，设置 route.final 实现"全部流量走 WARP"。
+			// 当某节点绑定了 load_balance policy 时，把 sing-box route.final 设为
+			// load_balance 的 tag（如 warp-pool），使所有未匹配 routing rules 的流量
+			// 都走 WARP 负载均衡池。xray 侧无 load_balance，跳过（detectRequiredKernel
+			// 会把 load_balance 节点路由到 sing-box 内核）。
+			if isSingbox {
+				for _, ob := range renderedOutbounds {
+					if t, ok := ob["type"].(string); ok && t == "load_balance" {
+						if tag, ok := ob["tag"].(string); ok && tag != "" {
+							routing, ok := config["routing"].(map[string]interface{})
+							if !ok {
+								routing = map[string]interface{}{}
+								config["routing"] = routing
+							}
+							routing["final"] = tag
+							if s.logger != nil {
+								s.logger.Info("injectOutboundPolicies: route.final set to load_balance",
+									"node_id", node.ID, "final_outbound", tag)
+							}
+							break
+						}
+					}
+				}
+			}
 		}
 		if len(renderedRules) > 0 {
 			routing, ok := config["routing"].(map[string]interface{})
@@ -952,6 +988,38 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 	freshConfig, err := s.buildRuntimeConfig(ctx, runtimeType, nodes, listenHost)
 	if err != nil {
 		return nil, err
+	}
+	// P1-2: DualKernelValidator 接入部署链路 — 配置持久化前对每个启用节点执行双核校验。
+	// 校验内容：Enhancement 专项 → 双核渲染 → 真实 dry-run（需二进制）→ 语义等价性。
+	// 任何节点校验失败（LevelError）则阻断下发，防止无效配置进入 config_versions 表。
+	// 开发环境未注入 validator 或未设置二进制路径时自动跳过 dry-run，仅做前三步语义校验。
+	if s.dualKernelValidator != nil {
+		for _, n := range nodes {
+			if !n.IsEnabled {
+				continue
+			}
+			spec := modelNodeToNodeSpec(n)
+			if spec == nil {
+				continue
+			}
+			result := s.dualKernelValidator.ValidateBoth(ctx, spec)
+			if !result.Passed {
+				var errDetails []string
+				for _, e := range result.Errors {
+					if e.Level == validator.LevelError {
+						errDetails = append(errDetails, fmt.Sprintf("[%s] %s", e.Kernel, e.Message))
+					}
+				}
+				if len(errDetails) > 0 {
+					return nil, fmt.Errorf("%w: 节点 %s 双核校验失败: %s",
+						ErrPreflightValidation, n.Code, strings.Join(errDetails, "; "))
+				}
+			}
+		}
+		if s.logger != nil {
+			s.logger.Debug("DualKernelValidator: all nodes passed validation",
+				"node_count", len(nodes), "runtime_type", runtimeType)
+		}
 	}
 	// R9: L4 Dry-run 校验 — 对完整渲染配置执行 xray -test / sing-box check
 	// 仅在设置了 XRAY_BINARY/SINGBOX_BINARY 环境变量时执行，开发环境自动跳过
@@ -2010,12 +2078,15 @@ func (s *DeploymentService) buildChainRuntimeConfig(ctx context.Context, runtime
 		}
 		inbounds, _ := fullConfig["inbounds"].([]interface{})
 
-		chainOutbounds, chainRouting, err := exposure.BuildXrayChainOutbounds(cs)
+		// P1-1: 使用 chain.RenderChainForKernel 统一入口，替代 exposure.BuildXrayChainOutbounds
+		chainResult, err := chain.RenderChainForKernel(chain.KernelXray, cs)
 		if err != nil {
 			return nil, err
 		}
+		chainOutbounds := chainResult.Outbounds
+		chainRouting := chainResult.Routing
 
-		baseRouting := exposure.DefaultXrayRouting()
+		baseRouting := chain.DefaultXrayRouting()
 		rules, _ := baseRouting["rules"].([]interface{})
 		if chainRules, ok := chainRouting["rules"].([]interface{}); ok {
 			rules = append(rules, chainRules...)
@@ -2042,11 +2113,13 @@ func (s *DeploymentService) buildChainRuntimeConfig(ctx context.Context, runtime
 		}
 		sbInbounds, _ := sbFullConfig["inbounds"].([]interface{})
 
-		chainOutbounds, err := exposure.BuildSingboxChainOutbounds(cs)
+		// P1-1: 使用 chain.RenderChainForKernel 统一入口，替代 exposure.BuildSingboxChainOutbounds
+		chainResult, err := chain.RenderChainForKernel(chain.KernelSingBox, cs)
 		if err != nil {
 			return nil, err
 		}
-		chainRoute := exposure.BuildSingboxChainRoute(cs)
+		chainOutbounds := chainResult.Outbounds
+		chainRoute := chainResult.Routing
 
 		return map[string]interface{}{
 			"log": map[string]interface{}{

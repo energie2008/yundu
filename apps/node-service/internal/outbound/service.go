@@ -22,6 +22,7 @@ type WarpProfileStore interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*WarpProfile, error)
 	GetByCode(ctx context.Context, code string) (*WarpProfile, error)
 	List(ctx context.Context) ([]*WarpProfile, error)
+	ListByNode(ctx context.Context, nodeID uuid.UUID) ([]*WarpProfile, error)
 }
 
 // OutboundService 封装出站策略的业务逻辑
@@ -155,6 +156,16 @@ func validatePolicyConfig(policyType string, cfg Map) error {
 		server, _ := cfg["server"].(string)
 		port := toInt(cfg["port"])
 		if server == "" || port <= 0 {
+			return ErrInvalidPolicyConfig
+		}
+		return nil
+	case "load_balance":
+		// load_balance 需要至少 2 个 outbound tag
+		if cfg == nil {
+			return ErrInvalidPolicyConfig
+		}
+		outbounds, ok := cfg["outbounds"].([]interface{})
+		if !ok || len(outbounds) < 2 {
 			return ErrInvalidPolicyConfig
 		}
 		return nil

@@ -352,3 +352,28 @@ func strSliceOrEmpty(v interface{}) []string {
 	}
 	return nil
 }
+
+// anyToInt 把 interface{} 转为 int（兼容 float64/int/int64/json number）。
+// 主要用于解析 JSON 解码后的 alter_id 等数值字段（JSON number 默认解码为 float64）。
+func anyToInt(v interface{}) int {
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case int64:
+		return int(val)
+	case string:
+		if n, err := parseIntSafe(val); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// parseIntSafe 解析字符串为 int（容错版，供 anyToInt 使用）。
+func parseIntSafe(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	return n, err
+}

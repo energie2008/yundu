@@ -86,3 +86,4 @@ dist-local/
 # --- 本地敏感文档（含密钥/VPS信息，禁止提交）---
 文档/
 docs-local/
+tmp-bin/ 

@@ -23,6 +23,17 @@ func RenderOutbounds(policies []*OutboundPolicy) (*ApplyAllResponse, error) {
 	xrayRules := make([]Map, 0)
 	singBoxRules := make([]Map, 0)
 
+	// LB-1: 预扫描是否存在 load_balance policy。
+	// 若存在 load_balance，则跳过各 warp policy 的 P3-F 自动注入（避免 3 条 warp
+	// 各注入一份相同流媒体规则导致 routing 冲突），改由 load_balance policy 统一注入。
+	hasLoadBalance := false
+	for _, p := range policies {
+		if p != nil && p.IsEnabled && p.PolicyType == "load_balance" {
+			hasLoadBalance = true
+			break
+		}
+	}
+
 	for _, p := range policies {
 		if p == nil || !p.IsEnabled {
 			continue
@@ -51,7 +62,23 @@ func RenderOutbounds(policies []*OutboundPolicy) (*ApplyAllResponse, error) {
 		// 如果 warp policy 未配置任何 routing_rules，自动注入常见流媒体解锁规则。
 		// 设计原则：仅在用户未自定义路由时注入默认规则，避免覆盖用户显式配置。
 		// outbound tag 由 renderXrayRoutingRule/renderSingBoxRoutingRule 通过 policyTag(p) 自动设置。
-		if p.PolicyType == "warp" && len(p.RoutingRules) == 0 {
+		// LB-1: 当存在 load_balance policy 时跳过 warp 自动注入（由 load_balance 统一注入）。
+		if p.PolicyType == "warp" && len(p.RoutingRules) == 0 && !hasLoadBalance {
+			for _, rule := range defaultWarpRoutingRules() {
+				if r := renderXrayRoutingRule(p, rule); r != nil {
+					xrayRules = append(xrayRules, r)
+				}
+				if r := renderSingBoxRoutingRule(p, rule); r != nil {
+					singBoxRules = append(singBoxRules, r)
+				}
+			}
+		}
+
+		// LB-2: load_balance 路由规则自动注入
+		// 当 load_balance policy 未配置 routing_rules 时，自动注入流媒体解锁规则，
+		// outbound 为 load_balance 的 tag（如 warp-pool），实现流量聚合到 WARP 池。
+		// 与 P3-F 对称：仅在用户未自定义路由时注入，避免覆盖显式配置。
+		if p.PolicyType == "load_balance" && len(p.RoutingRules) == 0 {
 			for _, rule := range defaultWarpRoutingRules() {
 				if r := renderXrayRoutingRule(p, rule); r != nil {
 					xrayRules = append(xrayRules, r)
@@ -188,6 +215,27 @@ func renderXrayOutbound(p *OutboundPolicy) (Map, error) {
 				}},
 			},
 		}, nil
+	case "load_balance":
+		// xray 无原生 load_balance，用第一个 outbound 作为兜底（xray 侧降级处理）
+		// 真正的负载均衡由 sing-box 侧 load_balance outbound 处理
+		// xray 内核节点不应使用 load_balance policy（detectRequiredKernel 会把 load_balance 节点路由到 sing-box）
+		outbounds, _ := p.ConfigJSON["outbounds"].([]interface{})
+		fallback := ""
+		if len(outbounds) > 0 {
+			if s, ok := outbounds[0].(string); ok {
+				fallback = s
+			}
+		}
+		return Map{
+			"tag":      tag,
+			"protocol": "freedom",
+			"settings": Map{
+				"domainStrategy": "AsIs",
+			},
+			"load_balance": Map{
+				"fallback_outbound": fallback,
+			},
+		}, nil
 	}
 	return nil, ErrRenderFailed
 }
@@ -293,6 +341,28 @@ func renderSingBoxOutbound(p *OutboundPolicy) (Map, error) {
 			out["password"] = pwd
 		}
 		return out, nil
+	case "load_balance":
+		// load_balance 聚合多个 warp outbound，实现真负载均衡
+		// sing-box 1.10+ 支持 type=load_balance
+		// strategy: round_robin（默认）/ consistent_hash
+		outbounds, _ := p.ConfigJSON["outbounds"].([]interface{})
+		strategy, _ := p.ConfigJSON["strategy"].(string)
+		if strategy == "" {
+			strategy = "round_robin"
+		}
+		lb := Map{
+			"type":      "load_balance",
+			"tag":       tag,
+			"outbounds": outbounds,
+			"strategy":  strategy,
+		}
+		if checkURL, _ := p.ConfigJSON["check_url"].(string); checkURL != "" {
+			lb["url"] = checkURL
+		}
+		if interval, _ := p.ConfigJSON["check_interval"].(string); interval != "" {
+			lb["interval"] = interval
+		}
+		return lb, nil
 	}
 	return nil, ErrRenderFailed
 }

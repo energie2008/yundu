@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/airport-panel/node-agent/internal/validator"
@@ -298,6 +300,10 @@ func (p *Pipeline) Run(
 	}
 	os.Remove(backupPath)
 
+	// P2-3: 自动清理旧备份文件，保留最近 3 个时间戳备份。
+	// 防止 Agent 崩溃后残留的 .bak 文件堆积导致磁盘空间不足。
+	cleanupOldBackups(p.configDir, 3, p.logger)
+
 	result.Success = true
 	result.Phase = "activate"
 	result.ApplyDurationMs = time.Since(start).Milliseconds()
@@ -366,4 +372,66 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 
 	return os.Rename(tmpPath, path)
+}
+
+// cleanupOldBackups P2-3: 清理配置目录中的旧备份文件，保留最近 maxKeep 个。
+// 匹配模式: *.bak, *.bak.*, *.old, *.old.*
+// 按修改时间降序排序，删除超出 maxKeep 数量的旧文件。
+// 此函数在每次成功部署后调用，防止 Agent 崩溃后残留的备份文件堆积。
+func cleanupOldBackups(configDir string, maxKeep int, logger *slog.Logger) {
+	if maxKeep <= 0 {
+		return
+	}
+	configPath := filepath.Join(configDir, "config")
+	entries, err := os.ReadDir(configPath)
+	if err != nil {
+		return
+	}
+
+	type backupFile struct {
+		path    string
+		modTime time.Time
+	}
+	var backups []backupFile
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// 匹配 .bak 和 .old 后缀的文件（含带时间戳/编号的变体）
+		if !strings.Contains(name, ".bak") && !strings.Contains(name, ".old") {
+			continue
+		}
+		// 跳过 .lkg 文件（LKG 不是备份）
+		if strings.Contains(name, ".lkg") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		backups = append(backups, backupFile{
+			path:    filepath.Join(configPath, name),
+			modTime: info.ModTime(),
+		})
+	}
+
+	// 按修改时间降序排序（最新的在前）
+	sort.Slice(backups, func(i, j int) bool {
+		return backups[i].modTime.After(backups[j].modTime)
+	})
+
+	// 删除超出 maxKeep 的旧备份
+	if len(backups) <= maxKeep {
+		return
+	}
+	for _, b := range backups[maxKeep:] {
+		if err := os.Remove(b.path); err != nil {
+			logger.Warn("cleanupOldBackups: failed to remove old backup",
+				"file", b.path, "error", err)
+		} else {
+			logger.Info("cleanupOldBackups: removed old backup",
+				"file", filepath.Base(b.path), "mod_time", b.modTime.Format(time.RFC3339))
+		}
+	}
 }

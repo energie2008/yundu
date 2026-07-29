@@ -78,6 +78,7 @@ export const sidebarGroups: NavGroup[] = [
       { label: '路由管理', path: '/route-policies', icon: Route },
       { label: '中转链路', path: '/proxy-chains', icon: Zap },
       { label: '服务器管理', path: '/servers', icon: HardDrive },
+      { label: '健康仪表盘', path: '/health-dashboard', icon: Activity },
       { label: '部署管理', path: '/deployments', icon: Rocket },
     ],
   },
@@ -210,7 +211,7 @@ export const TAB_GROUP_COLORS: Record<TabGroup, string> = {
 }
 
 export function getTabGroup(pathname: string): TabGroup {
-  if (pathname.startsWith('/nodes') || pathname.startsWith('/node-groups') || pathname.startsWith('/machines') || pathname.startsWith('/servers') || pathname.startsWith('/rule-sets') || pathname.startsWith('/route-policies') || pathname.startsWith('/proxy-chains') || pathname.startsWith('/deployments')) return 'nodes'
+  if (pathname.startsWith('/nodes') || pathname.startsWith('/node-groups') || pathname.startsWith('/machines') || pathname.startsWith('/servers') || pathname.startsWith('/health-dashboard') || pathname.startsWith('/rule-sets') || pathname.startsWith('/route-policies') || pathname.startsWith('/proxy-chains') || pathname.startsWith('/deployments')) return 'nodes'
   if (pathname.startsWith('/plans') || pathname.startsWith('/orders') || pathname.startsWith('/payments') || pathname.startsWith('/coupons') || pathname.startsWith('/gift-cards') || pathname.startsWith('/commissions') || pathname.startsWith('/finance/') || pathname.startsWith('/subscribe-templates')) return 'finance'
   if (pathname.startsWith('/tickets') || pathname.startsWith('/announcements') || pathname.startsWith('/knowledge') || pathname.startsWith('/notifications')) return 'support'
   if (pathname.startsWith('/system/') || pathname.startsWith('/mail-templates')) return 'system'

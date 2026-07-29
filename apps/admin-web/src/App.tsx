@@ -37,6 +37,7 @@ import TLSCertificates from '@/pages/TLSCertificates'
 import ConfigImporter from '@/pages/ConfigImporter'
 import ClientCompat from '@/pages/ClientCompat'
 import Servers from '@/pages/Servers'
+import HealthDashboard from '@/pages/HealthDashboard'
 import RouteRuleSets from '@/pages/RouteRuleSets'
 import ProxyChains from '@/pages/ProxyChains'
 import RoutePolicies from '@/pages/RoutePolicies'
@@ -83,6 +84,7 @@ function AppRoutes() {
         <Route path="presets" element={<Presets />} />
         <Route path="machines" element={<Machines />} />
         <Route path="servers" element={<Servers />} />
+        <Route path="health-dashboard" element={<HealthDashboard />} />
         <Route path="rule-sets" element={<RouteRuleSets />} />
         <Route path="proxy-chains" element={<ProxyChains />} />
         <Route path="route-policies" element={<RoutePolicies />} />

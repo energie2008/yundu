@@ -94,22 +94,32 @@ func NewWarpProfileRepo(pool *pgxpool.Pool) *WarpProfileRepo {
 	return &WarpProfileRepo{pool: pool}
 }
 
-const warpColumns = `id, code, name, warp_mode, endpoint, license_key, config_json, is_default, created_at, updated_at`
+const warpColumns = `id, code, name, warp_mode, endpoint, license_key, config_json, is_default, created_at, updated_at,
+	private_key, public_key, local_address, mtu,
+	device_id, access_token, client_id, ipv4_address, ipv6_address, status, node_id, outbound_tag, last_rotated_at, last_health_check_at`
 
 func scanWarp(row pgx.Row, w *WarpProfile) error {
 	return row.Scan(
 		&w.ID, &w.Code, &w.Name, &w.WarpMode, &w.Endpoint, &w.LicenseKey,
 		&w.ConfigJSON, &w.IsDefault, &w.CreatedAt, &w.UpdatedAt,
+		&w.PrivateKey, &w.PublicKey, &w.LocalAddress, &w.MTU,
+		&w.DeviceID, &w.AccessToken, &w.ClientID, &w.IPv4Address, &w.IPv6Address,
+		&w.Status, &w.NodeID, &w.OutboundTag, &w.LastRotatedAt, &w.LastHealthCheckAt,
 	)
 }
 
 func (r *WarpProfileRepo) Create(ctx context.Context, w *WarpProfile) error {
 	query := `
-		INSERT INTO warp_profiles (code, name, warp_mode, endpoint, license_key, config_json, is_default)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO warp_profiles (code, name, warp_mode, endpoint, license_key, config_json, is_default,
+			private_key, public_key, local_address, mtu,
+			device_id, access_token, client_id, ipv4_address, ipv6_address, status, node_id, outbound_tag)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		RETURNING id, created_at, updated_at`
 	return r.pool.QueryRow(ctx, query,
 		w.Code, w.Name, w.WarpMode, w.Endpoint, w.LicenseKey, w.ConfigJSON, w.IsDefault,
+		w.PrivateKey, w.PublicKey, w.LocalAddress, w.MTU,
+		w.DeviceID, w.AccessToken, w.ClientID, w.IPv4Address, w.IPv6Address,
+		w.Status, w.NodeID, w.OutboundTag,
 	).Scan(&w.ID, &w.CreatedAt, &w.UpdatedAt)
 }
 
@@ -140,6 +150,26 @@ func (r *WarpProfileRepo) GetByCode(ctx context.Context, code string) (*WarpProf
 func (r *WarpProfileRepo) List(ctx context.Context) ([]*WarpProfile, error) {
 	query := fmt.Sprintf(`SELECT %s FROM warp_profiles ORDER BY is_default DESC, created_at ASC`, warpColumns)
 	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []*WarpProfile
+	for rows.Next() {
+		w := &WarpProfile{}
+		if err := scanWarp(rows, w); err != nil {
+			return nil, err
+		}
+		items = append(items, w)
+	}
+	return items, rows.Err()
+}
+
+// ListByNode 查询某 VPS 的所有 WARP 账户
+func (r *WarpProfileRepo) ListByNode(ctx context.Context, nodeID uuid.UUID) ([]*WarpProfile, error) {
+	query := fmt.Sprintf(`SELECT %s FROM warp_profiles WHERE node_id = $1 ORDER BY created_at ASC`, warpColumns)
+	rows, err := r.pool.Query(ctx, query, nodeID)
 	if err != nil {
 		return nil, err
 	}

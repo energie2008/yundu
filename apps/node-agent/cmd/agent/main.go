@@ -631,9 +631,22 @@ func (a *Agent) handleCertRenew(ctx context.Context, renew *pb.CertRenewNotice) 
 
 func (a *Agent) handleConfigPush(ctx context.Context, cfgPush *pb.ConfigPush) {
 	targetVersion := strconv.FormatInt(cfgPush.Version, 10)
-	a.logger.Info("received config push", "version", targetVersion)
-	// Jitter Pull: 0-3000ms 随机延迟，避免推送风暴时所有节点同时拉取配置打爆面板
-	jitter := time.Duration(mrand.Intn(3000)) * time.Millisecond
+	hashPreview := cfgPush.ConfigHash
+	if len(hashPreview) > 8 {
+		hashPreview = hashPreview[:8]
+	}
+	a.logger.Info("received config push", "version", targetVersion, "hash", hashPreview)
+
+	// P2-1: 版本号比较，跳过不必要的拉取（心跳和推送可能同时触发）
+	if a.currentVersion == targetVersion {
+		a.logger.Debug("config push version matches current, skipping pull", "version", targetVersion)
+		return
+	}
+
+	// P2-1: Jitter Pull 降至 0-500ms，确保配置变更端到端延迟 <1s
+	// （推送 ~50ms + jitter ~250ms avg + HTTP 拉取 ~200ms + apply ~100ms ≈ 600ms）
+	// 500ms jitter 仍能有效防止多节点同时拉取的 thundering herd 问题
+	jitter := time.Duration(mrand.Intn(500)) * time.Millisecond
 	a.logger.Debug("applying jitter before config pull", "delay", jitter)
 	time.Sleep(jitter)
 	a.applyConfig(ctx, targetVersion, &a.currentVersion)

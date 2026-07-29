@@ -590,6 +590,9 @@ func Run() {
 	} else {
 		logger.Info("DualKernelValidator: dry-run enabled", "xray_binary", xrayBin, "singbox_binary", singboxBin)
 	}
+	// P1-2: 将 DualKernelValidator 注入 DeploymentService，
+	// 使 GetRuntimeConfig 在配置持久化前执行双核校验（Enhancement + 渲染 + dry-run + 语义等价性）
+	deploymentService.SetDualKernelValidator(dualKernelValidator)
 
 	adminValidationHandler := handler.NewAdminValidationHandler(dualKernelValidator)
 	adminChannelHealthHandler := channelhealth.NewAdminHandler(channelHealthService)
@@ -739,6 +742,8 @@ func Run() {
 		// 用于 ApplyAutofix 将 restart_kernel/reload_config/renew_cert 真实下发到 node-agent
 		dispatcher := aidiag.NewGRPCDispatcher(agentSrv, serverRepo, certService, logger)
 		aidiagService.SetActionDispatcher(dispatcher)
+		// 注入内核重启器到 AdminServerHandler（POST /admin/servers/:id/restart-kernel）
+		adminServerHandler.SetKernelRestarter(dispatcher)
 		// 注入 doctor 自动修复派发器（解析 nodeID→serverID 后调用 aidiag.ActionDispatcher）
 		doctorFixDispatcher := &doctorFixDispatcherAdapter{
 			nodeRepo:    nodeRepo,

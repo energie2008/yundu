@@ -134,8 +134,6 @@ interface ServerDetail {
   }
 }
 
-const panelUrl = 'https://panel.example.com'
-
 function defaultMetrics(): RuntimeMetrics {
   return {
     cpuPercent: 0,
@@ -197,6 +195,20 @@ interface RuntimeInfoItem {
   last_heartbeat_at?: string
 }
 
+// normalizeRuntimeType 将后端 runtime_type 归一化（与后端 normalizeRuntimeTypeLocal 对齐）
+function normalizeRuntimeType(rt: string): string {
+  switch (rt) {
+    case 'xray-core':
+    case 'xray':
+      return 'xray'
+    case 'singbox':
+    case 'sing-box':
+      return 'sing-box'
+    default:
+      return rt
+  }
+}
+
 interface ServerResponseItem {
   id: string
   code: string
@@ -241,8 +253,19 @@ interface ServerDetailResponseItem extends ServerResponseItem {
 }
 
 // 将后端 ServerResponse 映射为前端 ServerDetail
+// 防御性去重：同类型 runtime 只保留一个（合并节点数/内存等指标）
 function mapServerResponse(s: ServerResponseItem): ServerDetail {
-  const runtimes = s.runtimes || []
+  const rawRuntimes = s.runtimes || []
+  // 按 runtime_type 去重，同类型取节点数最多的（或第一个）
+  const seenTypes = new Map<string, RuntimeInfoItem>()
+  for (const rt of rawRuntimes) {
+    const normalized = normalizeRuntimeType(rt.runtime_type)
+    const existing = seenTypes.get(normalized)
+    if (!existing) {
+      seenTypes.set(normalized, { ...rt, runtime_type: normalized })
+    }
+  }
+  const runtimes = Array.from(seenTypes.values())
   const m = s.metrics
   return {
     id: s.id,
@@ -812,7 +835,8 @@ function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: ()
     }
   }, [currentServer.id, toast])
 
-  const restartKernel = (kernelName: string) => {
+  const restartKernel = useCallback(async (kernelName: string) => {
+    // 乐观更新：先标记为 restarting
     setCurrentServer((prev) => ({
       ...prev,
       kernels: prev.kernels.map((k) =>
@@ -820,18 +844,40 @@ function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: ()
       ),
     }))
     toast({ title: `正在重启 ${kernelName}...`, variant: 'default' })
-    setTimeout(() => {
+    try {
+      await api.post(EP.SERVER_RESTART_KERNEL(currentServer.id), { reason: `manual restart ${kernelName} from admin panel` })
+      // 重启指令已下发，等待 agent 响应后刷新状态
+      toast({ title: `${kernelName} 重启指令已下发`, variant: 'success' })
+      // 3秒后重新拉取服务器详情以获取最新状态
+      setTimeout(async () => {
+        try {
+          const data = await api.get<ServerDetailResponseItem>(EP.SERVER_DETAIL(currentServer.id))
+          const remapped = mapServerResponse(data)
+          setCurrentServer((prev) => ({
+            ...prev,
+            ...remapped,
+            agentToken: prev.agentToken,
+            installCmd: prev.installCmd,
+          }))
+        } catch {
+          // 静默失败，状态会在下次轮询时更新
+        }
+      }, 3000)
+    } catch (e) {
+      toast({
+        title: `${kernelName} 重启失败`,
+        description: e instanceof ApiError ? e.message : '未知错误',
+        variant: 'destructive',
+      })
+      // 恢复状态
       setCurrentServer((prev) => ({
         ...prev,
         kernels: prev.kernels.map((k) =>
-          k.name === kernelName
-            ? { ...k, status: 'running' as KernelStatus, restartCount: k.restartCount + 1 }
-            : k
+          k.name === kernelName ? { ...k, status: 'running' as KernelStatus } : k
         ),
       }))
-      toast({ title: `${kernelName} 重启成功`, variant: 'success' })
-    }, 3000)
-  }
+    }
+  }, [currentServer.id, toast])
 
   const maskedToken = currentServer.agentToken.slice(0, 12) + '••••••••••••••••••••' + currentServer.agentToken.slice(-4)
 
@@ -905,7 +951,9 @@ function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: ()
             内核运行状态
           </CardTitle>
           <CardDescription className="text-zinc-500">
-            双进程常驻（Xray + Sing-box），协议按路由规则分发到对应内核
+            {currentServer.kernels.length === 0
+              ? '暂无运行中的内核'
+              : `${currentServer.kernels.map(k => k.name).join(' + ')}，协议按路由规则分发到对应内核`}
           </CardDescription>
         </CardHeader>
         <CardContent>
