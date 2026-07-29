@@ -57,7 +57,7 @@ export function PresetCard({ preset, selected, modified, onClick }: PresetCardPr
 
       <div className="flex items-start gap-3 mb-2">
         <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${protoColor}/20 bg-opacity-20 mt-0.5`}>
-          <Server className="w-4 h-4" style={{ color: protoColor.replace('bg-', '').includes('emerald') ? '#10b981' : protoColor.includes('blue') ? '#3b82f6' : protoColor.includes('purple') ? '#a855f7' : protoColor.includes('amber') ? '#f59e0b' : protoColor.includes('rose') ? '#f43f5e' : protoColor.includes('cyan') ? '#06b6d4' : protoColor.includes('violet') ? '#8b5cf6' : protoColor.includes('lime') ? '#84cc16' : '#71717a' }} />
+          <Server className="w-4 h-4" style={{ color: 'var(--primary)' }} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap mb-1">

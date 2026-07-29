@@ -118,13 +118,13 @@ export const sidebarGroups: NavGroup[] = [
     label: 'YunDu增强',
     collapsible: true,
     items: [
-      { label: 'AI 诊断', path: '/diagnostics/ai', icon: Zap, badge: 'AI', badgeColor: 'bg-indigo-500' },
-      { label: '通道健康', path: '/diagnostics/channels', icon: Radio, badge: 'NEW', badgeColor: 'bg-emerald-500' },
-      { label: '节点体验', path: '/experience', icon: Gauge, badge: 'NEW', badgeColor: 'bg-violet-500' },
+      { label: 'AI 诊断', path: '/diagnostics/ai', icon: Zap, badge: 'AI', badgeColor: 'bg-[var(--primary)]' },
+      { label: '通道健康', path: '/diagnostics/channels', icon: Radio, badge: 'NEW', badgeColor: 'bg-[var(--success)]' },
+      { label: '节点体验', path: '/experience', icon: Gauge, badge: 'NEW', badgeColor: 'bg-[var(--success)]' },
       { label: '节点体检', path: '/doctor', icon: Stethoscope },
-      { label: '边缘暴露', path: '/exposure', icon: Globe, badge: 'BETA', badgeColor: 'bg-amber-500' },
-      { label: '协议注册', path: '/protocols', icon: Boxes, badge: 'BETA', badgeColor: 'bg-amber-500' },
-      { label: 'TLS 证书', path: '/certificates', icon: Lock, badge: 'BETA', badgeColor: 'bg-amber-500' },
+      { label: '边缘暴露', path: '/exposure', icon: Globe, badge: 'BETA', badgeColor: 'bg-[var(--warning)]' },
+      { label: '协议注册', path: '/protocols', icon: Boxes, badge: 'BETA', badgeColor: 'bg-[var(--warning)]' },
+      { label: 'TLS 证书', path: '/certificates', icon: Lock, badge: 'BETA', badgeColor: 'bg-[var(--warning)]' },
       { label: '配置导入', path: '/importer', icon: Upload },
       { label: '客户端兼容', path: '/compat', icon: Smartphone },
     ],
@@ -202,12 +202,12 @@ export const TAB_GROUP_LABELS: Record<TabGroup, string> = {
 }
 
 export const TAB_GROUP_COLORS: Record<TabGroup, string> = {
-  main: 'bg-indigo-500',
-  nodes: 'bg-emerald-500',
-  finance: 'bg-amber-500',
-  support: 'bg-sky-500',
-  system: 'bg-zinc-500',
-  yundu: 'bg-violet-500',
+main: 'bg-primary',
+nodes: 'bg-primary',
+finance: 'bg-primary',
+support: 'bg-primary',
+system: 'bg-primary',
+yundu: 'bg-primary',
 }
 
 export function getTabGroup(pathname: string): TabGroup {

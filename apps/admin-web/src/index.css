@@ -3,177 +3,177 @@
 @tailwind utilities;
 
 /* ============================================
-   YunDu Admin — Clean Minimal Theme
-   设计理念：极简 · 留白 · 单一主色 · 克制的语义色
-   主色：Indigo；中性：Zinc 灰阶；语义：仅 success/warning/danger
+   YunDu Admin — Warm Cozy Theme（暖阳温馨主题）
+   设计理念：简洁 · 统一 · 温馨
+   主色：赤陶 Terracotta；中性：暖米灰阶；语义：橄榄绿/蜂蜜琥珀/暖砖红
    ============================================ */
 :root {
-  /* —— 基础底色（更通透、留白感）—— */
-  --background: #fafafa;
-  --foreground: #18181b;
-  --card: #ffffff;
-  --card-foreground: #18181b;
-  --card-hover: #f4f4f5;
-  --popover: #ffffff;
-  --popover-foreground: #18181b;
+  /* —— 基础底色（奶油米白，温暖通透）—— */
+  --background: #faf6f0;
+  --foreground: #2c2620;
+  --card: #fffdfa;
+  --card-foreground: #2c2620;
+  --card-hover: #f5efe6;
+  --popover: #fffdfa;
+  --popover-foreground: #2c2620;
 
-  /* —— 主色（唯一品牌色，去掉紫色搭档）—— */
-  --primary: #4f46e5;
-  --primary-soft: #6366f1;
-  --primary-foreground: #ffffff;
-  --primary-glow: rgba(79, 70, 229, 0.10);
+  /* —— 主色（赤陶暖橙，唯一品牌色）—— */
+  --primary: #d97757;
+  --primary-soft: #e08d70;
+  --primary-foreground: #fffaf3;
+  --primary-glow: rgba(217, 119, 87, 0.12);
 
-  /* —— 中性灰阶（统一所有次要元素）—— */
-  --secondary: #f4f4f5;
-  --secondary-foreground: #52525b;
-  --muted: #f4f4f5;
-  --muted-foreground: #71717a;
+  /* —— 中性暖米灰阶（统一所有次要元素）—— */
+  --secondary: #f4ede3;
+  --secondary-foreground: #6e6152;
+  --muted: #f4ede3;
+  --muted-foreground: #8a7d6c;
 
-  /* —— 语义色（克制使用，仅状态指示）—— */
-  --success: #10b981;
+  /* —— 语义色（暖调克制使用，仅状态指示）—— */
+  --success: #5f8d4e;
   --success-foreground: #ffffff;
-  --warning: #f59e0b;
+  --warning: #e8a33d;
   --warning-foreground: #ffffff;
-  --destructive: #ef4444;
+  --destructive: #cd5c4d;
   --destructive-foreground: #ffffff;
-  --info: #4f46e5;            /* info 统一收敛到主色，避免引入第二个蓝 */
+  --info: #d97757;            /* info 统一收敛到主色 */
   --info-foreground: #ffffff;
 
   /* —— 语义色软底（badge / 标签用）—— */
-  --accent-success: #ecfdf5;
-  --accent-success-foreground: #047857;
-  --accent-warning: #fffbeb;
-  --accent-warning-foreground: #b45309;
-  --accent-danger: #fef2f2;
-  --accent-danger-foreground: #b91c1c;
+  --accent-success: #eef3e6;
+  --accent-success-foreground: #4c7038;
+  --accent-warning: #fbf1dc;
+  --accent-warning-foreground: #96691c;
+  --accent-danger: #f9e8e4;
+  --accent-danger-foreground: #a04032;
 
-  /* —— 装饰性 accent 全部收敛为中性灰（消除粉/紫/青/天蓝等花色）—— */
-  --accent: #f4f4f5;
-  --accent-foreground: #4f46e5;
-  --accent-pink: #f4f4f5;
-  --accent-pink-foreground: #52525b;
-  --accent-sky: #f4f4f5;
-  --accent-sky-foreground: #52525b;
-  --accent-emerald: #ecfdf5;
-  --accent-emerald-foreground: #047857;
-  --accent-amber: #fffbeb;
-  --accent-amber-foreground: #b45309;
-  --accent-rose: #fef2f2;
-  --accent-rose-foreground: #b91c1c;
+  /* —— 装饰性 accent 全部收敛为暖米灰（消除粉/紫/青/天蓝等花色）—— */
+  --accent: #f6efe6;
+  --accent-foreground: #b85a38;
+  --accent-pink: #f4ede3;
+  --accent-pink-foreground: #6e6152;
+  --accent-sky: #f4ede3;
+  --accent-sky-foreground: #6e6152;
+  --accent-emerald: #eef3e6;
+  --accent-emerald-foreground: #4c7038;
+  --accent-amber: #fbf1dc;
+  --accent-amber-foreground: #96691c;
+  --accent-rose: #f9e8e4;
+  --accent-rose-foreground: #a04032;
 
-  /* —— 边框 / 输入 / 聚焦 —— */
-  --border: #e4e4e7;
-  --border-hover: #d4d4d8;
-  --input: #e4e4e7;
-  --ring: #4f46e5;
+  /* —— 边框 / 输入 / 聚焦（暖调）—— */
+  --border: #eae1d3;
+  --border-hover: #dccfbb;
+  --input: #eae1d3;
+  --ring: #d97757;
 
-  /* —— 侧边栏（纯净白底）—— */
-  --sidebar-bg: #ffffff;
-  --sidebar-border: #e4e4e7;
-  --sidebar-active: rgba(79, 70, 229, 0.06);
-  --sidebar-active-text: #4f46e5;
-  --sidebar-text: #71717a;
-  --sidebar-header: #fafafa;
+  /* —— 侧边栏（暖米纸感）—— */
+  --sidebar-bg: #f7f1e7;
+  --sidebar-border: #eae1d3;
+  --sidebar-active: rgba(217, 119, 87, 0.10);
+  --sidebar-active-text: #b85a38;
+  --sidebar-text: #7d7160;
+  --sidebar-header: #f7f1e7;
 
   /* —— 顶栏 —— */
-  --header-bg: rgba(255, 255, 255, 0.85);
-  --header-border: #e4e4e7;
+  --header-bg: rgba(250, 246, 240, 0.85);
+  --header-border: #eae1d3;
 
-  /* —— 渐变（单色系，去紫色）—— */
-  --gradient-primary: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
-  --gradient-soft: linear-gradient(135deg, rgba(79,70,229,0.04) 0%, rgba(99,102,241,0.04) 100%);
-  --gradient-success: linear-gradient(135deg, #10b981 0%, #34d399 100%);
-  --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
-  --gradient-danger: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
-  --gradient-info: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  /* —— 渐变（暖橙单色系）—— */
+  --gradient-primary: linear-gradient(135deg, #d97757 0%, #e08d70 100%);
+  --gradient-soft: linear-gradient(135deg, rgba(217,119,87,0.05) 0%, rgba(224,141,112,0.05) 100%);
+  --gradient-success: linear-gradient(135deg, #5f8d4e 0%, #7aa468 100%);
+  --gradient-warning: linear-gradient(135deg, #e8a33d 0%, #f0bb63 100%);
+  --gradient-danger: linear-gradient(135deg, #cd5c4d 0%, #d97a6a 100%);
+  --gradient-info: linear-gradient(135deg, #d97757 0%, #e08d70 100%);
 
-  /* —— 阴影（更轻柔）—— */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.05), 0 2px 6px rgba(0, 0, 0, 0.03);
-  --shadow-glow: 0 0 16px rgba(79, 70, 229, 0.10);
+  /* —— 阴影（暖棕色调，更柔和温馨）—— */
+  --shadow-sm: 0 1px 2px rgba(122, 84, 52, 0.05);
+  --shadow-md: 0 2px 8px rgba(122, 84, 52, 0.06), 0 1px 2px rgba(122, 84, 52, 0.04);
+  --shadow-lg: 0 8px 24px rgba(122, 84, 52, 0.08), 0 2px 6px rgba(122, 84, 52, 0.04);
+  --shadow-glow: 0 0 16px rgba(217, 119, 87, 0.15);
 
   --radius: 0.75rem;
   color-scheme: light;
 }
 
 /* ============================================
-   Dark Theme — 深色模式（同样克制）
+   Dark Theme — 暖夜模式（深棕暖调，同样克制）
    ============================================ */
 .dark {
-  --background: #09090b;
-  --foreground: #fafafa;
-  --card: #18181b;
-  --card-foreground: #fafafa;
-  --card-hover: #27272a;
-  --popover: #18181b;
-  --popover-foreground: #fafafa;
+  --background: #1e1a15;
+  --foreground: #f3ede3;
+  --card: #282219;
+  --card-foreground: #f3ede3;
+  --card-hover: #332b20;
+  --popover: #282219;
+  --popover-foreground: #f3ede3;
 
-  --primary: #6366f1;
-  --primary-soft: #818cf8;
-  --primary-foreground: #ffffff;
-  --primary-glow: rgba(99, 102, 241, 0.15);
+  --primary: #e08d70;
+  --primary-soft: #eaa586;
+  --primary-foreground: #2d1d12;
+  --primary-glow: rgba(224, 141, 112, 0.15);
 
-  --secondary: #27272a;
-  --secondary-foreground: #d4d4d8;
-  --muted: #27272a;
-  --muted-foreground: #a1a1aa;
+  --secondary: #332b20;
+  --secondary-foreground: #d9cdbb;
+  --muted: #332b20;
+  --muted-foreground: #b3a693;
 
-  --success: #34d399;
-  --success-foreground: #052e1b;
-  --warning: #fbbf24;
-  --warning-foreground: #3a2a06;
-  --destructive: #f87171;
-  --destructive-foreground: #ffffff;
-  --info: #818cf8;
-  --info-foreground: #09090b;
+  --success: #8fb87a;
+  --success-foreground: #1e2a17;
+  --warning: #f0bb63;
+  --warning-foreground: #3a2a0d;
+  --destructive: #e07a67;
+  --destructive-foreground: #fff5f0;
+  --info: #e08d70;
+  --info-foreground: #2d1d12;
 
-  --accent-success: rgba(16, 185, 129, 0.12);
-  --accent-success-foreground: #6ee7b7;
-  --accent-warning: rgba(245, 158, 11, 0.12);
-  --accent-warning-foreground: #fcd34d;
-  --accent-danger: rgba(239, 68, 68, 0.12);
-  --accent-danger-foreground: #fca5a5;
+  --accent-success: rgba(143, 184, 122, 0.14);
+  --accent-success-foreground: #b4d6a3;
+  --accent-warning: rgba(232, 163, 61, 0.14);
+  --accent-warning-foreground: #f5cf8d;
+  --accent-danger: rgba(224, 122, 103, 0.14);
+  --accent-danger-foreground: #f0a595;
 
-  --accent: #27272a;
-  --accent-foreground: #a5b4fc;
-  --accent-pink: #27272a;
-  --accent-pink-foreground: #d4d4d8;
-  --accent-sky: #27272a;
-  --accent-sky-foreground: #d4d4d8;
-  --accent-emerald: rgba(16, 185, 129, 0.12);
-  --accent-emerald-foreground: #6ee7b7;
-  --accent-amber: rgba(245, 158, 11, 0.12);
-  --accent-amber-foreground: #fcd34d;
-  --accent-rose: rgba(239, 68, 68, 0.12);
-  --accent-rose-foreground: #fca5a5;
+  --accent: #332b20;
+  --accent-foreground: #eaa586;
+  --accent-pink: #332b20;
+  --accent-pink-foreground: #d9cdbb;
+  --accent-sky: #332b20;
+  --accent-sky-foreground: #d9cdbb;
+  --accent-emerald: rgba(143, 184, 122, 0.14);
+  --accent-emerald-foreground: #b4d6a3;
+  --accent-amber: rgba(232, 163, 61, 0.14);
+  --accent-amber-foreground: #f5cf8d;
+  --accent-rose: rgba(224, 122, 103, 0.14);
+  --accent-rose-foreground: #f0a595;
 
-  --border: #27272a;
-  --border-hover: #3f3f46;
-  --input: #27272a;
-  --ring: #6366f1;
+  --border: #3c342a;
+  --border-hover: #50463a;
+  --input: #3c342a;
+  --ring: #e08d70;
 
-  --sidebar-bg: #0f0f11;
-  --sidebar-border: #27272a;
-  --sidebar-active: rgba(99, 102, 241, 0.12);
-  --sidebar-active-text: #a5b4fc;
-  --sidebar-text: #a1a1aa;
-  --sidebar-header: #18181b;
+  --sidebar-bg: #241e16;
+  --sidebar-border: #3c342a;
+  --sidebar-active: rgba(224, 141, 112, 0.14);
+  --sidebar-active-text: #eaa586;
+  --sidebar-text: #b3a693;
+  --sidebar-header: #241e16;
 
-  --header-bg: rgba(9, 9, 11, 0.85);
-  --header-border: #27272a;
+  --header-bg: rgba(30, 26, 21, 0.85);
+  --header-border: #3c342a;
 
-  --gradient-primary: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
-  --gradient-soft: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(129,140,248,0.08) 100%);
-  --gradient-success: linear-gradient(135deg, #10b981 0%, #34d399 100%);
-  --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
-  --gradient-danger: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
-  --gradient-info: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  --gradient-primary: linear-gradient(135deg, #d97757 0%, #e08d70 100%);
+  --gradient-soft: linear-gradient(135deg, rgba(224,141,112,0.08) 0%, rgba(234,165,134,0.08) 100%);
+  --gradient-success: linear-gradient(135deg, #5f8d4e 0%, #7aa468 100%);
+  --gradient-warning: linear-gradient(135deg, #e8a33d 0%, #f0bb63 100%);
+  --gradient-danger: linear-gradient(135deg, #cd5c4d 0%, #d97a6a 100%);
+  --gradient-info: linear-gradient(135deg, #d97757 0%, #e08d70 100%);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.2);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25);
-  --shadow-glow: 0 0 16px rgba(99, 102, 241, 0.18);
+  --shadow-glow: 0 0 16px rgba(224, 141, 112, 0.18);
 
   color-scheme: dark;
 }
@@ -191,10 +191,16 @@ body,
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* 温馨细节：选中文本与焦点描边统一暖色 */
+::selection {
+  background: var(--primary-glow);
+  color: var(--foreground);
 }
 
 * {
@@ -796,3 +802,36 @@ code.bg-zinc-800 {
 .hover\:bg-red-500:hover { background-color: var(--destructive) !important; }
 .hover\:bg-emerald-500:hover { background-color: var(--success) !important; }
 .hover\:bg-amber-500:hover { background-color: var(--warning) !important; }
+
+/* ============================================================
+   暖阳温馨主题 · 补充映射
+   zinc/slate 中间色阶 → 暖中性色，避免冷灰破坏温馨氛围
+   ============================================================ */
+
+/* —— 浅色块（Switch 未选中轨道等）—— */
+.bg-zinc-300,
+.bg-zinc-200,
+.bg-slate-200,
+.bg-slate-300 {
+  background-color: var(--border) !important;
+}
+
+/* —— 中深色块（badge / 圆点 / 步骤圆圈 / 禁用按钮）—— */
+.bg-zinc-500, .bg-zinc-600, .bg-zinc-700,
+.bg-slate-500, .bg-slate-600, .bg-slate-700 {
+  background-color: var(--muted-foreground) !important;
+}
+
+/* —— 步骤圆圈/序号内文字保持暖白 —— */
+.bg-zinc-500.text-white, .bg-zinc-600.text-white, .bg-zinc-700.text-white,
+.bg-slate-500.text-white, .bg-slate-600.text-white, .bg-slate-700.text-white {
+  color: #fffaf3 !important;
+}
+
+/* —— slate 背景文字色阶 —— */
+.text-slate-300, .text-slate-600, .text-slate-700 {
+  color: var(--muted-foreground) !important;
+}
+.text-slate-800, .text-slate-900 {
+  color: var(--foreground) !important;
+}

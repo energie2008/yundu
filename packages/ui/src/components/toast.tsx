@@ -9,9 +9,9 @@ const toastVariants = cva(
   {
     variants: {
       variant: {
-        default: 'border-zinc-200 bg-white text-zinc-900',
-        destructive: 'border-red-200 bg-red-50 text-red-700',
-        success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        default: 'border-[var(--border)] bg-[var(--card)] text-[var(--foreground)]',
+        destructive: 'border-[var(--accent-danger,var(--border))] bg-[var(--accent-danger,var(--card))] text-[var(--accent-danger-foreground,var(--destructive))]',
+        success: 'border-[var(--accent-success,var(--border))] bg-[var(--accent-success,var(--card))] text-[var(--accent-success-foreground,var(--success))]',
       },
     },
     defaultVariants: {
@@ -31,11 +31,11 @@ export interface ToastProps extends React.HTMLAttributes<HTMLDivElement>, Varian
 const ToastIcon = ({ variant }: { variant: ToastProps['variant'] }) => {
   switch (variant) {
     case 'success':
-      return <CheckCircle className="h-5 w-5 text-emerald-400" />
+      return <CheckCircle className="h-5 w-5 text-[var(--success)]" />
     case 'destructive':
-      return <AlertCircle className="h-5 w-5 text-red-400" />
+      return <AlertCircle className="h-5 w-5 text-[var(--destructive)]" />
     default:
-      return <Info className="h-5 w-5 text-indigo-400" />
+      return <Info className="h-5 w-5 text-[var(--primary)]" />
   }
 }
 
@@ -53,7 +53,7 @@ const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
           <div className="flex-1">
             {title && <div className="text-sm font-medium">{title}</div>}
             {description && (
-              <div className={cn('text-sm mt-0.5', variant === 'destructive' ? 'text-red-600' : variant === 'success' ? 'text-emerald-600' : 'text-zinc-500')}>
+              <div className={cn('text-sm mt-0.5', variant === 'destructive' || variant === 'success' ? 'opacity-90' : 'text-[var(--muted-foreground)]')}>
                 {description}
               </div>
             )}
@@ -62,7 +62,7 @@ const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute right-2 top-2 rounded-md p-1 opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="absolute right-2 top-2 rounded-md p-1 opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
           >
             <X className="h-4 w-4" />
           </button>

@@ -1126,7 +1126,7 @@ export default function Users() {
                             {actionMenuOpen === user.id && (
                               <>
                                 <div className="fixed inset-0 z-40" onClick={() => setActionMenuOpen(null)} />
-                                <div className="absolute right-0 top-full mt-1 w-48 rounded-lg shadow-lg z-50 py-1" style={{ backgroundColor: '#18181b', border: `1px solid ${ADMIN_BORDER}` }}>
+                                <div className="absolute right-0 top-full mt-1 w-48 rounded-lg shadow-lg z-50 py-1" style={{ backgroundColor: 'var(--popover)', border: `1px solid ${ADMIN_BORDER}` }}>
                                   <button
                                     className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-zinc-800"
                                     style={{ color: ADMIN_TEXT }}

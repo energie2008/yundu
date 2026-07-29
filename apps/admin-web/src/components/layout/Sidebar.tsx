@@ -39,7 +39,7 @@ function SidebarLink({
         <span
           className={cn(
             'text-[10px] font-semibold px-1.5 py-0.5 rounded-md text-white shrink-0',
-            item.badgeColor || 'bg-slate-600'
+            item.badgeColor || 'bg-[var(--primary)]'
           )}
         >
           {item.badge}

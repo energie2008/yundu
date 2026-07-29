@@ -4,20 +4,20 @@ import { cn } from '../lib/utils'
 import { Spinner } from './spinner'
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]',
+  'inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)] disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]',
   {
     variants: {
       variant: {
         default:
-          'bg-indigo-600 text-white shadow hover:bg-indigo-500',
+          'bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm hover:bg-[var(--primary-soft)]',
         destructive:
-          'bg-red-600 text-white shadow-sm hover:bg-red-500',
+          'bg-[var(--destructive)] text-[var(--destructive-foreground)] shadow-sm hover:opacity-90',
         outline:
-          'border border-zinc-300 bg-transparent shadow-sm hover:bg-zinc-100 hover:text-zinc-900',
+          'border border-[var(--border)] bg-transparent text-[var(--foreground)] shadow-sm hover:bg-[var(--muted)]',
         secondary:
-          'bg-zinc-100 text-zinc-900 shadow-sm hover:bg-zinc-200',
-        ghost: 'hover:bg-zinc-100 hover:text-zinc-900',
-        link: 'text-indigo-600 underline-offset-4 hover:underline',
+          'bg-[var(--secondary)] text-[var(--secondary-foreground)] shadow-sm hover:bg-[var(--muted)]',
+        ghost: 'text-[var(--foreground)] hover:bg-[var(--muted)]',
+        link: 'text-[var(--primary)] underline-offset-4 hover:underline',
       },
       size: {
         default: 'h-9 px-4 py-2',
