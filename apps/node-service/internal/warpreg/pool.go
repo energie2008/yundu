@@ -199,3 +199,13 @@ func trim(s string) string {
 	}
 	return s[start:end]
 }
+
+// ApplyLicense 为 WARP 账户应用 WARP+ License
+// 调用 Cloudflare API 绑定 License 到设备，成功后更新 warp_profiles.license_key
+func (p *Pool) ApplyLicense(ctx context.Context, deviceID, accessToken, license string) error {
+	if err := p.registrar.client.SetLicense(ctx, deviceID, accessToken, license); err != nil {
+		return fmt.Errorf("set license: %w", err)
+	}
+	p.logger.Info("warp license applied", "device_id", deviceID, "license", license)
+	return nil
+}

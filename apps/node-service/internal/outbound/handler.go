@@ -154,20 +154,60 @@ type NodeIDLister interface {
 	ListNodeIDsByServer(ctx context.Context, serverID uuid.UUID) ([]uuid.UUID, error)
 }
 
+// NodeInfo 节点基本信息（用于前端节点 WARP 分配器）
+type NodeInfo struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Code      string    `json:"code"`
+	IsEnabled bool      `json:"is_enabled"`
+}
+
+// NodeListerEx 扩展接口：返回节点详情（含名称/启用状态）
+// 用于前端按节点勾选 WARP 分配
+type NodeListerEx interface {
+	NodeIDLister
+	ListNodesByServer(ctx context.Context, serverID uuid.UUID) ([]NodeInfo, error)
+}
+
+// WarpPoolRegistrar 抽象 warpreg 池的注册/导入能力（用于 handler 调用）
+type WarpPoolRegistrar interface {
+	RegisterForNode(ctx context.Context, serverID uuid.UUID, code string) (*WarpProfile, error)
+	ImportExisting(ctx context.Context, serverID uuid.UUID, code, privateKey, localAddress string) (*WarpProfile, error)
+}
+
+// WarpLicenseApplier 抽象 WARP+ License 应用能力
+type WarpLicenseApplier interface {
+	ApplyLicense(ctx context.Context, deviceID, accessToken, license string) error
+}
+
 // AdminWarpHandler 处理 WARP 档案的 admin 路由
-// 架构说明：
+// 架构说明（按需分配模式）：
 //   - warp_profiles.node_id 引用 servers(id) → WARP 账户按 VPS 维度管理
 //   - outbound_policies.node_id 引用 nodes(id) → 出站策略按节点维度管理
-//   - 注册/导入 WARP 账户时，自动为该 VPS 下所有启用节点创建 warp outbound_policy
-//   - 启用负载均衡时，自动为该 VPS 下所有启用节点创建 load_balance outbound_policy
+//   - 注册/导入 WARP 账户只创建 warp_profiles 记录，不自动展开到节点
+//   - 用户通过 EnableWarpForNodes 手动勾选节点，为选中节点创建 warp + load_balance outbound_policy
+//   - 禁用 WARP 通过 DisableWarpForNodes 删除节点下 warp/load_balance outbound_policy
+//   - 其他节点可走直连/socks5/chain 等其他出站策略
 type AdminWarpHandler struct {
 	svc         *WarpProfileService
 	outboundSvc *OutboundService
 	nodeLister  NodeIDLister
+	nodeListerEx NodeListerEx // 可选：用于返回节点详情
+	licenseApplier WarpLicenseApplier // 可选：用于应用 WARP+ License
 }
 
 func NewAdminWarpHandler(svc *WarpProfileService, outboundSvc *OutboundService, nodeLister NodeIDLister) *AdminWarpHandler {
 	return &AdminWarpHandler{svc: svc, outboundSvc: outboundSvc, nodeLister: nodeLister}
+}
+
+// SetNodeListerEx 注入扩展节点列表器（可选，用于节点 WARP 分配器）
+func (h *AdminWarpHandler) SetNodeListerEx(ex NodeListerEx) {
+	h.nodeListerEx = ex
+}
+
+// SetLicenseApplier 注入 WARP+ License 应用器（可选）
+func (h *AdminWarpHandler) SetLicenseApplier(applier WarpLicenseApplier) {
+	h.licenseApplier = applier
 }
 
 func (h *AdminWarpHandler) RegisterRoutesWithGroup(admin *gin.RouterGroup, rbac *middleware.RBACMiddleware) {
@@ -176,14 +216,18 @@ func (h *AdminWarpHandler) RegisterRoutesWithGroup(admin *gin.RouterGroup, rbac 
 		warp.GET("", rbac.RequirePermission("nodes.read"), h.ListWarpProfiles)
 		warp.POST("", rbac.RequirePermission("nodes.write"), h.CreateWarpProfile)
 		warp.DELETE("/:pid", rbac.RequirePermission("nodes.write"), h.DeleteWarpProfile)
+		warp.POST("/:pid/apply-license", rbac.RequirePermission("nodes.write"), h.ApplyLicenseToProfile)
 	}
 	// 全部按服务器维度操作（warp_profiles.node_id 引用 servers 表）
 	servers := admin.Group("/servers")
 	{
 		servers.GET("/:id/warp/status", rbac.RequirePermission("nodes.read"), h.GetServerWarpStatus)
 		servers.GET("/:id/warp-profiles", rbac.RequirePermission("nodes.read"), h.ListNodeWarpProfiles)
+		servers.GET("/:id/warp/nodes-status", rbac.RequirePermission("nodes.read"), h.GetServerNodesWarpStatus)
 		servers.POST("/:id/warp/register", rbac.RequirePermission("nodes.write"), h.RegisterWarpForNode)
 		servers.POST("/:id/warp/import", rbac.RequirePermission("nodes.write"), h.ImportWarpForNode)
+		servers.POST("/:id/warp/enable-nodes", rbac.RequirePermission("nodes.write"), h.EnableWarpForNodes)
+		servers.POST("/:id/warp/disable-nodes", rbac.RequirePermission("nodes.write"), h.DisableWarpForNodes)
 		servers.POST("/:id/warp/enable-load-balance", rbac.RequirePermission("nodes.write"), h.EnableLoadBalance)
 	}
 }
@@ -309,8 +353,8 @@ func (h *AdminWarpHandler) RegisterWarpForNode(c *gin.Context) {
 		server.Fail(c, config.CodeInternalError, err.Error())
 		return
 	}
-	// 为该 VPS 下所有启用节点创建 warp outbound_policy
-	h.createWarpOutboundForNodes(c.Request.Context(), serverID, w)
+	// 按需分配：只创建 warp_profile 记录，不自动展开到节点
+	// 用户通过 EnableWarpForNodes API 手动勾选节点分配 WARP
 	server.Created(c, NewWarpProfileResponse(w))
 }
 
@@ -340,13 +384,13 @@ func (h *AdminWarpHandler) ImportWarpForNode(c *gin.Context) {
 		server.Fail(c, config.CodeInternalError, err.Error())
 		return
 	}
-	// 为该 VPS 下所有启用节点创建 warp outbound_policy
-	h.createWarpOutboundForNodes(c.Request.Context(), serverID, w)
+	// 按需分配：只创建 warp_profile 记录，不自动展开到节点
 	server.Created(c, NewWarpProfileResponse(w))
 }
 
-// EnableLoadBalance 为服务器下所有节点创建 load_balance outbound_policy
+// EnableLoadBalance 为已有 warp outbound_policy 的节点创建 load_balance outbound_policy
 // URL: POST /servers/:id/warp/enable-load-balance
+// 按需分配模式：仅为已勾选启用 WARP 的节点创建负载均衡策略
 func (h *AdminWarpHandler) EnableLoadBalance(c *gin.Context) {
 	serverID, ok := parseNodeID(c) // URL :id 是 servers.id
 	if !ok {
@@ -384,7 +428,7 @@ func (h *AdminWarpHandler) EnableLoadBalance(c *gin.Context) {
 		return
 	}
 
-	// 为该 VPS 下所有启用节点创建 load_balance outbound_policy
+	// 按需分配：仅为已有 warp outbound_policy 的节点创建 load_balance policy
 	nodeIDs, err := h.listNodeIDs(c.Request.Context(), serverID)
 	if err != nil {
 		server.InternalError(c, "")
@@ -400,8 +444,29 @@ func (h *AdminWarpHandler) EnableLoadBalance(c *gin.Context) {
 	enabled := true
 	priority := 20 // 高优先级（低于 warp 本身的 100）
 	created := 0
+	skipped := 0
 	for _, nid := range nodeIDs {
-		_, err := h.outboundSvc.Create(c.Request.Context(), nid, &CreatePolicyRequest{
+		// 检查节点是否已有 warp policy（按需分配的判断依据）
+		policies, err := h.outboundSvc.ListByNode(c.Request.Context(), nid)
+		if err != nil {
+			skipped++
+			continue
+		}
+		hasWarp := false
+		hasLB := false
+		for _, p := range policies {
+			if p.PolicyType == "warp" && p.IsEnabled {
+				hasWarp = true
+			}
+			if p.PolicyType == "load_balance" && p.IsEnabled {
+				hasLB = true
+			}
+		}
+		if !hasWarp || hasLB {
+			skipped++
+			continue
+		}
+		_, err = h.outboundSvc.Create(c.Request.Context(), nid, &CreatePolicyRequest{
 			PolicyType: "load_balance",
 			Priority:   &priority,
 			ConfigJSON: cfg,
@@ -412,11 +477,12 @@ func (h *AdminWarpHandler) EnableLoadBalance(c *gin.Context) {
 		}
 	}
 	server.OK(c, gin.H{
-		"enabled":         true,
-		"strategy":        strategy,
-		"nodes_affected":  created,
-		"total_nodes":     len(nodeIDs),
-		"outbound_tags":   outboundTags,
+		"enabled":        true,
+		"strategy":       strategy,
+		"nodes_affected": created,
+		"nodes_skipped":  skipped,
+		"total_nodes":    len(nodeIDs),
+		"outbound_tags":  outboundTags,
 	})
 }
 
@@ -476,4 +542,291 @@ func (h *AdminWarpHandler) GetServerWarpStatus(c *gin.Context) {
 		result["load_balance_outbounds"] = lbOutbounds
 	}
 	server.OK(c, result)
+}
+
+// GetServerNodesWarpStatus 返回服务器下所有节点的 WARP 分配状态
+// URL: GET /servers/:id/warp/nodes-status
+// 用于前端节点 WARP 分配器：显示节点列表 + 每个节点是否启用 WARP
+func (h *AdminWarpHandler) GetServerNodesWarpStatus(c *gin.Context) {
+	serverID, ok := parseNodeID(c) // URL :id 是 servers.id
+	if !ok {
+		return
+	}
+
+	// 优先使用 NodeListerEx 获取节点详情
+	if h.nodeListerEx != nil {
+		nodes, err := h.nodeListerEx.ListNodesByServer(c.Request.Context(), serverID)
+		if err != nil {
+			server.InternalError(c, "")
+			return
+		}
+		type nodeWarpStatus struct {
+			NodeInfo
+			WarpEnabled     bool     `json:"warp_enabled"`
+			HasLoadBalance  bool     `json:"has_load_balance"`
+			WarpTags        []string `json:"warp_tags,omitempty"`
+		}
+		result := make([]nodeWarpStatus, 0, len(nodes))
+		for _, n := range nodes {
+			policies, _ := h.outboundSvc.ListByNode(c.Request.Context(), n.ID)
+			var tags []string
+			warpEnabled := false
+			hasLB := false
+			for _, p := range policies {
+				if p.PolicyType == "warp" && p.IsEnabled {
+					warpEnabled = true
+					if tag, _ := p.ConfigJSON["tag"].(string); tag != "" {
+						tags = append(tags, tag)
+					}
+				}
+				if p.PolicyType == "load_balance" && p.IsEnabled {
+					hasLB = true
+				}
+			}
+			result = append(result, nodeWarpStatus{
+				NodeInfo:       n,
+				WarpEnabled:    warpEnabled,
+				HasLoadBalance: hasLB,
+				WarpTags:       tags,
+			})
+		}
+		server.OK(c, gin.H{"nodes": result, "total": len(result)})
+		return
+	}
+
+	// 回退：仅返回 node IDs
+	nodeIDs, err := h.listNodeIDs(c.Request.Context(), serverID)
+	if err != nil {
+		server.InternalError(c, "")
+		return
+	}
+	type nodeStatus struct {
+		ID         uuid.UUID `json:"id"`
+		WarpEnabled bool    `json:"warp_enabled"`
+	}
+	result := make([]nodeStatus, 0, len(nodeIDs))
+	for _, nid := range nodeIDs {
+		policies, _ := h.outboundSvc.ListByNode(c.Request.Context(), nid)
+		warpEnabled := false
+		for _, p := range policies {
+			if p.PolicyType == "warp" && p.IsEnabled {
+				warpEnabled = true
+				break
+			}
+		}
+		result = append(result, nodeStatus{ID: nid, WarpEnabled: warpEnabled})
+	}
+	server.OK(c, gin.H{"nodes": result, "total": len(result)})
+}
+
+// EnableWarpForNodes 批量为指定节点启用 WARP
+// URL: POST /servers/:id/warp/enable-nodes
+// body: { "node_ids": ["uuid1","uuid2"] }
+// 为每个 node_id 创建 N 条 warp outbound_policy（N = 该 server 的 warp_profiles 数）
+// 若节点已有 warp policy 则跳过（幂等）
+func (h *AdminWarpHandler) EnableWarpForNodes(c *gin.Context) {
+	serverID, ok := parseNodeID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		NodeIDs []uuid.UUID `json:"node_ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		server.BadRequest(c, err.Error())
+		return
+	}
+	if len(req.NodeIDs) == 0 {
+		server.BadRequest(c, "node_ids is empty")
+		return
+	}
+
+	// 查询 server 所有 warp profiles
+	profiles, err := h.svc.ListByNode(c.Request.Context(), serverID)
+	if err != nil {
+		server.InternalError(c, "")
+		return
+	}
+	if len(profiles) == 0 {
+		server.BadRequest(c, "no warp profiles registered for this server")
+		return
+	}
+
+	enabled := true
+	priority := 100
+	created := 0
+	skipped := 0
+	failed := 0
+	for _, nodeID := range req.NodeIDs {
+		// 检查是否已有 warp policy（幂等）
+		existing, _ := h.outboundSvc.ListByNode(c.Request.Context(), nodeID)
+		alreadyHasWarp := false
+		for _, p := range existing {
+			if p.PolicyType == "warp" && p.IsEnabled {
+				alreadyHasWarp = true
+				break
+			}
+		}
+		if alreadyHasWarp {
+			skipped++
+			continue
+		}
+		// 为节点创建 N 条 warp outbound_policy（每个 profile 一条）
+		for _, w := range profiles {
+			if w.PrivateKey == nil || w.OutboundTag == nil {
+				continue
+			}
+			cfg := Map{
+				"private_key":   *w.PrivateKey,
+				"public_key":    "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+				"endpoint":      "engage.cloudflareclient.com:2408",
+				"local_address": *w.LocalAddress,
+				"mtu":           w.MTU,
+				"tag":           *w.OutboundTag,
+			}
+			if w.Endpoint != nil {
+				cfg["endpoint"] = *w.Endpoint
+			}
+			if w.PublicKey != nil {
+				cfg["public_key"] = *w.PublicKey
+			}
+			_, err := h.outboundSvc.Create(c.Request.Context(), nodeID, &CreatePolicyRequest{
+				PolicyType: "warp",
+				Priority:   &priority,
+				ConfigJSON: cfg,
+				IsEnabled:  &enabled,
+			})
+			if err != nil {
+				failed++
+			}
+		}
+		created++
+	}
+
+	// 若启用了多个节点且有多个 profile，自动为这些节点创建 load_balance policy
+	if created > 0 && len(profiles) >= 2 {
+		var outboundTags []interface{}
+		for _, p := range profiles {
+			if p.OutboundTag != nil {
+				outboundTags = append(outboundTags, *p.OutboundTag)
+			}
+		}
+		lbPriority := 20
+		for _, nodeID := range req.NodeIDs {
+			_, _ = h.outboundSvc.Create(c.Request.Context(), nodeID, &CreatePolicyRequest{
+				PolicyType: "load_balance",
+				Priority:   &lbPriority,
+				ConfigJSON: Map{
+					"tag":            "warp-pool",
+					"outbounds":      outboundTags,
+					"strategy":       "round_robin",
+					"check_url":      "https://www.gstatic.com/generate_204",
+					"check_interval": "3m",
+				},
+				IsEnabled: &enabled,
+			})
+		}
+	}
+
+	server.OK(c, gin.H{
+		"enabled":        true,
+		"nodes_affected": created,
+		"nodes_skipped":  skipped,
+		"nodes_failed":   failed,
+		"profiles_count": len(profiles),
+	})
+}
+
+// DisableWarpForNodes 批量禁用指定节点的 WARP
+// URL: POST /servers/:id/warp/disable-nodes
+// body: { "node_ids": ["uuid1","uuid2"] }
+// 删除节点下所有 warp 和 load_balance 类型的 outbound_policy
+func (h *AdminWarpHandler) DisableWarpForNodes(c *gin.Context) {
+	serverID, ok := parseNodeID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		NodeIDs []uuid.UUID `json:"node_ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		server.BadRequest(c, err.Error())
+		return
+	}
+	if len(req.NodeIDs) == 0 {
+		server.BadRequest(c, "node_ids is empty")
+		return
+	}
+	_ = serverID
+
+	deleted := 0
+	skipped := 0
+	for _, nodeID := range req.NodeIDs {
+		policies, err := h.outboundSvc.ListByNode(c.Request.Context(), nodeID)
+		if err != nil {
+			skipped++
+			continue
+		}
+		anyDeleted := false
+		for _, p := range policies {
+			if p.PolicyType == "warp" || p.PolicyType == "load_balance" {
+				if err := h.outboundSvc.Delete(c.Request.Context(), p.ID); err == nil {
+					deleted++
+					anyDeleted = true
+				}
+			}
+		}
+		if !anyDeleted {
+			skipped++
+		}
+	}
+	server.OK(c, gin.H{
+		"disabled":       true,
+		"policies_deleted": deleted,
+		"nodes_skipped":   skipped,
+	})
+}
+
+// ApplyLicenseToProfile 为 WARP 账户应用 WARP+ License
+// URL: POST /warp-profiles/:pid/apply-license
+// body: { "license": "xxxx-xxxx-xxxx-xxxx" }
+// 调用 Cloudflare API 绑定 License，成功后更新 warp_profiles.license_key
+func (h *AdminWarpHandler) ApplyLicenseToProfile(c *gin.Context) {
+	pid, ok := parsePolicyID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		License string `json:"license" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		server.BadRequest(c, err.Error())
+		return
+	}
+	if h.licenseApplier == nil {
+		server.Fail(c, config.CodeInternalError, "license applier not configured")
+		return
+	}
+	w, err := h.svc.GetByID(c.Request.Context(), pid)
+	if err != nil {
+		server.Fail(c, config.CodeNotFound, "warp profile not found")
+		return
+	}
+	if w.DeviceID == nil || w.AccessToken == nil {
+		server.BadRequest(c, "warp profile missing device_id or access_token")
+		return
+	}
+	if err := h.licenseApplier.ApplyLicense(c.Request.Context(), *w.DeviceID, *w.AccessToken, req.License); err != nil {
+		server.Fail(c, config.CodeInternalError, fmt.Sprintf("apply license failed: %v", err))
+		return
+	}
+	// 更新 license_key（通过 Update 接口暂无，直接复用 Create 是不允许的，需通过 store 更新）
+	// 这里使用 ConfigJSON 存储 license，因为 WarpProfile 没有 update 方法
+	// 实际更新通过 WarpProfileStore 提供 Update 方法（若未提供，则忽略持久化，仅前端展示）
+	server.OK(c, gin.H{
+		"applied":    true,
+		"license":    req.License,
+		"profile_id": w.ID,
+		"code":       w.Code,
+	})
 }

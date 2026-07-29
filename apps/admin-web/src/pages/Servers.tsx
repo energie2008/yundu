@@ -26,6 +26,7 @@ import {
   Globe,
   Trash2,
   Cloud,
+  Star,
 } from 'lucide-react'
 import {
   Card,
@@ -806,6 +807,7 @@ interface WarpProfile {
   outbound_tag: string
   device_id?: string
   last_rotated_at?: string
+  license_key?: string
 }
 
 interface WarpStatus {
@@ -814,6 +816,17 @@ interface WarpStatus {
   load_balance: boolean
   load_balance_strategy?: string
   load_balance_outbounds?: string[]
+}
+
+// 节点 WARP 分配状态
+interface NodeWarpStatus {
+  id: string
+  name: string
+  code: string
+  is_enabled: boolean
+  warp_enabled: boolean
+  has_load_balance: boolean
+  warp_tags?: string[]
 }
 
 function getWarpStatusBadgeClass(status: string): string {
@@ -877,9 +890,17 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
   const [registerOpen, setRegisterOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [lbOpen, setLbOpen] = useState(false)
+  const [licenseOpen, setLicenseOpen] = useState(false)
+  const [licenseProfile, setLicenseProfile] = useState<WarpProfile | null>(null)
+  const [licenseValue, setLicenseValue] = useState('')
   const [registerCode, setRegisterCode] = useState('')
   const [importForm, setImportForm] = useState({ private_key: '', local_address: '', code: '' })
   const [lbStrategy, setLbStrategy] = useState('round_robin')
+
+  // 节点 WARP 分配状态
+  const [nodesStatus, setNodesStatus] = useState<NodeWarpStatus[]>([])
+  const [nodesLoading, setNodesLoading] = useState(false)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set())
 
   const fetchStatus = useCallback(async () => {
     setLoading(true)
@@ -894,9 +915,30 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
     }
   }, [serverId])
 
+  // 获取节点 WARP 分配状态
+  const fetchNodesStatus = useCallback(async () => {
+    setNodesLoading(true)
+    try {
+      const data = await api.get<{ nodes: NodeWarpStatus[]; total: number }>(EP.SERVER_WARP_NODES_STATUS(serverId))
+      setNodesStatus(data.nodes || [])
+      // 同步已选中状态：warp_enabled=true 的节点默认勾选
+      const selected = new Set<string>()
+      for (const n of data.nodes || []) {
+        if (n.warp_enabled) selected.add(n.id)
+      }
+      setSelectedNodeIds(selected)
+    } catch {
+      // 节点状态加载失败不阻断主流程
+      setNodesStatus([])
+    } finally {
+      setNodesLoading(false)
+    }
+  }, [serverId])
+
   useEffect(() => {
     fetchStatus()
-  }, [fetchStatus])
+    fetchNodesStatus()
+  }, [fetchStatus, fetchNodesStatus])
 
   // 注册新账号（query param: code）
   const handleRegister = async () => {
@@ -961,6 +1003,113 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
     } catch (e) {
       toast({
         title: '启用失败',
+        description: e instanceof ApiError ? e.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // 切换节点勾选
+  const toggleNodeSelection = (nodeId: string) => {
+    setSelectedNodeIds(prev => {
+      const next = new Set(prev)
+      if (next.has(nodeId)) next.delete(nodeId)
+      else next.add(nodeId)
+      return next
+    })
+  }
+
+  // 批量启用节点 WARP
+  const handleEnableNodesWarp = async () => {
+    const nodeIds = Array.from(selectedNodeIds)
+    if (nodeIds.length === 0) {
+      toast({ title: '请至少选择一个节点', variant: 'destructive' })
+      return
+    }
+    setActionLoading(true)
+    try {
+      const resp = await api.post<{ nodes_affected: number; nodes_skipped: number; profiles_count: number }>(
+        EP.SERVER_WARP_ENABLE_NODES(serverId),
+        { node_ids: nodeIds }
+      )
+      toast({
+        title: 'WARP 已启用',
+        description: `影响 ${resp.nodes_affected} 个节点，跳过 ${resp.nodes_skipped} 个（已启用）`,
+        variant: 'success',
+      })
+      await fetchNodesStatus()
+    } catch (e) {
+      toast({
+        title: '启用失败',
+        description: e instanceof ApiError ? e.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // 批量禁用节点 WARP
+  const handleDisableNodesWarp = async () => {
+    const nodeIds = Array.from(selectedNodeIds)
+    if (nodeIds.length === 0) {
+      toast({ title: '请至少选择一个节点', variant: 'destructive' })
+      return
+    }
+    if (!window.confirm(`确定禁用 ${nodeIds.length} 个节点的 WARP 出口吗？相关 outbound_policy 将被删除。`)) return
+    setActionLoading(true)
+    try {
+      const resp = await api.post<{ policies_deleted: number; nodes_skipped: number }>(
+        EP.SERVER_WARP_DISABLE_NODES(serverId),
+        { node_ids: nodeIds }
+      )
+      toast({
+        title: 'WARP 已禁用',
+        description: `删除 ${resp.policies_deleted} 条策略`,
+        variant: 'success',
+      })
+      await fetchNodesStatus()
+    } catch (e) {
+      toast({
+        title: '禁用失败',
+        description: e instanceof ApiError ? e.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // 打开 License 应用弹窗
+  const openLicenseDialog = (profile: WarpProfile) => {
+    setLicenseProfile(profile)
+    setLicenseValue(profile.license_key || '')
+    setLicenseOpen(true)
+  }
+
+  // 应用 WARP+ License
+  const handleApplyLicense = async () => {
+    if (!licenseProfile) return
+    if (!licenseValue.trim()) {
+      toast({ title: '请填写 License Key', variant: 'destructive' })
+      return
+    }
+    setActionLoading(true)
+    try {
+      await api.post(EP.WARP_PROFILE_APPLY_LICENSE(licenseProfile.id), { license: licenseValue.trim() })
+      toast({
+        title: 'WARP+ License 已应用',
+        description: `账号 ${licenseProfile.code} 已升级为 WARP+`,
+        variant: 'success',
+      })
+      setLicenseOpen(false)
+      setLicenseProfile(null)
+      await fetchStatus()
+    } catch (e) {
+      toast({
+        title: '应用失败',
         description: e instanceof ApiError ? e.message : '未知错误',
         variant: 'destructive',
       })
@@ -1175,21 +1324,199 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
                         {formatRotatedAt(profile.last_rotated_at)}
                       </TableCell>
                       <TableCell className="py-3">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-zinc-500 hover:text-red-400 hover:bg-red-950/30"
-                          onClick={() => handleDelete(profile)}
-                          title="删除"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          {/* WARP+ License 状态 */}
+                          {profile.license_key && (
+                            <Badge variant="outline" className="bg-amber-900/30 text-amber-300 border-amber-800/50 text-xs mr-1">
+                              WARP+
+                            </Badge>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-amber-400 hover:text-amber-300 hover:bg-amber-950/30"
+                            onClick={() => openLicenseDialog(profile)}
+                            title="应用 WARP+ License"
+                          >
+                            <Star className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-zinc-500 hover:text-red-400 hover:bg-red-950/30"
+                            onClick={() => handleDelete(profile)}
+                            title="删除"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 节点 WARP 分配器 */}
+      <Card className="bg-zinc-900 border-zinc-800">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="w-4 h-4 text-cyan-400" />
+              节点 WARP 分配
+              <Badge variant="secondary" className="bg-zinc-800 text-zinc-400 ml-2">
+                {selectedNodeIds.size}/{nodesStatus.length} 节点已启用
+              </Badge>
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchNodesStatus}
+              disabled={nodesLoading}
+              className="text-indigo-400 hover:text-indigo-300 h-7 px-2"
+            >
+              <RefreshCw className={`w-3 h-3 mr-1 ${nodesLoading ? 'animate-spin' : ''}`} /> 刷新
+            </Button>
+          </div>
+          <CardDescription className="text-zinc-500">
+            按需勾选节点启用 WARP 出口，未勾选的节点走直连/socks5/chain 等其他策略
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {nodesLoading ? (
+            <div className="p-4 space-y-3">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-12 w-full bg-zinc-800 rounded-lg" />
+              ))}
+            </div>
+          ) : nodesStatus.length === 0 ? (
+            <div className="p-6 text-center">
+              <EmptyState
+                title="暂无节点"
+                description="该服务器下没有启用节点，请先在节点管理中创建节点"
+              />
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-zinc-800 hover:bg-transparent">
+                      <TableHead className="text-zinc-400 text-xs font-medium w-10">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 accent-indigo-500"
+                          checked={nodesStatus.length > 0 && nodesStatus.filter(n => n.is_enabled).every(n => selectedNodeIds.has(n.id))}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedNodeIds(new Set(nodesStatus.filter(n => n.is_enabled).map(n => n.id)))
+                            } else {
+                              setSelectedNodeIds(new Set())
+                            }
+                          }}
+                          title="全选启用节点"
+                        />
+                      </TableHead>
+                      <TableHead className="text-zinc-400 text-xs font-medium">节点名称</TableHead>
+                      <TableHead className="text-zinc-400 text-xs font-medium">代号</TableHead>
+                      <TableHead className="text-zinc-400 text-xs font-medium">WARP 状态</TableHead>
+                      <TableHead className="text-zinc-400 text-xs font-medium hidden md:table-cell">WARP 标签</TableHead>
+                      <TableHead className="text-zinc-400 text-xs font-medium hidden md:table-cell">负载均衡</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {nodesStatus.map((node) => (
+                      <TableRow key={node.id} className={`border-zinc-800 ${node.is_enabled ? 'hover:bg-zinc-800/50' : 'opacity-50'}`}>
+                        <TableCell className="py-3">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 accent-indigo-500"
+                            checked={selectedNodeIds.has(node.id)}
+                            onChange={() => toggleNodeSelection(node.id)}
+                            disabled={!node.is_enabled}
+                          />
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <div className="font-medium text-zinc-200 text-sm flex items-center gap-2">
+                            {node.name}
+                            {!node.is_enabled && (
+                              <Badge variant="outline" className="bg-zinc-800 text-zinc-500 border-zinc-700 text-xs">
+                                已禁用
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <span className="text-xs text-zinc-500 font-mono">{node.code}</span>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          {node.warp_enabled ? (
+                            <Badge variant="outline" className="bg-emerald-900/30 text-emerald-300 border-emerald-800/50 text-xs">
+                              <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5 bg-emerald-500" />
+                              已启用
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-zinc-800 text-zinc-400 border-zinc-700 text-xs">
+                              <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5 bg-zinc-500" />
+                              直连
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="py-3 hidden md:table-cell">
+                          {node.warp_tags && node.warp_tags.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {node.warp_tags.map((tag) => (
+                                <Badge key={tag} variant="outline" className="bg-cyan-900/30 text-cyan-300 border-cyan-800/50 text-xs font-mono">
+                                  {tag}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-zinc-500">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="py-3 hidden md:table-cell">
+                          {node.has_load_balance ? (
+                            <Badge variant="outline" className="bg-indigo-900/30 text-indigo-300 border-indigo-800/50 text-xs">
+                              已启用
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-zinc-500">—</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-zinc-800">
+                <Button
+                  size="sm"
+                  className="bg-indigo-600 hover:bg-indigo-500"
+                  onClick={handleEnableNodesWarp}
+                  disabled={actionLoading || selectedNodeIds.size === 0}
+                >
+                  <Zap className="w-4 h-4 mr-1" />
+                  启用 WARP
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-red-800/50 text-red-400 hover:bg-red-950/30 hover:text-red-300"
+                  onClick={handleDisableNodesWarp}
+                  disabled={actionLoading || selectedNodeIds.size === 0}
+                >
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  禁用 WARP
+                </Button>
+                <span className="text-xs text-zinc-500 self-center ml-auto">
+                  已选 {selectedNodeIds.size} / 共 {nodesStatus.length} 个节点
+                </span>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -1326,6 +1653,48 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
               className="bg-emerald-600 hover:bg-emerald-500"
             >
               {actionLoading ? '启用中...' : '启用负载均衡'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* WARP+ License 应用对话框 */}
+      <Dialog open={licenseOpen} onOpenChange={setLicenseOpen}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-100 flex items-center gap-2">
+              <Star className="w-4 h-4 text-amber-400" />
+              应用 WARP+ License
+            </DialogTitle>
+            <DialogDescription className="text-zinc-500">
+              为账号「{licenseProfile?.code}」应用 WARP+ License，升级为无限流量
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="warp-license" className="text-zinc-300">License Key *</Label>
+              <Input
+                id="warp-license"
+                value={licenseValue}
+                onChange={(e) => setLicenseValue(e.target.value)}
+                placeholder="如 12345678-1234-1234-1234-123456789012"
+                className="bg-zinc-950 border-zinc-700 text-zinc-100 font-mono text-xs"
+              />
+              <p className="text-xs text-zinc-500">
+                WARP+ License 可共享给多个账户使用，升级后享受无限流量和优先级路由
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLicenseOpen(false)} disabled={actionLoading}>
+              取消
+            </Button>
+            <Button
+              onClick={handleApplyLicense}
+              disabled={actionLoading}
+              className="bg-amber-600 hover:bg-amber-500"
+            >
+              {actionLoading ? '应用中...' : '应用 License'}
             </Button>
           </DialogFooter>
         </DialogContent>

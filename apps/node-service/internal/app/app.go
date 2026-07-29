@@ -580,7 +580,12 @@ func Run() {
 	adminTemplateHandler := protocol.NewAdminTemplateHandler(templateService)
 	adminPresetHandler := protocol.NewAdminPresetHandler(presetService)
 	adminOutboundHandler := outbound.NewAdminOutboundHandler(outboundService)
-	adminWarpHandler := outbound.NewAdminWarpHandler(warpProfileService, outboundService, &nodeIDListerAdapter{nodeRepo: nodeRepo})
+	nodeListerAdapter := &nodeIDListerAdapter{nodeRepo: nodeRepo}
+	adminWarpHandler := outbound.NewAdminWarpHandler(warpProfileService, outboundService, nodeListerAdapter)
+	// 注入扩展节点列表器（用于前端节点 WARP 分配器显示节点详情）
+	adminWarpHandler.SetNodeListerEx(nodeListerAdapter)
+	// 注入 WARP+ License 应用器（Pool 实现了 ApplyLicense 方法）
+	adminWarpHandler.SetLicenseApplier(warpPool)
 	adminRoutingHandler := routing.NewAdminRoutingHandler(
 		ruleSetService, policyService, policyRuleService,
 		bindingService, lbPolicyService, outboundGroupService, routingRenderer,
@@ -1075,8 +1080,8 @@ func warpOutputToProfile(out *warpreg.WarpProfileOutput) *outbound.WarpProfile {
 	}
 }
 
-// nodeIDListerAdapter 适配 repo.NodeRepo → outbound.NodeIDLister
-// 用于解析 serverID → 启用节点 ID 列表（创建 outbound_policies 时按 node_id 存储）
+// nodeIDListerAdapter 适配 repo.NodeRepo → outbound.NodeIDLister + outbound.NodeListerEx
+// 用于解析 serverID → 启用节点列表（按需分配 WARP 时提供节点信息）
 type nodeIDListerAdapter struct {
 	nodeRepo *repo.NodeRepo
 }
@@ -1091,4 +1096,23 @@ func (a *nodeIDListerAdapter) ListNodeIDsByServer(ctx context.Context, serverID 
 		ids = append(ids, n.ID)
 	}
 	return ids, nil
+}
+
+// ListNodesByServer 返回节点详情列表（用于前端节点 WARP 分配器）
+// 包含所有节点（含禁用），前端按 is_enabled 字段区分显示
+func (a *nodeIDListerAdapter) ListNodesByServer(ctx context.Context, serverID uuid.UUID) ([]outbound.NodeInfo, error) {
+	nodes, err := a.nodeRepo.ListAllByServerID(ctx, serverID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]outbound.NodeInfo, 0, len(nodes))
+	for _, n := range nodes {
+		result = append(result, outbound.NodeInfo{
+			ID:        n.ID,
+			Name:      n.Name,
+			Code:      n.Code,
+			IsEnabled: n.IsEnabled,
+		})
+	}
+	return result, nil
 }

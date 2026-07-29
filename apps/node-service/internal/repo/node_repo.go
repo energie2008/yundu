@@ -436,6 +436,44 @@ func (r *NodeRepo) ListByServerID(ctx context.Context, serverID uuid.UUID) ([]*m
 	return nodes, rows.Err()
 }
 
+// ListAllByServerID 返回服务器下所有节点（含禁用节点），用于 WARP 节点分配器展示完整列表
+func (r *NodeRepo) ListAllByServerID(ctx context.Context, serverID uuid.UUID) ([]*model.Node, error) {
+	query := `
+		SELECT n.id, n.code, n.name, n.runtime_id, n.region_id, n.group_id, n.node_type, n.protocol_type, n.transport_type,
+			n.security_type, n.address, n.port, n.server_port, n.reality_server_name, n.sni, n.alpn, n.path, n.host_header, n.flow, n.is_enabled, n.is_visible, n.allow_udp,
+			n.speed_limit_mbps, n.device_limit, n.padding_scheme, n.rate_time_enable, n.rate_time_ranges, n.transfer_enable_bytes,
+			n.traffic_rate, n.priority, n.capacity_score, n.protocol_schema_version, n.exposure_mode, n.downstream_exposure_mode, n.is_split_mode,
+			n.config_json, n.tags, n.metadata,
+			n.last_published_version, n.created_at, n.updated_at, n.deleted_at
+		FROM nodes n
+		JOIN runtimes r ON n.runtime_id = r.id
+		WHERE r.server_id = $1 AND n.deleted_at IS NULL
+		ORDER BY n.is_enabled DESC, n.priority ASC`
+	rows, err := r.pool.Query(ctx, query, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []*model.Node
+	for rows.Next() {
+		n := &model.Node{}
+		err := rows.Scan(
+			&n.ID, &n.Code, &n.Name, &n.RuntimeID, &n.RegionID, &n.GroupID, &n.NodeType, &n.ProtocolType, &n.TransportType,
+			&n.SecurityType, &n.Address, &n.Port, &n.ServerPort, &n.RealityServerName, &n.SNI, &n.ALPN, &n.Path, &n.HostHeader, &n.Flow, &n.IsEnabled, &n.IsVisible, &n.AllowUDP,
+			&n.SpeedLimitMbps, &n.DeviceLimit, &n.PaddingScheme, &n.RateTimeEnable, &n.RateTimeRanges, &n.TransferEnableBytes,
+			&n.TrafficRate, &n.Priority, &n.CapacityScore, &n.ProtocolSchemaVersion, &n.ExposureMode, &n.DownstreamExposureMode, &n.IsSplitMode,
+			&n.ConfigJSON, &n.Tags, &n.Metadata,
+			&n.LastPublishedVersion, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, rows.Err()
+}
+
 func (r *NodeRepo) ListByRuntimeID(ctx context.Context, runtimeID uuid.UUID) ([]*model.Node, error) {
 	query := fmt.Sprintf(`
 		SELECT %s

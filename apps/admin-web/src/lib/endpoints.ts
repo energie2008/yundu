@@ -178,6 +178,7 @@ SERVER_HEALTH_DASHBOARD: '/admin/servers/health-dashboard',
   NODE_OUTBOUND_GROUPS: (nodeId: string) => `/admin/nodes/${nodeId}/outbound-groups`,
   WARP_PROFILES: '/admin/warp-profiles',
   WARP_PROFILE: (pid: string) => `/admin/warp-profiles/${pid}`,
+  WARP_PROFILE_APPLY_LICENSE: (pid: string) => `/admin/warp-profiles/${pid}/apply-license`,
   // WARP 服务器级管理：状态/注册/导入/负载均衡
   // warp_profiles.node_id 引用 servers(id)，全部按 serverID 操作
   SERVER_WARP_STATUS: (serverId: string) => `/admin/servers/${serverId}/warp/status`,
@@ -185,6 +186,10 @@ SERVER_HEALTH_DASHBOARD: '/admin/servers/health-dashboard',
   SERVER_WARP_REGISTER: (serverId: string) => `/admin/servers/${serverId}/warp/register`,
   SERVER_WARP_IMPORT: (serverId: string) => `/admin/servers/${serverId}/warp/import`,
   SERVER_WARP_ENABLE_LOAD_BALANCE: (serverId: string) => `/admin/servers/${serverId}/warp/enable-load-balance`,
+  // 按需分配：节点级 WARP 启用/禁用/状态查询
+  SERVER_WARP_NODES_STATUS: (serverId: string) => `/admin/servers/${serverId}/warp/nodes-status`,
+  SERVER_WARP_ENABLE_NODES: (serverId: string) => `/admin/servers/${serverId}/warp/enable-nodes`,
+  SERVER_WARP_DISABLE_NODES: (serverId: string) => `/admin/servers/${serverId}/warp/disable-nodes`,
 
   // ===== 代理链 (node-service) =====
   PROXY_CHAINS: '/admin/proxy-chains',
