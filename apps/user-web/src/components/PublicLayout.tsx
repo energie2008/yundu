@@ -13,11 +13,11 @@ export function PublicLayout() {
   }, [location.pathname])
 
   return (
-    <div className="min-h-screen bg-[#F8F9FC]">
+    <div className="min-h-screen bg-[#faf6f0]">
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
         <div className="flex items-center justify-between h-14 px-4 md:px-8 max-w-7xl mx-auto">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[#8B73B5] flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg bg-[#c9825f] flex items-center justify-center">
               <Zap className="w-4 h-4 text-white fill-white" />
             </div>
             <span className="text-lg font-bold text-gray-900">YunDu</span>
@@ -25,7 +25,7 @@ export function PublicLayout() {
           <div>
             {isAuthenticated ? (
               <Link to="/dashboard">
-                <Button className="bg-[#8B73B5] hover:bg-[#7A63A3] text-white h-9">
+                <Button className="bg-[#c9825f] hover:bg-[#b06a48] text-white h-9">
                   控制台
                 </Button>
               </Link>
@@ -37,7 +37,7 @@ export function PublicLayout() {
                   </Button>
                 </Link>
                 <Link to="/register">
-                  <Button className="bg-[#8B73B5] hover:bg-[#7A63A3] text-white h-9">
+                  <Button className="bg-[#c9825f] hover:bg-[#b06a48] text-white h-9">
                     注册
                   </Button>
                 </Link>

@@ -151,7 +151,7 @@ export function Checkout() {
             <h3 className="flex items-center gap-2 text-sm font-semibold mb-3" style={{ color: 'var(--foreground)' }}>
               <span>📦</span> 套餐摘要
             </h3>
-            <div className="text-base font-bold mb-2" style={{ color: '#ef4444' }}>
+            <div className="text-base font-bold mb-2" style={{ color: '#cd5c4d' }}>
               {formatTraffic(plan.traffic_bytes)} 每月重置
             </div>
             <div className="space-y-1.5 mb-4">
@@ -187,7 +187,7 @@ export function Checkout() {
                     className="p-3 rounded-lg border-2 text-center transition-all text-sm"
                     style={{
                       borderColor: isSelected ? 'var(--primary)' : 'var(--border)',
-                      background: isSelected ? 'rgba(124,92,252,0.06)' : 'transparent',
+                      background: isSelected ? 'rgba(217,119,87,0.06)' : 'transparent',
                       color: isSelected ? 'var(--primary)' : 'var(--foreground)',
                     }}
                   >
@@ -217,7 +217,7 @@ export function Checkout() {
                     className="flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all text-sm"
                     style={{
                       borderColor: isSelected ? 'var(--primary)' : 'var(--border)',
-                      background: isSelected ? 'rgba(124,92,252,0.06)' : 'transparent',
+                      background: isSelected ? 'rgba(217,119,87,0.06)' : 'transparent',
                     }}
                   >
                     <input
@@ -241,7 +241,7 @@ export function Checkout() {
                 <p className="text-sm text-center py-4" style={{ color: 'var(--muted-foreground)' }}>加载支付方式中...</p>
               )}
               {methodsQuery.isError && (
-                <p className="text-sm text-center py-4 px-3 rounded-lg" style={{ color: 'var(--destructive)', background: 'rgba(239,68,68,0.08)' }}>
+                <p className="text-sm text-center py-4 px-3 rounded-lg" style={{ color: 'var(--destructive)', background: 'rgba(205,92,77,0.08)' }}>
                   支付方式加载失败，请刷新页面重试
                 </p>
               )}

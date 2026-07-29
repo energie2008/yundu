@@ -82,7 +82,7 @@ export default function VerifyEmail() {
   return (
     <div
       className="min-h-screen flex items-center justify-center p-4"
-      style={{ background: 'linear-gradient(135deg, #f0edff 0%, #f5f7fb 100%)', minHeight: '100vh' }}
+      style={{ background: 'linear-gradient(135deg, #f6efe6 0%, #faf6f0 100%)', minHeight: '100vh' }}
     >
       <div className="w-full max-w-md">
         {/* Brand header */}

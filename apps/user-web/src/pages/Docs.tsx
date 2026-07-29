@@ -70,7 +70,7 @@ export default function Docs() {
     <div className="p-6 max-w-6xl mx-auto">
       {/* Header */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-4" style={{ background: 'rgba(124,92,252,0.1)' }}>
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-4" style={{ background: 'rgba(217,119,87,0.1)' }}>
           <BookOpen className="w-4 h-4" style={{ color: 'var(--primary)' }} />
           <span className="text-sm" style={{ color: 'var(--primary)' }}>知识库</span>
         </div>
@@ -113,7 +113,7 @@ export default function Docs() {
                     : 'hover:bg-opacity-50'
                 )}
                 style={selectedCategory === ''
-                  ? { background: 'rgba(124,92,252,0.08)', color: 'var(--primary)', borderColor: 'rgba(124,92,252,0.3)', borderWidth: '1px', borderStyle: 'solid' }
+                  ? { background: 'rgba(217,119,87,0.08)', color: 'var(--primary)', borderColor: 'rgba(217,119,87,0.3)', borderWidth: '1px', borderStyle: 'solid' }
                   : { color: 'var(--muted-foreground)' }
                 }
                 onMouseEnter={e => {
@@ -152,7 +152,7 @@ export default function Docs() {
                         isSelected ? 'border' : 'hover:bg-opacity-50'
                       )}
                       style={isSelected
-                        ? { background: 'rgba(124,92,252,0.08)', color: 'var(--primary)', borderColor: 'rgba(124,92,252,0.3)', borderWidth: '1px', borderStyle: 'solid' }
+                        ? { background: 'rgba(217,119,87,0.08)', color: 'var(--primary)', borderColor: 'rgba(217,119,87,0.3)', borderWidth: '1px', borderStyle: 'solid' }
                         : { color: 'var(--muted-foreground)' }
                       }
                       onMouseEnter={e => {
@@ -231,7 +231,7 @@ export default function Docs() {
                         <div className="flex items-center gap-2 mb-2 flex-wrap">
                           <span
                             className="text-xs px-2 py-0.5 rounded-full"
-                            style={{ background: 'rgba(124,92,252,0.1)', color: 'var(--primary)' }}
+                            style={{ background: 'rgba(217,119,87,0.1)', color: 'var(--primary)' }}
                           >
                             {getCategoryName(article.category)}
                           </span>

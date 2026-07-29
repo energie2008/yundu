@@ -58,7 +58,7 @@ function NodeModal({ plan, onClose }: { plan: PlanResponse; onClose: () => void 
                       <span className="proto-tag">{node.protocol}</span>
                     )}
                     {node.tags?.slice(0, 2).map(tag => (
-                      <span key={tag} className="proto-tag" style={{ background: 'rgba(100,116,139,0.1)', color: 'var(--muted-foreground)' }}>{tag}</span>
+                      <span key={tag} className="proto-tag" style={{ background: 'rgba(138,125,108,0.1)', color: 'var(--muted-foreground)' }}>{tag}</span>
                     ))}
                   </div>
                 </div>

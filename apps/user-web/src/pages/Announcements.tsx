@@ -131,14 +131,14 @@ export default function Announcements() {
                   key={item.id}
                   className="w-full p-4 rounded-xl text-left transition-all duration-200 group"
                   style={{
-                    backgroundColor: item.is_read ? 'var(--muted)' : 'rgba(124,92,252,0.05)',
-                    border: `1px solid ${item.is_read ? 'transparent' : 'rgba(124,92,252,0.2)'}`,
+                    backgroundColor: item.is_read ? 'var(--muted)' : 'rgba(217,119,87,0.05)',
+                    border: `1px solid ${item.is_read ? 'transparent' : 'rgba(217,119,87,0.2)'}`,
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = item.is_read ? 'var(--border)' : 'rgba(124,92,252,0.1)'
+                    e.currentTarget.style.backgroundColor = item.is_read ? 'var(--border)' : 'rgba(217,119,87,0.1)'
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = item.is_read ? 'var(--muted)' : 'rgba(124,92,252,0.05)'
+                    e.currentTarget.style.backgroundColor = item.is_read ? 'var(--muted)' : 'rgba(217,119,87,0.05)'
                   }}
                   onClick={() => handleOpen(item)}
                 >
@@ -146,13 +146,13 @@ export default function Announcements() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                         {item.is_pinned && (
-                          <Badge className="border-0 text-xs flex items-center gap-1" style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>
+                          <Badge className="border-0 text-xs flex items-center gap-1" style={{ backgroundColor: 'rgba(232,163,61,0.1)', color: '#e8a33d' }}>
                             <Pin className="w-3 h-3" />
                             置顶
                           </Badge>
                         )}
                         {!item.is_read && (
-                          <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(124,92,252,0.1)', color: 'var(--primary)' }}>
+                          <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(217,119,87,0.1)', color: 'var(--primary)' }}>
                             新
                           </Badge>
                         )}
@@ -188,7 +188,7 @@ export default function Announcements() {
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--foreground)' }} className="flex items-center gap-2 pr-6">
               {detail?.is_pinned && (
-                <Badge className="border-0 text-xs flex items-center gap-1" style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>
+                <Badge className="border-0 text-xs flex items-center gap-1" style={{ backgroundColor: 'rgba(232,163,61,0.1)', color: '#e8a33d' }}>
                   <Pin className="w-3 h-3" />
                   置顶
                 </Badge>

@@ -282,11 +282,11 @@ export function Dashboard() {
 
   // Quick action items
   const quickActions = [
-    { icon: '🛒', label: '购买订阅', desc: '购买订阅套餐', to: '/dashboard/plans', color: '#7c5cfc' },
-    { icon: '📥', label: '客户端软件下载', desc: '下载各平台客户端', to: '/dashboard/knowledge', color: '#3b82f6' },
-    { icon: '📋', label: '我的订单', desc: '查看订单历史', to: '/dashboard/orders', color: '#7c5cfc' },
-    { icon: '💬', label: '工单支持', desc: '获取客服帮助', to: '/dashboard/tickets', color: '#f59e0b' },
-    { icon: '🎁', label: '邀请好友', desc: '赚取佣金奖励', to: '/dashboard/invite', color: '#10b981' },
+    { icon: '🛒', label: '购买订阅', desc: '购买订阅套餐', to: '/dashboard/plans', color: '#d97757' },
+    { icon: '📥', label: '客户端软件下载', desc: '下载各平台客户端', to: '/dashboard/knowledge', color: '#d97757' },
+    { icon: '📋', label: '我的订单', desc: '查看订单历史', to: '/dashboard/orders', color: '#d97757' },
+    { icon: '💬', label: '工单支持', desc: '获取客服帮助', to: '/dashboard/tickets', color: '#e8a33d' },
+    { icon: '🎁', label: '邀请好友', desc: '赚取佣金奖励', to: '/dashboard/invite', color: '#5f8d4e' },
   ];
 
   return (
@@ -310,7 +310,7 @@ export function Dashboard() {
             <div className="flex items-start justify-between mb-1">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>我的订阅</h3>
               {isUnlimited && (
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(124,92,252,0.1)', color: 'var(--primary)' }}>
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(217,119,87,0.1)', color: 'var(--primary)' }}>
                   无限制
                 </span>
               )}
@@ -389,16 +389,16 @@ export function Dashboard() {
                       onClick={() => setImportOpen(!importOpen)}
                       className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-sm font-medium rounded-lg transition-colors"
                       style={{
-                        background: importOpen ? '#9580e8' : 'var(--muted)',
+                        background: importOpen ? '#e08d70' : 'var(--muted)',
                         color: importOpen ? 'white' : 'var(--foreground)',
                       }}
                       onMouseEnter={e => {
                         if (!importOpen) e.currentTarget.style.background = 'var(--border)';
-                        else e.currentTarget.style.background = '#846ddb';
+                        else e.currentTarget.style.background = '#c9714f';
                       }}
                       onMouseLeave={e => {
                         if (!importOpen) e.currentTarget.style.background = 'var(--muted)';
-                        else e.currentTarget.style.background = '#9580e8';
+                        else e.currentTarget.style.background = '#e08d70';
                       }}
                     >
                       <span>📋</span> 快速导入订阅 <span style={{ transition: 'transform 0.2s', transform: importOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block' }}>⌄</span>
@@ -421,7 +421,7 @@ export function Dashboard() {
                             onClick={() => setImportTab('copy')}
                             className="py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors"
                             style={{
-                              background: importTab === 'copy' ? 'rgba(124,92,252,0.08)' : 'var(--muted)',
+                              background: importTab === 'copy' ? 'rgba(217,119,87,0.08)' : 'var(--muted)',
                               color: importTab === 'copy' ? 'var(--primary)' : 'var(--muted-foreground)',
                             }}
                           >
@@ -431,7 +431,7 @@ export function Dashboard() {
                             onClick={() => setImportTab('qrcode')}
                             className="py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors"
                             style={{
-                              background: importTab === 'qrcode' ? 'rgba(124,92,252,0.08)' : 'var(--muted)',
+                              background: importTab === 'qrcode' ? 'rgba(217,119,87,0.08)' : 'var(--muted)',
                               color: importTab === 'qrcode' ? 'var(--primary)' : 'var(--muted-foreground)',
                             }}
                           >
@@ -499,7 +499,7 @@ export function Dashboard() {
                     onClick={() => navigate('/dashboard/plans')}
                     className="py-2.5 rounded-lg text-sm font-medium text-white transition-colors"
                     style={{ background: 'var(--primary)' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#6a4ce0')}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#b85a38')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'var(--primary)')}
                   >
                     🔄 续费订阅
@@ -587,7 +587,7 @@ export function Dashboard() {
               {/* Inner header */}
               <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
                 <span className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>节点状态</span>
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.1)', color: '#22c55e' }}>
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(95,141,78,0.1)', color: '#5f8d4e' }}>
                   {onlineCount}/{nodes.length} 在线
                 </span>
               </div>
@@ -618,7 +618,7 @@ export function Dashboard() {
                             <span className="proto-tag">{node.protocol}</span>
                           )}
                           {node.tags?.slice(0, 2).map(tag => (
-                            <span key={tag} className="proto-tag" style={{ background: 'rgba(100,116,139,0.1)', color: 'var(--muted-foreground)' }}>{tag}</span>
+                            <span key={tag} className="proto-tag" style={{ background: 'rgba(138,125,108,0.1)', color: 'var(--muted-foreground)' }}>{tag}</span>
                           ))}
                         </div>
                       </div>

@@ -2,100 +2,147 @@
 @tailwind components;
 @tailwind utilities;
 
-/* YunDu light theme - soft lavender purple with warm accents */
+/* YunDu 暖阳温馨主题 — 与 admin-web 统一：赤陶暖橙 + 奶油米白 + 暖米灰阶 */
 :root {
-  --background: #fafbfc;
-  --foreground: #1a1d29;
-  --card: #ffffff;
-  --card-foreground: #1a1d29;
-  --popover: #ffffff;
-  --popover-foreground: #1a1d29;
-  --primary: #8b7cf6;
-  --primary-soft: #a99cf9;
-  --primary-foreground: #ffffff;
-  --secondary: #f6f7fb;
-  --secondary-foreground: #475569;
-  --muted: #f6f7fb;
-  --muted-foreground: #64748b;
-  --accent: #f0eefe;
-  --accent-foreground: #6d5fd6;
-  --accent-pink: #fce7f3;
-  --accent-pink-foreground: #be185d;
-  --accent-sky: #e0f2fe;
-  --accent-sky-foreground: #0369a1;
-  --accent-emerald: #d1fae5;
-  --accent-emerald-foreground: #047857;
-  --accent-amber: #fef3c7;
-  --accent-amber-foreground: #b45309;
-  --accent-rose: #fee2e2;
-  --accent-rose-foreground: #be123c;
-  --destructive: #ef4444;
+  --background: #faf6f0;
+  --foreground: #2c2620;
+  --card: #fffdfa;
+  --card-foreground: #2c2620;
+  --popover: #fffdfa;
+  --popover-foreground: #2c2620;
+  --primary: #d97757;
+  --primary-soft: #e08d70;
+  --primary-foreground: #fffaf3;
+  --secondary: #f4ede3;
+  --secondary-foreground: #6e6152;
+  --muted: #f4ede3;
+  --muted-foreground: #8a7d6c;
+  --accent: #f6efe6;
+  --accent-foreground: #b85a38;
+  --accent-pink: #f4ede3;
+  --accent-pink-foreground: #6e6152;
+  --accent-sky: #f4ede3;
+  --accent-sky-foreground: #6e6152;
+  --accent-emerald: #eef3e6;
+  --accent-emerald-foreground: #4c7038;
+  --accent-amber: #fbf1dc;
+  --accent-amber-foreground: #96691c;
+  --accent-rose: #f9e8e4;
+  --accent-rose-foreground: #a04032;
+  --destructive: #cd5c4d;
   --destructive-foreground: #ffffff;
-  --border: #eef0f4;
-  --input: #eef0f4;
-  --ring: #8b7cf6;
-  --success: #22c55e;
-  --warning: #f59e0b;
+  --border: #eae1d3;
+  --input: #eae1d3;
+  --ring: #d97757;
+  --success: #5f8d4e;
+  --warning: #e8a33d;
   /* 语义软底（@airport/ui Badge/Toast 使用） */
-  --accent-success: #d1fae5;
-  --accent-success-foreground: #047857;
-  --accent-warning: #fef3c7;
-  --accent-warning-foreground: #b45309;
-  --accent-danger: #fee2e2;
-  --accent-danger-foreground: #be123c;
-  --card-hover: #f6f7fb;
-  --sidebar-bg: #ffffff;
-  --sidebar-border: #eef0f4;
-  --header-bg: rgba(255, 255, 255, 0.85);
+  --accent-success: #eef3e6;
+  --accent-success-foreground: #4c7038;
+  --accent-warning: #fbf1dc;
+  --accent-warning-foreground: #96691c;
+  --accent-danger: #f9e8e4;
+  --accent-danger-foreground: #a04032;
+  --card-hover: #f5efe6;
+  --sidebar-bg: #f7f1e7;
+  --sidebar-border: #eae1d3;
+  --header-bg: rgba(250, 246, 240, 0.85);
   --radius: 0.75rem;
   color-scheme: light;
 }
 
 .dark {
-  --background: #0f1218;
-  --foreground: #e4e6eb;
-  --card: #1a1d29;
-  --card-foreground: #e4e6eb;
-  --popover: #1a1d29;
-  --popover-foreground: #e4e6eb;
-  --primary: #9b8af6;
-  --primary-soft: #b0a4f8;
-  --primary-foreground: #ffffff;
-  --secondary: #1e2230;
-  --secondary-foreground: #b0b5c3;
-  --muted: #1e2230;
-  --muted-foreground: #8b92a5;
-  --accent: #252349;
-  --accent-foreground: #b0a4f8;
-  --accent-pink: #2a1a2e;
-  --accent-pink-foreground: #f472b6;
-  --accent-sky: #0c1e3a;
-  --accent-sky-foreground: #38bdf8;
-  --accent-emerald: #0a2818;
-  --accent-emerald-foreground: #34d399;
-  --accent-amber: #2a2008;
-  --accent-amber-foreground: #fbbf24;
-  --accent-rose: #2a1010;
-  --accent-rose-foreground: #fb7185;
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
-  --border: #252836;
-  --input: #252836;
-  --ring: #9b8af6;
-  --success: #22c55e;
-  --warning: #f59e0b;
+  --background: #1e1a15;
+  --foreground: #f3ede3;
+  --card: #282219;
+  --card-foreground: #f3ede3;
+  --popover: #282219;
+  --popover-foreground: #f3ede3;
+  --primary: #e08d70;
+  --primary-soft: #eaa586;
+  --primary-foreground: #2d1d12;
+  --secondary: #332b20;
+  --secondary-foreground: #d9cdbb;
+  --muted: #332b20;
+  --muted-foreground: #b3a693;
+  --accent: #332b20;
+  --accent-foreground: #eaa586;
+  --accent-pink: #332b20;
+  --accent-pink-foreground: #d9cdbb;
+  --accent-sky: #332b20;
+  --accent-sky-foreground: #d9cdbb;
+  --accent-emerald: #2c3424;
+  --accent-emerald-foreground: #b4d6a3;
+  --accent-amber: #3a3020;
+  --accent-amber-foreground: #f5cf8d;
+  --accent-rose: #3a2422;
+  --accent-rose-foreground: #f0a595;
+  --destructive: #e07a67;
+  --destructive-foreground: #fff5f0;
+  --border: #3c342a;
+  --input: #3c342a;
+  --ring: #e08d70;
+  --success: #8fb87a;
+  --warning: #f0bb63;
   /* 语义软底（@airport/ui Badge/Toast 使用） */
-  --accent-success: #0a2818;
-  --accent-success-foreground: #34d399;
-  --accent-warning: #2a2008;
-  --accent-warning-foreground: #fbbf24;
-  --accent-danger: #2a1010;
-  --accent-danger-foreground: #fb7185;
-  --card-hover: #1e2230;
-  --sidebar-bg: #1a1d29;
-  --sidebar-border: #252836;
-  --header-bg: rgba(26, 29, 41, 0.85);
+  --accent-success: #2c3424;
+  --accent-success-foreground: #b4d6a3;
+  --accent-warning: #3a3020;
+  --accent-warning-foreground: #f5cf8d;
+  --accent-danger: #3a2422;
+  --accent-danger-foreground: #f0a595;
+  --card-hover: #332b20;
+  --sidebar-bg: #241e16;
+  --sidebar-border: #3c342a;
+  --header-bg: rgba(30, 26, 21, 0.85);
   color-scheme: dark;
+}
+
+/* Tailwind 调色板劫持 — RGB 三元组（配合 tailwind.config.js，同 admin-web 方案） */
+:root {
+  --yd-fg: 44 38 32;
+  --yd-fg-secondary: 110 97 82;
+  --yd-fg-muted: 138 125 108;
+  --yd-bg: 250 246 240;
+  --yd-card: 255 253 250;
+  --yd-muted: 244 237 227;
+  --yd-border: 234 225 211;
+  --yd-border-strong: 220 207 187;
+  --yd-primary: 217 119 87;
+  --yd-primary-deep: 184 90 56;
+  --yd-primary-tint: 246 239 230;
+  --yd-success: 95 141 78;
+  --yd-success-deep: 76 112 56;
+  --yd-success-tint: 238 243 230;
+  --yd-warning: 232 163 61;
+  --yd-warning-deep: 150 105 28;
+  --yd-warning-tint: 251 241 220;
+  --yd-danger: 205 92 77;
+  --yd-danger-deep: 160 64 50;
+  --yd-danger-tint: 249 232 228;
+}
+
+.dark {
+  --yd-fg: 243 237 227;
+  --yd-fg-secondary: 217 205 187;
+  --yd-fg-muted: 179 166 147;
+  --yd-bg: 30 26 21;
+  --yd-card: 40 34 25;
+  --yd-muted: 51 43 32;
+  --yd-border: 60 52 42;
+  --yd-border-strong: 80 70 58;
+  --yd-primary: 224 141 112;
+  --yd-primary-deep: 234 165 134;
+  --yd-primary-tint: 58 42 32;
+  --yd-success: 143 184 122;
+  --yd-success-deep: 180 214 163;
+  --yd-success-tint: 44 52 36;
+  --yd-warning: 240 187 99;
+  --yd-warning-deep: 245 207 141;
+  --yd-warning-tint: 58 48 32;
+  --yd-danger: 224 122 103;
+  --yd-danger-deep: 240 165 149;
+  --yd-danger-tint: 58 36 34;
 }
 
 @theme inline {
@@ -140,8 +187,14 @@
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* 温馨细节：选中文本统一暖色 */
+::selection {
+  background: rgba(217, 119, 87, 0.15);
+  color: var(--foreground);
 }
 
 /* Scrollbar styling */
@@ -186,8 +239,8 @@ body {
   display: inline-block;
   flex-shrink: 0;
 }
-.status-dot.online { background-color: #22c55e; }
-.status-dot.offline { background-color: #ef4444; }
+.status-dot.online { background-color: var(--success); }
+.status-dot.offline { background-color: var(--destructive); }
 
 /* Protocol tag style */
 .proto-tag {
@@ -196,8 +249,8 @@ body {
   border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
-  background: rgba(124, 92, 252, 0.1);
-  color: #7c5cfc;
+  background: var(--accent);
+  color: var(--accent-foreground);
   margin-left: 4px;
 }
 
@@ -219,8 +272,8 @@ body {
   border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
+  background: var(--accent-success);
+  color: var(--accent-success-foreground);
 }
 
 /* Modal overlay */
@@ -339,7 +392,7 @@ textarea.border-zinc-800:focus,
 select.border-zinc-800:focus {
   border-color: var(--primary) !important;
   outline: none !important;
-  box-shadow: 0 0 0 2px rgba(124,92,252,0.2) !important;
+  box-shadow: 0 0 0 2px var(--accent) !important;
 }
 
 /* Badge variants */

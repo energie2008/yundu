@@ -138,8 +138,8 @@ function PlanCard({ plan }: { plan: PlanResponse }) {
     <div
       className={`relative flex flex-col rounded-2xl p-7 transition-all duration-300 ${
         isPopular
-          ? 'bg-[var(--card)] shadow-xl shadow-purple-500/10 ring-2 ring-[var(--primary)]/30 scale-[1.02]'
-          : 'bg-[var(--card)]/60 backdrop-blur-sm border border-[var(--border)] hover:shadow-lg hover:border-[var(--primary)]/20'
+          ? 'bg-[var(--card)] shadow-xl shadow-purple-500/10 ring-2 ring-[rgb(217_119_87_/_0.3)] scale-[1.02]'
+          : 'bg-[rgb(255_253_250_/_0.6)] backdrop-blur-sm border border-[var(--border)] hover:shadow-lg hover:border-[rgb(217_119_87_/_0.2)]'
       }`}
     >
       {isPopular && (
@@ -471,7 +471,7 @@ export function Landing() {
             {features.map((f, i) => (
               <div
                 key={i}
-                className="group p-7 rounded-2xl bg-[var(--card)]/50 border border-[var(--border)] backdrop-blur-sm transition-all duration-300 hover:bg-[var(--card)] hover:shadow-lg hover:shadow-purple-500/5 hover:-translate-y-1"
+                className="group p-7 rounded-2xl bg-[rgb(255_253_250_/_0.5)] border border-[var(--border)] backdrop-blur-sm transition-all duration-300 hover:bg-[var(--card)] hover:shadow-lg hover:shadow-purple-500/5 hover:-translate-y-1"
               >
                 <div
                   className="w-11 h-11 rounded-xl flex items-center justify-center mb-5 transition-transform group-hover:scale-105"
@@ -547,7 +547,7 @@ export function Landing() {
             {testimonials.map((t, i) => (
               <div
                 key={i}
-                className="group p-7 rounded-2xl bg-[var(--card)]/50 border border-[var(--border)] backdrop-blur-sm transition-all duration-300 hover:bg-[var(--card)] hover:shadow-lg hover:-translate-y-1"
+                className="group p-7 rounded-2xl bg-[rgb(255_253_250_/_0.5)] border border-[var(--border)] backdrop-blur-sm transition-all duration-300 hover:bg-[var(--card)] hover:shadow-lg hover:-translate-y-1"
               >
                 <Quote
                   className="w-8 h-8 mb-4 opacity-20"
@@ -595,7 +595,7 @@ export function Landing() {
             {faqs.map((item, i) => (
               <div
                 key={i}
-                className="p-6 rounded-2xl bg-[var(--card)]/50 border border-[var(--border)] backdrop-blur-sm transition-all hover:bg-[var(--card)] hover:border-[var(--primary)]/20"
+                className="p-6 rounded-2xl bg-[rgb(255_253_250_/_0.5)] border border-[var(--border)] backdrop-blur-sm transition-all hover:bg-[var(--card)] hover:border-[rgb(217_119_87_/_0.2)]"
               >
                 <h3 className="font-medium text-base mb-2" style={{ color: 'var(--foreground)' }}>{item.q}</h3>
                 <p className="text-sm leading-relaxed" style={{ color: 'var(--secondary-foreground)' }}>{item.a}</p>
@@ -614,8 +614,8 @@ export function Landing() {
             }}
           >
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
-              <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-[var(--card)]/10 blur-2xl" />
-              <div className="absolute -bottom-20 -left-20 w-64 h-64 rounded-full bg-[var(--card)]/10 blur-2xl" />
+              <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-[rgb(255_253_250_/_0.1)] blur-2xl" />
+              <div className="absolute -bottom-20 -left-20 w-64 h-64 rounded-full bg-[rgb(255_253_250_/_0.1)] blur-2xl" />
             </div>
             <div className="relative">
               <h2 className="text-3xl md:text-4xl font-bold text-white mb-4 tracking-tight">

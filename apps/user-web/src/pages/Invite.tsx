@@ -49,7 +49,7 @@ function StatCard({
   return (
     <div className="xboard-card p-5">
       <div className="flex items-center gap-3 mb-3">
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-lg" style={{ background: 'rgba(124,92,252,0.1)' }}>
+        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-lg" style={{ background: 'rgba(217,119,87,0.1)' }}>
           <span style={{ color: 'var(--primary)' }}>{icon}</span>
         </div>
         <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
@@ -63,9 +63,9 @@ function StatCard({
 // 提现状态映射
 function getWithdrawStatusLabel(status: number): { text: string; color: string } {
   switch (status) {
-    case 0: return { text: '审核中', color: '#f59e0b' }
-    case 1: return { text: '已打款', color: '#22c55e' }
-    case 2: return { text: '已拒绝', color: '#ef4444' }
+    case 0: return { text: '审核中', color: '#e8a33d' }
+    case 1: return { text: '已打款', color: '#5f8d4e' }
+    case 2: return { text: '已拒绝', color: '#cd5c4d' }
     default: return { text: '未知', color: 'var(--muted-foreground)' }
   }
 }
@@ -73,9 +73,9 @@ function getWithdrawStatusLabel(status: number): { text: string; color: string }
 // 佣金状态映射
 function getCommissionStatusLabel(status: number): { text: string; color: string } {
   switch (status) {
-    case 0: return { text: '待结算', color: '#f59e0b' }
-    case 1: return { text: '已结算', color: '#22c55e' }
-    case 2: return { text: '已取消', color: '#ef4444' }
+    case 0: return { text: '待结算', color: '#e8a33d' }
+    case 1: return { text: '已结算', color: '#5f8d4e' }
+    case 2: return { text: '已取消', color: '#cd5c4d' }
     default: return { text: '未知', color: 'var(--muted-foreground)' }
   }
 }
@@ -410,7 +410,7 @@ export default function Invite() {
             </div>
             <div className="text-center">
               <p className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>待结算</p>
-              <p className="text-lg font-bold" style={{ color: '#f59e0b' }}>{formatCNY(pendingSettlement)}</p>
+              <p className="text-lg font-bold" style={{ color: '#e8a33d' }}>{formatCNY(pendingSettlement)}</p>
             </div>
             <div className="text-center">
               <p className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>已提现</p>
@@ -458,7 +458,7 @@ export default function Invite() {
                   style={{ borderColor: 'var(--border)' }}
                 >
                   <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium"
-                    style={{ background: 'rgba(124,92,252,0.1)', color: 'var(--primary)' }}>
+                    style={{ background: 'rgba(217,119,87,0.1)', color: 'var(--primary)' }}>
                     {inv.email[0]?.toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -470,8 +470,8 @@ export default function Invite() {
                   <span
                     className="text-xs px-2 py-0.5 rounded-full"
                     style={{
-                      background: inv.email_verified ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)',
-                      color: inv.email_verified ? '#22c55e' : '#f59e0b',
+                      background: inv.email_verified ? 'rgba(95,141,78,0.1)' : 'rgba(232,163,61,0.1)',
+                      color: inv.email_verified ? '#5f8d4e' : '#e8a33d',
                     }}
                   >
                     {inv.email_verified ? '已验证' : '待验证'}
@@ -579,9 +579,9 @@ export default function Invite() {
             { step: '3', title: '获得佣金', desc: `好友完成消费后，您将获得 ${rate}% 佣金奖励，佣金以人民币计算` },
             { step: '4', title: '申请提现', desc: `佣金余额达到 ${formatCNY(minWithdraw)} 即可申请提现，支持支付宝/USDT/Paypal` },
           ].map(item => (
-            <div key={item.step} className="flex items-start gap-3 p-3 rounded-lg" style={{ backgroundColor: 'rgba(124,92,252,0.06)' }}>
+            <div key={item.step} className="flex items-start gap-3 p-3 rounded-lg" style={{ backgroundColor: 'rgba(217,119,87,0.06)' }}>
               <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-                style={{ background: 'rgba(124,92,252,0.1)' }}>
+                style={{ background: 'rgba(217,119,87,0.1)' }}>
                 <span className="text-xs font-bold" style={{ color: 'var(--primary)' }}>{item.step}</span>
               </div>
               <div>

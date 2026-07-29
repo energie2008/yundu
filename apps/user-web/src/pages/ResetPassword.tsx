@@ -82,7 +82,7 @@ export default function ResetPassword() {
   return (
     <div
       className="min-h-screen flex items-center justify-center p-4"
-      style={{ background: 'linear-gradient(135deg, #f0edff 0%, #f5f7fb 100%)', minHeight: '100vh' }}
+      style={{ background: 'linear-gradient(135deg, #f6efe6 0%, #faf6f0 100%)', minHeight: '100vh' }}
     >
       <div className="w-full max-w-md">
         {/* Brand header */}
@@ -98,7 +98,7 @@ export default function ResetPassword() {
         <div className="xboard-card p-8">
           {success ? (
             <div className="text-center py-4">
-              <div className="mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6" style={{ background: 'rgba(34,197,94,0.1)' }}>
+              <div className="mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6" style={{ background: 'rgba(95,141,78,0.1)' }}>
                 <CheckCircle2 className="w-10 h-10" style={{ color: 'var(--success)' }} />
               </div>
               <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--foreground)' }}>密码已重置</h2>
@@ -107,7 +107,7 @@ export default function ResetPassword() {
           ) : (
             <>
               <div className="mb-6">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4" style={{ background: 'rgba(124,92,252,0.1)' }}>
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4" style={{ background: 'rgba(217,119,87,0.1)' }}>
                   <KeyRound className="w-6 h-6" style={{ color: 'var(--primary)' }} />
                 </div>
                 <h2 className="text-xl font-bold" style={{ color: 'var(--foreground)' }}>重置密码</h2>

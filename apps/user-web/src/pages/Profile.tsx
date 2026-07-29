@@ -35,7 +35,7 @@ function InfoCard({
 }) {
   return (
     <div className="flex items-center gap-4 p-4 rounded-xl" style={{ backgroundColor: 'var(--muted)' }}>
-      <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: 'rgba(124,92,252,0.1)' }}>
+      <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: 'rgba(217,119,87,0.1)' }}>
         <Icon className="w-5 h-5" style={{ color: 'var(--primary)' }} />
       </div>
       <div>
@@ -63,7 +63,7 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 
 function getWithdrawStatusLabel(status: number): { label: string; color: string } {
   switch (status) {
-    case 0: return { label: '待审核', color: '#f59e0b' }
+    case 0: return { label: '待审核', color: '#e8a33d' }
     case 1: return { label: '已通过', color: 'var(--success)' }
     case 2: return { label: '已拒绝', color: 'var(--destructive)' }
     case 3: return { label: '已打款', color: 'var(--success)' }
@@ -446,7 +446,7 @@ export default function Profile() {
                   onClick={() => setChangingPassword(true)}
                   className="text-sm h-8 px-3"
                   style={{ color: 'var(--primary)' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(124,92,252,0.1)')}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(217,119,87,0.1)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   修改
@@ -567,9 +567,9 @@ export default function Profile() {
             )}
           </div>
 
-          <div className="rounded-xl border p-5 mb-5" style={{ backgroundColor: 'rgba(239, 68, 68, 0.04)', borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+          <div className="rounded-xl border p-5 mb-5" style={{ backgroundColor: 'rgba(205, 92, 77, 0.04)', borderColor: 'rgba(205, 92, 77, 0.2)' }}>
             <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)' }}>
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'rgba(205, 92, 77, 0.1)' }}>
                 <AlertTriangle className="w-5 h-5" style={{ color: 'var(--destructive)' }} />
               </div>
               <div>
@@ -598,7 +598,7 @@ export default function Profile() {
               onClick={handleLogout}
               className="h-10 px-5"
               style={{ color: 'var(--destructive)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.1)')}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(205,92,77,0.1)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <LogOut className="w-4 h-4 mr-1.5" />

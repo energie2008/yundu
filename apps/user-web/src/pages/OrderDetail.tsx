@@ -91,7 +91,7 @@ function CopyButton({ text }: { text: string }) {
       className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors"
       style={{
         color: copied ? 'var(--success)' : 'var(--primary)',
-        backgroundColor: copied ? 'rgba(34,197,94,0.1)' : 'rgba(124,92,252,0.1)',
+        backgroundColor: copied ? 'rgba(95,141,78,0.1)' : 'rgba(217,119,87,0.1)',
       }}
     >
       {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -103,13 +103,13 @@ function CopyButton({ text }: { text: string }) {
 function getStatusBadge(status: OrderResponse['status']) {
   switch (status) {
     case 'pending':
-      return { bg: 'rgba(245,158,11,0.1)', color: '#f59e0b', label: '待支付' }
+      return { bg: 'rgba(232,163,61,0.1)', color: '#e8a33d', label: '待支付' }
     case 'paid':
-      return { bg: 'rgba(34,197,94,0.1)', color: 'var(--success)', label: '已完成' }
+      return { bg: 'rgba(95,141,78,0.1)', color: 'var(--success)', label: '已完成' }
     case 'canceled':
       return { bg: 'var(--muted)', color: 'var(--muted-foreground)', label: '已取消' }
     case 'expired':
-      return { bg: 'rgba(239,68,68,0.1)', color: 'var(--destructive)', label: '已过期' }
+      return { bg: 'rgba(205,92,77,0.1)', color: 'var(--destructive)', label: '已过期' }
     default:
       return { bg: 'var(--muted)', color: 'var(--muted-foreground)', label: status }
   }
@@ -202,7 +202,7 @@ export default function OrderDetail() {
       </div>
 
       {isPaid && (
-        <div className="xboard-card p-6 text-center mb-5" style={{ border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.05)' }}>
+        <div className="xboard-card p-6 text-center mb-5" style={{ border: '1px solid rgba(95,141,78,0.3)', background: 'rgba(95,141,78,0.05)' }}>
           <CheckCircle className="w-14 h-14 mx-auto mb-3" style={{ color: 'var(--success)' }} />
           <p className="text-lg font-semibold" style={{ color: 'var(--success)' }}>支付成功！</p>
           <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>您的订阅已激活</p>
@@ -219,7 +219,7 @@ export default function OrderDetail() {
       )}
 
       {isExpired && (
-        <div className="xboard-card p-6 text-center mb-5" style={{ border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.05)' }}>
+        <div className="xboard-card p-6 text-center mb-5" style={{ border: '1px solid rgba(205,92,77,0.3)', background: 'rgba(205,92,77,0.05)' }}>
           <XCircle className="w-14 h-14 mx-auto mb-3" style={{ color: 'var(--destructive)' }} />
           <p className="text-lg font-semibold" style={{ color: 'var(--destructive)' }}>订单已过期</p>
           <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>请重新创建订单</p>
@@ -275,8 +275,8 @@ export default function OrderDetail() {
             <p className="text-xs font-mono break-all" style={{ color: 'var(--foreground)' }}>{order.pay_address}</p>
           </div>
 
-          <div className="rounded-lg p-4 mb-5" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
-            <p className="text-sm" style={{ color: '#f59e0b' }}>
+          <div className="rounded-lg p-4 mb-5" style={{ background: 'rgba(232,163,61,0.08)', border: '1px solid rgba(232,163,61,0.2)' }}>
+            <p className="text-sm" style={{ color: '#e8a33d' }}>
               <Clock className="w-4 h-4 inline mr-1" />
               请在有效期内支付 <strong style={{ color: 'var(--primary)' }}>{formatUSDT(order.amount_usdt)} USDT</strong>（TRC20网络）到上述地址，支付完成后系统将自动确认并激活您的订阅。
             </p>

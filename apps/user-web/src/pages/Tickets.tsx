@@ -39,10 +39,10 @@ import clsx from 'clsx'
 
 function getStatusConfig(status: string) {
   const configs: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
-    open: { label: '处理中', color: 'var(--primary)', bg: 'rgba(124,92,252,0.1)', icon: Clock },
-    pending: { label: '待处理', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', icon: AlertCircle },
-    replied: { label: '已回复', color: 'var(--primary)', bg: 'rgba(124,92,252,0.1)', icon: MessageSquare },
-    resolved: { label: '已解决', color: 'var(--success)', bg: 'rgba(34,197,94,0.1)', icon: CheckCircle2 },
+    open: { label: '处理中', color: 'var(--primary)', bg: 'rgba(217,119,87,0.1)', icon: Clock },
+    pending: { label: '待处理', color: '#e8a33d', bg: 'rgba(232,163,61,0.1)', icon: AlertCircle },
+    replied: { label: '已回复', color: 'var(--primary)', bg: 'rgba(217,119,87,0.1)', icon: MessageSquare },
+    resolved: { label: '已解决', color: 'var(--success)', bg: 'rgba(95,141,78,0.1)', icon: CheckCircle2 },
     closed: { label: '已关闭', color: 'var(--muted-foreground)', bg: 'var(--muted)', icon: XCircle },
   }
   return configs[status] || { label: getStatusLabel(status), color: 'var(--muted-foreground)', bg: 'var(--muted)', icon: AlertCircle }
@@ -166,7 +166,7 @@ function TicketDetailView({ ticketId, onBack }: { ticketId: string; onBack: () =
                   {status.label}
                 </Badge>
                 {ticket.unread_count && ticket.unread_count > 0 && (
-                  <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: 'var(--destructive)' }}>
+                  <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(205,92,77,0.1)', color: 'var(--destructive)' }}>
                     {ticket.unread_count} 条未读
                   </Badge>
                 )}
@@ -189,11 +189,11 @@ function TicketDetailView({ ticketId, onBack }: { ticketId: string; onBack: () =
                 <div
                   key={msg.id}
                   className="p-4 rounded-xl"
-                  style={{ backgroundColor: msg.is_admin ? 'rgba(124,92,252,0.06)' : 'var(--muted)' }}
+                  style={{ backgroundColor: msg.is_admin ? 'rgba(217,119,87,0.06)' : 'var(--muted)' }}
                 >
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
-                      style={{ background: msg.is_admin ? 'var(--primary)' : 'linear-gradient(135deg, #7c5cfc, #9f87ff)' }}>
+                      style={{ background: msg.is_admin ? 'var(--primary)' : 'linear-gradient(135deg, #d97757, #e08d70)' }}>
                       {(msg.author_name || (msg.is_admin ? '客服' : '我')).charAt(0)}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -201,7 +201,7 @@ function TicketDetailView({ ticketId, onBack }: { ticketId: string; onBack: () =
                         {msg.author_name || (msg.is_admin ? '客服' : '我')}
                       </span>
                       {msg.is_admin && (
-                        <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(124,92,252,0.1)', color: 'var(--primary)' }}>客服</Badge>
+                        <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(217,119,87,0.1)', color: 'var(--primary)' }}>客服</Badge>
                       )}
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{formatTimeAgo(msg.created_at)}</span>
                     </div>
@@ -418,7 +418,7 @@ export default function Tickets() {
                             {status.label}
                           </Badge>
                           {ticket.unread_count && ticket.unread_count > 0 && (
-                            <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: 'var(--destructive)' }}>
+                            <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(205,92,77,0.1)', color: 'var(--destructive)' }}>
                               {ticket.unread_count} 未读
                             </Badge>
                           )}
