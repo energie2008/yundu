@@ -545,7 +545,7 @@ export default function ClientCompat() {
                               const level = row.cells?.[f]
                               return (
                                 <TableCell key={f} className="py-3">
-                                  {level ? getCompatBadge(level) : <Minus className="w-3.5 h-3.5 text-zinc-700" />}
+                                  {level ? getCompatBadge(level) : <Minus className="w-3.5 h-3.5 text-zinc-500" />}
                                 </TableCell>
                               )
                             })}

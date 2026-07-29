@@ -400,7 +400,7 @@ export default function NodeGroups() {
       ) : filteredGroups.length === 0 ? (
         <Card className="bg-zinc-900 border-zinc-800">
           <CardContent className="py-16 text-center">
-            <Layers className="w-12 h-12 mx-auto text-zinc-700 mb-3" />
+            <Layers className="w-12 h-12 mx-auto text-zinc-500 mb-3" />
             <p className="text-zinc-400 text-sm">{search ? '没有匹配的分组' : '暂无分组'}</p>
             <p className="text-zinc-600 text-xs mt-1">
               {search ? '尝试其他关键词' : '点击「添加分组」创建第一个会员分组'}
@@ -617,7 +617,7 @@ export default function NodeGroups() {
                   <div className="text-center py-8 text-xs text-zinc-500">加载中...</div>
                 ) : boundNodes.length === 0 ? (
                   <div className="text-center py-8 text-xs text-zinc-500">
-                    <HardDrive className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
+                    <HardDrive className="w-8 h-8 mx-auto mb-2 text-zinc-500" />
                     该分组暂无节点
                   </div>
                 ) : (
@@ -682,7 +682,7 @@ export default function NodeGroups() {
                   <div className="text-center py-8 text-xs text-zinc-500">加载中...</div>
                 ) : unboundNodes.length === 0 ? (
                   <div className="text-center py-8 text-xs text-zinc-500">
-                    <Check className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
+                    <Check className="w-8 h-8 mx-auto mb-2 text-zinc-500" />
                     {nodeSearch ? '无匹配节点' : '所有节点已绑定'}
                   </div>
                 ) : (

@@ -182,7 +182,7 @@ function RadarChart({ scores }: { scores: { label: string; value: number }[] }) 
             key={levelIdx}
             points={gridPoints}
             fill="none"
-            stroke="#27272a"
+            stroke="#eae1d3"
             strokeWidth="1"
           />
         )
@@ -198,7 +198,7 @@ function RadarChart({ scores }: { scores: { label: string; value: number }[] }) 
             y1={center}
             x2={p.x}
             y2={p.y}
-            stroke="#27272a"
+            stroke="#eae1d3"
             strokeWidth="1"
           />
         )
@@ -207,12 +207,12 @@ function RadarChart({ scores }: { scores: { label: string; value: number }[] }) 
       <polygon
         points={polygonPoints}
         fill="rgba(139, 92, 246, 0.25)"
-        stroke="#8b5cf6"
+        stroke="#d97757"
         strokeWidth="2"
       />
       {/* 数据点 */}
       {dataPoints.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="3" fill="#8b5cf6" />
+        <circle key={i} cx={p.x} cy={p.y} r="3" fill="#d97757" />
       ))}
       {/* 标签 */}
       {scores.map((s, i) => {
@@ -226,7 +226,7 @@ function RadarChart({ scores }: { scores: { label: string; value: number }[] }) 
             key={i}
             x={labelPos.x}
             y={labelPos.y}
-            fill="#a1a1aa"
+            fill="#8a7d6c"
             fontSize="11"
             textAnchor={anchor as 'start' | 'middle' | 'end'}
             dominantBaseline="middle"
@@ -269,34 +269,34 @@ function TrendChart({ data }: { data: ScoreHistoryItem[] }) {
             y1={yScale(v)}
             x2={width - padding.right}
             y2={yScale(v)}
-            stroke="#27272a"
+            stroke="#eae1d3"
             strokeWidth="1"
             strokeDasharray={v === 0 ? '0' : '2,2'}
           />
-          <text x={padding.left - 6} y={yScale(v)} fill="#71717a" fontSize="10" textAnchor="end" dominantBaseline="middle">
+          <text x={padding.left - 6} y={yScale(v)} fill="#8a7d6c" fontSize="10" textAnchor="end" dominantBaseline="middle">
             {v}
           </text>
         </g>
       ))}
       {/* X 轴标签（首尾） */}
-      <text x={padding.left} y={height - 8} fill="#71717a" fontSize="10" textAnchor="start">
+      <text x={padding.left} y={height - 8} fill="#8a7d6c" fontSize="10" textAnchor="start">
         {formatTime(sorted[0]?.calculated_at)}
       </text>
-      <text x={width - padding.right} y={height - 8} fill="#71717a" fontSize="10" textAnchor="end">
+      <text x={width - padding.right} y={height - 8} fill="#8a7d6c" fontSize="10" textAnchor="end">
         {formatTime(sorted[sorted.length - 1]?.calculated_at)}
       </text>
       {/* 数据线 */}
-      <path d={overallPath} fill="none" stroke="#8b5cf6" strokeWidth="2" />
-      <path d={latencyPath} fill="none" stroke="#10b981" strokeWidth="1.5" strokeDasharray="3,2" />
-      <path d={stabilityPath} fill="none" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="3,2" />
+      <path d={overallPath} fill="none" stroke="#d97757" strokeWidth="2" />
+      <path d={latencyPath} fill="none" stroke="#5f8d4e" strokeWidth="1.5" strokeDasharray="3,2" />
+      <path d={stabilityPath} fill="none" stroke="#e8a33d" strokeWidth="1.5" strokeDasharray="3,2" />
       {/* 图例 */}
       <g transform={`translate(${padding.left}, 4)`}>
-        <line x1="0" y1="8" x2="14" y2="8" stroke="#8b5cf6" strokeWidth="2" />
-        <text x="18" y="11" fill="#a1a1aa" fontSize="10">总分</text>
-        <line x1="60" y1="8" x2="74" y2="8" stroke="#10b981" strokeWidth="1.5" strokeDasharray="3,2" />
-        <text x="78" y="11" fill="#a1a1aa" fontSize="10">延迟分</text>
-        <line x1="130" y1="8" x2="144" y2="8" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="3,2" />
-        <text x="148" y="11" fill="#a1a1aa" fontSize="10">稳定分</text>
+        <line x1="0" y1="8" x2="14" y2="8" stroke="#d97757" strokeWidth="2" />
+        <text x="18" y="11" fill="#8a7d6c" fontSize="10">总分</text>
+        <line x1="60" y1="8" x2="74" y2="8" stroke="#5f8d4e" strokeWidth="1.5" strokeDasharray="3,2" />
+        <text x="78" y="11" fill="#8a7d6c" fontSize="10">延迟分</text>
+        <line x1="130" y1="8" x2="144" y2="8" stroke="#e8a33d" strokeWidth="1.5" strokeDasharray="3,2" />
+        <text x="148" y="11" fill="#8a7d6c" fontSize="10">稳定分</text>
       </g>
     </svg>
   )

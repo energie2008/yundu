@@ -162,7 +162,7 @@ export default function FinanceAudit() {
             <div className="flex gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-200 leading-relaxed">
-                <strong className="text-amber-100">注意：</strong>支付回调URL是独立于用户访问域名的配置项，请勿随意更改。修改前请在支付平台同步更新。
+                <strong className="text-amber-200">注意：</strong>支付回调URL是独立于用户访问域名的配置项，请勿随意更改。修改前请在支付平台同步更新。
               </p>
             </div>
           </CardContent>

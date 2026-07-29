@@ -179,6 +179,57 @@
 }
 
 /* ============================================
+   Tailwind 调色板劫持 — RGB 三元组变量
+   配合 tailwind.config.js 把页面里残留的旧暗色类
+   （zinc/indigo/emerald 等）整体映射到暖色主题
+   ============================================ */
+:root {
+  --yd-fg: 44 38 32;
+  --yd-fg-secondary: 110 97 82;
+  --yd-fg-muted: 138 125 108;
+  --yd-bg: 250 246 240;
+  --yd-card: 255 253 250;
+  --yd-muted: 244 237 227;
+  --yd-border: 234 225 211;
+  --yd-border-strong: 220 207 187;
+  --yd-primary: 217 119 87;
+  --yd-primary-deep: 184 90 56;
+  --yd-primary-tint: 246 239 230;
+  --yd-success: 95 141 78;
+  --yd-success-deep: 76 112 56;
+  --yd-success-tint: 238 243 230;
+  --yd-warning: 232 163 61;
+  --yd-warning-deep: 150 105 28;
+  --yd-warning-tint: 251 241 220;
+  --yd-danger: 205 92 77;
+  --yd-danger-deep: 160 64 50;
+  --yd-danger-tint: 249 232 228;
+}
+
+.dark {
+  --yd-fg: 243 237 227;
+  --yd-fg-secondary: 217 205 187;
+  --yd-fg-muted: 179 166 147;
+  --yd-bg: 30 26 21;
+  --yd-card: 40 34 25;
+  --yd-muted: 51 43 32;
+  --yd-border: 60 52 42;
+  --yd-border-strong: 80 70 58;
+  --yd-primary: 224 141 112;
+  --yd-primary-deep: 234 165 134;
+  --yd-primary-tint: 58 42 32;
+  --yd-success: 143 184 122;
+  --yd-success-deep: 180 214 163;
+  --yd-success-tint: 44 52 36;
+  --yd-warning: 240 187 99;
+  --yd-warning-deep: 245 207 141;
+  --yd-warning-tint: 58 48 32;
+  --yd-danger: 224 122 103;
+  --yd-danger-deep: 240 165 149;
+  --yd-danger-tint: 58 36 34;
+}
+
+/* ============================================
    Base Styles
    ============================================ */
 html,
@@ -388,66 +439,16 @@ body {
 }
 
 /* ============================================================
-   统一风格覆盖层
-   把 @airport/ui 的暗色 zinc 类 + 页面里的彩色 Tailwind 类
-   全部映射到上面的极简调色板，消除色系混乱
+   全局强制规则（最小集）
+   其余旧暗色类的统一已由 tailwind.config.js 调色板劫持完成
    ============================================================ */
 
-/* —— Button 暗色底映射 —— */
-button.border-zinc-800 {
-  border-color: var(--border) !important;
-  background: transparent !important;
-  color: var(--foreground) !important;
-}
-button.border-zinc-800:hover {
-  background: var(--muted) !important;
-  color: var(--foreground) !important;
-}
-button.bg-zinc-800 {
-  background: var(--muted) !important;
-  color: var(--foreground) !important;
-}
-button.bg-zinc-800:hover {
-  background: var(--border) !important;
-}
-button.bg-zinc-900 {
-  background: var(--card) !important;
-  color: var(--foreground) !important;
-}
-
-/* —— Focus ring —— */
+/* —— Focus ring 统一暖橙 —— */
 *:focus-visible {
   --tw-ring-color: var(--primary) !important;
 }
 
-/* —— Dialog —— */
-[role="dialog"].border-zinc-800,
-div.border-zinc-800.bg-zinc-900 {
-  background: var(--card) !important;
-  border-color: var(--border) !important;
-  color: var(--foreground) !important;
-}
-.fixed.inset-0.bg-black {
-  background: rgba(0, 0, 0, 0.4) !important;
-  backdrop-filter: blur(4px) !important;
-}
-h2.text-zinc-100 {
-  color: var(--foreground) !important;
-}
-p.text-zinc-400 {
-  color: var(--muted-foreground) !important;
-}
-button .text-zinc-400 {
-  color: var(--muted-foreground) !important;
-}
-
-/* —— Tabs —— */
-div.rounded-lg.bg-zinc-800,
-div.rounded-lg .bg-zinc-800 {
-  background: var(--muted) !important;
-}
-
-/* —— Inputs: 统一灰底 + 黑字（所有 input/textarea/select）—— */
+/* —— 表单控件统一：卡片底 + 暖色边框 + 主题文字 —— */
 input,
 textarea,
 select {
@@ -472,366 +473,9 @@ option {
   color: var(--foreground) !important;
 }
 
-/* —— Select dropdown —— */
-[role="listbox"].bg-zinc-900 {
-  background: var(--card) !important;
-  border-color: var(--border) !important;
-  color: var(--foreground) !important;
+/* —— 弹窗黑色遮罩柔化 —— */
+.fixed.inset-0.bg-black {
+  background: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(4px) !important;
 }
 
-/* —— Label / Separator / Skeleton / Spinner —— */
-label.text-zinc-400 {
-  color: var(--muted-foreground) !important;
-}
-hr.bg-zinc-800 {
-  background: var(--border) !important;
-}
-.bg-zinc-800.animate-pulse {
-  background: var(--muted) !important;
-}
-svg.text-zinc-400 {
-  color: var(--muted-foreground) !important;
-}
-
-/* —— Switch —— */
-button[data-state="checked"].bg-zinc-800 {
-  background: var(--primary) !important;
-}
-button[data-state="unchecked"].bg-zinc-800 {
-  background: var(--muted) !important;
-}
-
-/* —— Table —— */
-table .border-zinc-800 {
-  border-color: var(--border) !important;
-}
-table th, table td {
-  color: var(--foreground) !important;
-}
-table thead {
-  background: var(--muted) !important;
-}
-
-/* —— Loading screen / 通用 zinc 背景 —— */
-.bg-zinc-950 {
-  background-color: var(--background) !important;
-}
-.bg-zinc-900 {
-  background-color: var(--card) !important;
-}
-.border-zinc-800 {
-  border-color: var(--border) !important;
-}
-
-/* ============================================================
-   zinc 文字色阶 → 统一映射到 foreground / muted
-   ============================================================ */
-.text-zinc-100,
-.text-zinc-200,
-.text-zinc-900 {
-  color: var(--foreground) !important;
-}
-.text-zinc-300,
-.text-zinc-500,
-.text-zinc-600,
-.text-zinc-700 {
-  color: var(--muted-foreground) !important;
-}
-.text-zinc-400 {
-  color: var(--muted-foreground) !important;
-}
-
-/* —— 带透明度的 zinc 背景/边框 —— */
-.bg-zinc-800\/50,
-.bg-zinc-800\/30,
-.bg-zinc-800\/20,
-.bg-zinc-700\/50,
-.bg-zinc-700\/30,
-.bg-zinc-900\/50,
-.bg-white\/5,
-.bg-white\/\[0\.03\] {
-  background-color: var(--muted) !important;
-}
-.border-zinc-700,
-.border-zinc-700\/50,
-.border-zinc-700\/30,
-.border-zinc-800\/50,
-.border-zinc-800\/30 {
-  border-color: var(--border) !important;
-}
-.hover\:bg-zinc-800\/50:hover,
-.hover\:bg-zinc-800\/30:hover,
-.hover\:bg-zinc-800:hover,
-.hover\:bg-white\/5:hover,
-.hover\:bg-white\/\[0\.03\]:hover {
-  background-color: var(--muted) !important;
-}
-
-/* —— hover 文字色 —— */
-.hover\:text-zinc-100:hover,
-.hover\:text-slate-200:hover,
-.hover\:text-slate-300:hover {
-  color: var(--foreground) !important;
-}
-.hover\:text-zinc-300:hover {
-  color: var(--muted-foreground) !important;
-}
-
-/* —— slate 色阶映射 —— */
-.text-slate-200,
-.text-slate-400,
-.text-slate-500 {
-  color: var(--muted-foreground) !important;
-}
-
-/* —— Dialog 内强制统一 —— */
-[role="dialog"] .bg-zinc-900 {
-  background-color: var(--card) !important;
-}
-[role="dialog"] .text-zinc-100,
-[role="dialog"] .text-zinc-300,
-[role="dialog"] .text-zinc-400,
-[role="dialog"] .text-zinc-500 {
-  color: var(--muted-foreground) !important;
-}
-[role="dialog"] input,
-[role="dialog"] textarea,
-[role="dialog"] select {
-  background-color: var(--card) !important;
-  border-color: var(--border) !important;
-  color: var(--foreground) !important;
-}
-
-/* —— Badge secondary —— */
-.badge-secondary,
-div.bg-zinc-800.text-zinc-100,
-div.bg-zinc-800.text-zinc-200,
-.bg-zinc-800.text-zinc-200 {
-  background: var(--muted) !important;
-  color: var(--secondary-foreground) !important;
-}
-div.border-zinc-700.text-zinc-100 {
-  border-color: var(--border) !important;
-  color: var(--foreground) !important;
-}
-
-/* —— Indigo 色阶 → 主色变量 —— */
-.text-indigo-300,
-.text-indigo-400 {
-  color: var(--primary) !important;
-}
-.bg-indigo-600\/20,
-.bg-indigo-500\/20 {
-  background: var(--primary-glow) !important;
-}
-.border-indigo-500\/20 {
-  border-color: var(--primary-glow) !important;
-}
-.from-indigo-500\/15 {
-  --tw-gradient-from: var(--primary-glow) var(--tw-gradient-from-position) !important;
-}
-.to-purple-500\/10 {
-  --tw-gradient-to: var(--primary-glow) var(--tw-gradient-to-position) !important;
-}
-.shadow-indigo-500\/5,
-.shadow-indigo-500\/20 {
-  box-shadow: 0 0 10px var(--primary-glow) !important;
-}
-.ring-indigo-500 {
-  --tw-ring-color: var(--primary) !important;
-}
-
-/* —— 行内 code —— */
-code.bg-zinc-800\/50,
-code.bg-zinc-800 {
-  background-color: var(--muted) !important;
-  color: var(--foreground) !important;
-  border-color: var(--border) !important;
-}
-
-/* ============================================================
-   彩色 Tailwind 类统一去色
-   把页面里直接用的 bg-red-500 / text-emerald-400 / bg-amber-900/50 等
-   全部映射到中性灰或语义色软底，消除红绿蓝黄紫粉等多色搭配
-   保留 .status-dot / 按钮 / 渐变 的语义色
-   ============================================================ */
-
-/* —— 实心彩色背景 → 中性灰（badge / 标签）—— */
-.bg-red-500, .bg-red-600, .bg-red-700,
-.bg-green-500, .bg-green-600,
-.bg-blue-500, .bg-blue-600,
-.bg-yellow-500, .bg-yellow-600,
-.bg-orange-500, .bg-orange-600,
-.bg-purple-500, .bg-purple-600,
-.bg-cyan-500, .bg-cyan-600,
-.bg-lime-500,
-.bg-rose-500, .bg-rose-600,
-.bg-violet-500, .bg-violet-600,
-.bg-sky-500, .bg-sky-600,
-.bg-emerald-500, .bg-emerald-600,
-.bg-amber-500, .bg-amber-600,
-.bg-pink-500, .bg-pink-600,
-.bg-fuchsia-500, .bg-fuchsia-600,
-.bg-teal-500, .bg-teal-600 {
-  background-color: var(--muted) !important;
-  color: var(--secondary-foreground) !important;
-}
-
-/* —— 彩色文字 → 中性 foreground（保留语义色的单独处理见下）—— */
-.text-red-300, .text-red-400,
-.text-green-300, .text-green-400, .text-green-700,
-.text-blue-300, .text-blue-400, .text-blue-700,
-.text-yellow-300, .text-yellow-400, .text-yellow-700,
-.text-orange-300, .text-orange-400,
-.text-purple-300, .text-purple-400,
-.text-cyan-300, .text-cyan-400,
-.text-lime-400,
-.text-rose-300, .text-rose-400,
-.text-violet-300, .text-violet-400,
-.text-sky-300, .text-sky-400,
-.text-emerald-300, .text-emerald-400,
-.text-amber-300, .text-amber-400,
-.text-pink-400,
-.text-fuchsia-300 {
-  color: var(--foreground) !important;
-}
-
-/* —— 暗色 accent-900/50 软底彩色块 → 中性灰 —— */
-.bg-emerald-900\/50,
-.bg-amber-900\/50,
-.bg-rose-900\/50,
-.bg-blue-900\/50,
-.bg-purple-900\/50,
-.bg-red-900\/50,
-.bg-green-900\/50,
-.bg-yellow-900\/50,
-.bg-orange-900\/50,
-.bg-cyan-900\/50,
-.bg-violet-900\/50,
-.bg-sky-900\/50,
-.bg-pink-900\/50,
-.bg-fuchsia-900\/50 {
-  background-color: var(--muted) !important;
-}
-.border-emerald-800\/50,
-.border-amber-800\/50,
-.border-rose-800\/50,
-.border-blue-800\/50,
-.border-purple-800\/50,
-.border-red-800\/50,
-.border-green-800\/50,
-.border-yellow-800\/50,
-.border-orange-800\/50,
-.border-cyan-800\/50,
-.border-violet-800\/50,
-.border-sky-800\/50,
-.border-pink-800\/50 {
-  border-color: var(--border) !important;
-}
-
-/* —— 实心暗色 900 系列 → 中性灰 —— */
-.bg-red-900, .bg-red-950,
-.bg-emerald-900, .bg-emerald-950,
-.bg-amber-900, .bg-amber-950,
-.bg-blue-900,
-.bg-indigo-900, .bg-indigo-950,
-.bg-violet-900,
-.bg-rose-900,
-.bg-purple-900,
-.bg-green-900,
-.bg-yellow-900,
-.bg-cyan-900,
-.bg-sky-900 {
-  background-color: var(--muted) !important;
-}
-
-/* —— 实心 500/600 系列（按钮/标签）—— */
-.bg-indigo-500 {
-  background-color: var(--primary) !important;
-  color: var(--primary-foreground) !important;
-}
-.bg-indigo-600 {
-  background-color: var(--primary) !important;
-  color: var(--primary-foreground) !important;
-}
-.hover\:bg-indigo-500:hover,
-.hover\:bg-indigo-600:hover {
-  background-color: var(--primary-soft) !important;
-}
-
-/* —— emerald 文字 → 语义 success（保留状态语义）—— */
-.text-emerald-400 {
-  color: var(--success) !important;
-}
-.bg-emerald-500 {
-  background-color: var(--success) !important;
-  color: var(--success-foreground) !important;
-}
-
-/* —— red 文字 → 语义 danger —— */
-.text-red-400,
-.text-red-500 {
-  color: var(--destructive) !important;
-}
-.bg-red-500,
-.bg-red-600 {
-  background-color: var(--destructive) !important;
-  color: var(--destructive-foreground) !important;
-}
-
-/* —— amber 文字 → 语义 warning —— */
-.text-amber-400,
-.text-amber-500 {
-  color: var(--warning) !important;
-}
-.bg-amber-500,
-.bg-amber-600 {
-  background-color: var(--warning) !important;
-  color: var(--warning-foreground) !important;
-}
-
-/* —— 边框色统一 —— */
-.border-red-500, .border-red-800, .border-red-900 { border-color: var(--destructive) !important; }
-.border-emerald-500, .border-emerald-800, .border-emerald-900 { border-color: var(--success) !important; }
-.border-amber-500, .border-amber-800, .border-amber-900 { border-color: var(--warning) !important; }
-.border-blue-500, .border-blue-800 { border-color: var(--border) !important; }
-.border-violet-800 { border-color: var(--border) !important; }
-.border-purple-800 { border-color: var(--border) !important; }
-
-/* —— hover 彩色背景 —— */
-.hover\:bg-red-500:hover { background-color: var(--destructive) !important; }
-.hover\:bg-emerald-500:hover { background-color: var(--success) !important; }
-.hover\:bg-amber-500:hover { background-color: var(--warning) !important; }
-
-/* ============================================================
-   暖阳温馨主题 · 补充映射
-   zinc/slate 中间色阶 → 暖中性色，避免冷灰破坏温馨氛围
-   ============================================================ */
-
-/* —— 浅色块（Switch 未选中轨道等）—— */
-.bg-zinc-300,
-.bg-zinc-200,
-.bg-slate-200,
-.bg-slate-300 {
-  background-color: var(--border) !important;
-}
-
-/* —— 中深色块（badge / 圆点 / 步骤圆圈 / 禁用按钮）—— */
-.bg-zinc-500, .bg-zinc-600, .bg-zinc-700,
-.bg-slate-500, .bg-slate-600, .bg-slate-700 {
-  background-color: var(--muted-foreground) !important;
-}
-
-/* —— 步骤圆圈/序号内文字保持暖白 —— */
-.bg-zinc-500.text-white, .bg-zinc-600.text-white, .bg-zinc-700.text-white,
-.bg-slate-500.text-white, .bg-slate-600.text-white, .bg-slate-700.text-white {
-  color: #fffaf3 !important;
-}
-
-/* —— slate 背景文字色阶 —— */
-.text-slate-300, .text-slate-600, .text-slate-700 {
-  color: var(--muted-foreground) !important;
-}
-.text-slate-800, .text-slate-900 {
-  color: var(--foreground) !important;
-}

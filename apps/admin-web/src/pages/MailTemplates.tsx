@@ -595,7 +595,7 @@ export default function MailTemplates() {
                 <div>
                   <div className="text-xs text-zinc-500 mb-1">HTML 正文（渲染预览）</div>
                   <div
-                    className="bg-white border border-zinc-800 rounded-md p-4 text-sm text-zinc-900 overflow-auto max-h-[50vh]"
+                    className="bg-white border border-zinc-800 rounded-md p-4 text-sm text-[#27272a] overflow-auto max-h-[50vh]"
                     // eslint-disable-next-line react/no-danger
                     dangerouslySetInnerHTML={{ __html: previewing.body || '<p style="color:#999">（空）</p>' }}
                   />

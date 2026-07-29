@@ -1026,9 +1026,9 @@ function AdvancedSettingsDialog({ open, onOpenChange, config, onConfigChange }: 
                 <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-900/50">
                   <p className="text-xs text-emerald-300 font-medium mb-1">自动配置（零 SSH）</p>
                   <div className="text-xs text-emerald-200/80 space-y-1">
-                    <p>• 服务端 sing-box 自动监听整个端口范围（原生 <code className="text-emerald-100">hop_ports</code>）</p>
+                    <p>• 服务端 sing-box 自动监听整个端口范围（原生 <code className="text-emerald-200">hop_ports</code>）</p>
                     <p>• node-agent 自动放行范围内所有 UDP 端口防火墙</p>
-                    <p>• 订阅链接自动渲染 <code className="text-emerald-100">mport=40020-40200</code></p>
+                    <p>• 订阅链接自动渲染 <code className="text-emerald-200">mport=40020-40200</code></p>
                     <p>• 无需手动配置 iptables/NAT，无需 SSH 登录</p>
                   </div>
                 </div>

@@ -642,7 +642,7 @@ function RealtimeMetricsPanel({ server }: { server: ServerDetail }) {
               </span>
               <span className="text-xs text-emerald-400 font-mono">{Math.round(metrics.cpuPercent)}%</span>
             </div>
-            {renderLine(cpuData, '#10b981')}
+            {renderLine(cpuData, '#5f8d4e')}
           </div>
           <div className="bg-zinc-800/30 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
@@ -651,7 +651,7 @@ function RealtimeMetricsPanel({ server }: { server: ServerDetail }) {
               </span>
               <span className="text-xs text-blue-400 font-mono">{Math.round(metrics.memoryPercent)}%</span>
             </div>
-            {renderLine(memData, '#3b82f6')}
+            {renderLine(memData, '#d97757')}
           </div>
           <div className="bg-zinc-800/30 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
@@ -660,7 +660,7 @@ function RealtimeMetricsPanel({ server }: { server: ServerDetail }) {
               </span>
               <span className="text-xs text-cyan-400 font-mono">{Math.round(metrics.networkInKBps)} KB/s</span>
             </div>
-            {renderLine(netInData, '#06b6d4')}
+            {renderLine(netInData, '#e8a33d')}
           </div>
           <div className="bg-zinc-800/30 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
@@ -669,7 +669,7 @@ function RealtimeMetricsPanel({ server }: { server: ServerDetail }) {
               </span>
               <span className="text-xs text-violet-400 font-mono">{Math.round(metrics.networkOutKBps)} KB/s</span>
             </div>
-            {renderLine(netOutData, '#8b5cf6')}
+            {renderLine(netOutData, '#8a7d6c')}
           </div>
         </div>
 
@@ -772,7 +772,7 @@ function RealtimeLogs({ serverId }: { serverId: string }) {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="bg-black/50 rounded-lg p-3 h-52 overflow-auto font-mono text-xs" ref={(el) => {
+        <div className="bg-zinc-800/50 border border-zinc-800 rounded-lg p-3 h-52 overflow-auto font-mono text-xs" ref={(el) => {
           if (el && autoScroll) {
             el.scrollTop = el.scrollHeight
           }
@@ -1968,7 +1968,7 @@ function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: ()
                     自动分析Agent日志，定位配置/网络/证书/内核兼容问题
                   </p>
                   {currentServer.lastDiagnosis && (
-                    <div className="bg-black/20 rounded-lg p-3">
+                    <div className="bg-zinc-800/50 rounded-lg p-3">
                       <div className="flex items-center gap-2 mb-1">
                         <Badge variant="destructive" className="bg-red-900/50 text-red-300 text-xs">
                           {currentServer.lastDiagnosis.category}
