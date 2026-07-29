@@ -220,11 +220,42 @@ func (s *DeploymentService) SetOutboundService(svc *outbound.OutboundService) {
 
 // injectOutboundPolicies P3-C: 将节点绑定的 outbound 策略渲染结果注入到内核配置。
 // 在 buildConfigViaKernelRender 之后调用，将 warp/socks5/chain outbound 追加到 config.outbounds。
+// 注意：同一 runtime 下多个节点可能共享相同的 WARP outbound 策略（server 级别管理），
+// 需按 tag 去重避免 sing-box "duplicate outbound/endpoint tag" 校验失败。
 func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config map[string]interface{}, nodes []*model.Node, runtimeType string) {
 	if s.outboundService == nil || len(nodes) == 0 {
 		return
 	}
 	isSingbox := runtimeType == "sing-box" || runtimeType == "singbox"
+	// 记录已存在的 outbound/endpoint tag（从 config 初始内容提取）
+	seenTags := make(map[string]bool)
+	if existing, ok := config["outbounds"].([]interface{}); ok {
+		for _, ob := range existing {
+			if m, ok := ob.(outbound.Map); ok {
+				if tag, ok := m["tag"].(string); ok {
+					seenTags[tag] = true
+				}
+			} else if m, ok := ob.(map[string]interface{}); ok {
+				if tag, ok := m["tag"].(string); ok {
+					seenTags[tag] = true
+				}
+			}
+		}
+	}
+	if existing, ok := config["endpoints"].([]interface{}); ok {
+		for _, ep := range existing {
+			if m, ok := ep.(outbound.Map); ok {
+				if tag, ok := m["tag"].(string); ok {
+					seenTags[tag] = true
+				}
+			} else if m, ok := ep.(map[string]interface{}); ok {
+				if tag, ok := m["tag"].(string); ok {
+					seenTags[tag] = true
+				}
+			}
+		}
+	}
+	urltestFinalSet := false
 	for _, node := range nodes {
 		resp, err := s.outboundService.ApplyAll(ctx, node.ID)
 		if err != nil {
@@ -236,12 +267,30 @@ func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config m
 		}
 		var renderedOutbounds []outbound.Map
 		var renderedRules []outbound.Map
+		var renderedEndpoints []outbound.Map
 		if isSingbox {
 			renderedOutbounds = resp.SingBox.Outbounds
 			renderedRules = resp.SingBox.RoutingRules
+			renderedEndpoints = resp.SingBox.Endpoints
 		} else {
 			renderedOutbounds = resp.Xray.Outbounds
 			renderedRules = resp.Xray.RoutingRules
+		}
+		// sing-box 1.13+: wireguard 渲染为 endpoint，注入到 config.endpoints[]
+		if isSingbox && len(renderedEndpoints) > 0 {
+			var endpoints []interface{}
+			if existing, ok := config["endpoints"].([]interface{}); ok {
+				endpoints = existing
+			}
+			for _, ep := range renderedEndpoints {
+				tag, _ := ep["tag"].(string)
+				if tag != "" && seenTags[tag] {
+					continue // 去重：跳过已存在的 endpoint tag
+				}
+				endpoints = append(endpoints, ep)
+				seenTags[tag] = true
+			}
+			config["endpoints"] = endpoints
 		}
 		if len(renderedOutbounds) > 0 {
 			var outbounds []interface{}
@@ -249,27 +298,30 @@ func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config m
 				outbounds = existing
 			}
 			for _, ob := range renderedOutbounds {
+				tag, _ := ob["tag"].(string)
+				if tag != "" && seenTags[tag] {
+					continue // 去重：跳过已存在的 outbound tag
+				}
 				outbounds = append(outbounds, ob)
+				seenTags[tag] = true
 			}
 			config["outbounds"] = outbounds
 
-			// LB-3: 检测 load_balance outbound，设置 route.final 实现"全部流量走 WARP"。
-			// 当某节点绑定了 load_balance policy 时，把 sing-box route.final 设为
-			// load_balance 的 tag（如 warp-pool），使所有未匹配 routing rules 的流量
-			// 都走 WARP 负载均衡池。xray 侧无 load_balance，跳过（detectRequiredKernel
-			// 会把 load_balance 节点路由到 sing-box 内核）。
-			if isSingbox {
+			// LB-3: 检测 urltest outbound（由 load_balance policy 转译而来），
+			// 设置 route.final 实现"全部流量走 WARP"。
+			if isSingbox && !urltestFinalSet {
 				for _, ob := range renderedOutbounds {
-					if t, ok := ob["type"].(string); ok && t == "load_balance" {
+					if t, ok := ob["type"].(string); ok && t == "urltest" {
 						if tag, ok := ob["tag"].(string); ok && tag != "" {
-							routing, ok := config["routing"].(map[string]interface{})
+							route, ok := config["route"].(map[string]interface{})
 							if !ok {
-								routing = map[string]interface{}{}
-								config["routing"] = routing
+								route = map[string]interface{}{}
+								config["route"] = route
 							}
-							routing["final"] = tag
+							route["final"] = tag
+							urltestFinalSet = true
 							if s.logger != nil {
-								s.logger.Info("injectOutboundPolicies: route.final set to load_balance",
+								s.logger.Info("injectOutboundPolicies: route.final set to urltest",
 									"node_id", node.ID, "final_outbound", tag)
 							}
 							break
@@ -279,19 +331,19 @@ func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config m
 			}
 		}
 		if len(renderedRules) > 0 {
-			routing, ok := config["routing"].(map[string]interface{})
+			route, ok := config["route"].(map[string]interface{})
 			if !ok {
-				routing = map[string]interface{}{}
-				config["routing"] = routing
+				route = map[string]interface{}{}
+				config["route"] = route
 			}
 			var rules []interface{}
-			if existing, ok := routing["rules"].([]interface{}); ok {
+			if existing, ok := route["rules"].([]interface{}); ok {
 				rules = existing
 			}
 			for _, rule := range renderedRules {
 				rules = append(rules, rule)
 			}
-			routing["rules"] = rules
+			route["rules"] = rules
 		}
 		if s.logger != nil {
 			s.logger.Info("injectOutboundPolicies: outbound policies injected",

@@ -14,12 +14,13 @@ func RenderOutbounds(policies []*OutboundPolicy) (*ApplyAllResponse, error) {
 	if len(policies) == 0 {
 		return &ApplyAllResponse{
 			Xray:    RenderedRuntime{Outbounds: []Map{}, RoutingRules: []Map{}},
-			SingBox: RenderedRuntime{Outbounds: []Map{}, RoutingRules: []Map{}},
+			SingBox: RenderedRuntime{Outbounds: []Map{}, RoutingRules: []Map{}, Endpoints: []Map{}},
 		}, nil
 	}
 
 	xrayOutbounds := make([]Map, 0, len(policies))
 	singBoxOutbounds := make([]Map, 0, len(policies))
+	singBoxEndpoints := make([]Map, 0) // sing-box 1.13+: wireguard 渲染为 endpoint 而非 outbound
 	xrayRules := make([]Map, 0)
 	singBoxRules := make([]Map, 0)
 
@@ -43,9 +44,21 @@ func RenderOutbounds(policies []*OutboundPolicy) (*ApplyAllResponse, error) {
 		if xb, err := renderXrayOutbound(p); err == nil {
 			xrayOutbounds = append(xrayOutbounds, xb)
 		}
-		// sing-box outbound
-		if sb, err := renderSingBoxOutbound(p); err == nil {
-			singBoxOutbounds = append(singBoxOutbounds, sb)
+		// sing-box: warp 有 private_key 时渲染为 endpoint（sing-box 1.13+ 移除了 wireguard outbound），
+		// 其余类型渲染为 outbound。urltest/selector 可通过 tag 引用 endpoint。
+		isWarpEndpoint := false
+		if p.PolicyType == "warp" {
+			if pk, _ := p.ConfigJSON["private_key"].(string); pk != "" {
+				isWarpEndpoint = true
+				if ep, err := renderSingBoxWarpEndpoint(p); err == nil {
+					singBoxEndpoints = append(singBoxEndpoints, ep)
+				}
+			}
+		}
+		if !isWarpEndpoint {
+			if sb, err := renderSingBoxOutbound(p); err == nil {
+				singBoxOutbounds = append(singBoxOutbounds, sb)
+			}
 		}
 
 		// routing rules（同形式：policy 配置里的 routing_rules 直接转译）
@@ -125,6 +138,7 @@ func RenderOutbounds(policies []*OutboundPolicy) (*ApplyAllResponse, error) {
 		SingBox: RenderedRuntime{
 			Outbounds:    singBoxOutbounds,
 			RoutingRules: singBoxRules,
+			Endpoints:    singBoxEndpoints,
 		},
 	}, nil
 }
@@ -263,69 +277,32 @@ func renderSingBoxOutbound(p *OutboundPolicy) (Map, error) {
 		}
 		return out, nil
 	case "warp":
-		// P3-A: sing-box 原生 wireguard outbound（主路径）
-		// 性能优势：原生 wireguard 比 socks5 转发少一跳，延迟降低 5-15ms，吞吐提升 10-20%
-		// 如果 private_key 缺失，回退到 socks5（wireproxy / warp-cli 本地代理）
+		// sing-box 1.13+ 移除了 wireguard outbound，有 private_key 的 warp 由
+		// renderSingBoxWarpEndpoint 渲染为 endpoint。此处仅处理无 private_key 的
+		// socks5 回退（wireproxy / warp-cli 本地代理）。
 		//
 		// Fallback 端口选择：
 		//   - 默认 40000（warp-cli）
 		//   - 若 config_json.wireproxy=true，用 40001（wireproxy，~4MB 轻量侧车）
 		//   - config_json.port 可显式覆盖端口
-		privateKey, _ := p.ConfigJSON["private_key"].(string)
-		if privateKey == "" {
-			server, _ := p.ConfigJSON["server"].(string)
-			if server == "" {
-				server = "127.0.0.1"
+		server, _ := p.ConfigJSON["server"].(string)
+		if server == "" {
+			server = "127.0.0.1"
+		}
+		port := toInt(p.ConfigJSON["port"])
+		if port == 0 {
+			// wireproxy 模式：默认 40001；warp-cli 模式：默认 40000
+			if wireproxyMode, _ := p.ConfigJSON["wireproxy"].(bool); wireproxyMode {
+				port = 40001
+			} else {
+				port = 40000
 			}
-			port := toInt(p.ConfigJSON["port"])
-			if port == 0 {
-				// wireproxy 模式：默认 40001；warp-cli 模式：默认 40000
-				if wireproxyMode, _ := p.ConfigJSON["wireproxy"].(bool); wireproxyMode {
-					port = 40001
-				} else {
-					port = 40000
-				}
-			}
-			return Map{
-				"type":   "socks",
-				"tag":    tag,
-				"server": server,
-				"port":   port,
-			}, nil
-		}
-		// 原生 wireguard：解析 endpoint
-		serverAddr, _ := p.ConfigJSON["endpoint"].(string)
-		serverPort := 2408
-		if addr, port, ok := splitHostPort(serverAddr, 2408); ok {
-			serverAddr = addr
-			serverPort = port
-		}
-		if serverAddr == "" {
-			serverAddr = "162.159.192.1"
-		}
-		// Cloudflare WARP 公钥（well-known）
-		peerPublicKey, _ := p.ConfigJSON["public_key"].(string)
-		if peerPublicKey == "" {
-			peerPublicKey = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
-		}
-		// local_address: WARP 分配的本地地址
-		localAddr, _ := p.ConfigJSON["local_address"].(string)
-		if localAddr == "" {
-			localAddr = "172.16.0.2/32"
-		}
-		mtu := toInt(p.ConfigJSON["mtu"])
-		if mtu == 0 {
-			mtu = 1280
 		}
 		return Map{
-			"type":            "wireguard",
-			"tag":             tag,
-			"server":          serverAddr,
-			"server_port":     serverPort,
-			"local_address":   splitLocalAddresses(localAddr),
-			"private_key":     privateKey,
-			"peer_public_key": peerPublicKey,
-			"mtu":             mtu,
+			"type":   "socks",
+			"tag":    tag,
+			"server": server,
+			"port":   port,
 		}, nil
 	case "chain":
 		server, _ := p.ConfigJSON["server"].(string)
@@ -342,29 +319,95 @@ func renderSingBoxOutbound(p *OutboundPolicy) (Map, error) {
 		}
 		return out, nil
 	case "load_balance":
-		// load_balance 聚合多个 warp outbound，实现真负载均衡
-		// sing-box 1.10+ 支持 type=load_balance
-		// strategy: round_robin（默认）/ consistent_hash
+		// sing-box 无 load_balance outbound 类型。改用 urltest（延迟自动选优 + 故障切换）。
+		// urltest 会周期性测试所有子 outbound/endpoint 的延迟，自动选择最快的，
+		// 并在某个 WARP 实例不可用时自动切换到其他实例。
+		// 内部 policy_type 仍为 load_balance，renderer 负责转译为 sing-box 的 urltest。
 		outbounds, _ := p.ConfigJSON["outbounds"].([]interface{})
-		strategy, _ := p.ConfigJSON["strategy"].(string)
-		if strategy == "" {
-			strategy = "round_robin"
-		}
 		lb := Map{
-			"type":      "load_balance",
+			"type":      "urltest",
 			"tag":       tag,
 			"outbounds": outbounds,
-			"strategy":  strategy,
 		}
-		if checkURL, _ := p.ConfigJSON["check_url"].(string); checkURL != "" {
-			lb["url"] = checkURL
+		// 健康检查 URL（默认 gstatic 204）
+		checkURL, _ := p.ConfigJSON["check_url"].(string)
+		if checkURL == "" {
+			checkURL = "https://www.gstatic.com/generate_204"
 		}
-		if interval, _ := p.ConfigJSON["check_interval"].(string); interval != "" {
-			lb["interval"] = interval
+		lb["url"] = checkURL
+		// 检查间隔（默认 3 分钟）
+		interval, _ := p.ConfigJSON["check_interval"].(string)
+		if interval == "" {
+			interval = "3m"
 		}
+		lb["interval"] = interval
 		return lb, nil
 	}
 	return nil, ErrRenderFailed
+}
+
+// renderSingBoxWarpEndpoint 生成 sing-box wireguard endpoint 配置（sing-box 1.13+）。
+// sing-box 1.13.0 移除了 wireguard outbound，必须使用 endpoint 格式：
+//   - 放在 config.endpoints[] 而非 config.outbounds[]
+//   - 字段 address（非 local_address）
+//   - peer 信息放在 peers[] 数组中（address/port/public_key/allowed_ips）
+//
+// endpoint 的 tag 可被 urltest/selector outbound 引用，实现负载均衡/故障切换。
+func renderSingBoxWarpEndpoint(p *OutboundPolicy) (Map, error) {
+	tag := policyTag(p)
+	privateKey, _ := p.ConfigJSON["private_key"].(string)
+
+	// 解析 endpoint
+	serverAddr, _ := p.ConfigJSON["endpoint"].(string)
+	serverPort := 2408
+	if addr, port, ok := splitHostPort(serverAddr, 2408); ok {
+		serverAddr = addr
+		serverPort = port
+	}
+	if serverAddr == "" {
+		serverAddr = "162.159.192.1"
+	}
+
+	// Cloudflare WARP 公钥（well-known）
+	peerPublicKey, _ := p.ConfigJSON["public_key"].(string)
+	if peerPublicKey == "" {
+		peerPublicKey = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+	}
+
+	// address（原 local_address）：WARP 分配的本地地址
+	localAddr, _ := p.ConfigJSON["local_address"].(string)
+	if localAddr == "" {
+		localAddr = "172.16.0.2/32"
+	}
+	addresses := splitLocalAddresses(localAddr)
+
+	mtu := toInt(p.ConfigJSON["mtu"])
+	if mtu == 0 {
+		mtu = 1280
+	}
+
+	// allowed_ips: 检测到 IPv6 地址时启用双栈路由
+	allowedIPs := []string{"0.0.0.0/0"}
+	for _, addr := range addresses {
+		if strings.Contains(addr, ":") {
+			allowedIPs = []string{"0.0.0.0/0", "::/0"}
+			break
+		}
+	}
+
+	return Map{
+		"type":        "wireguard",
+		"tag":         tag,
+		"address":     addresses,
+		"private_key": privateKey,
+		"peers": []Map{{
+			"address":     serverAddr,
+			"port":        serverPort,
+			"public_key":  peerPublicKey,
+			"allowed_ips": allowedIPs,
+		}},
+		"mtu": mtu,
+	}, nil
 }
 
 // renderXrayRoutingRule 把 policy 的 routing_rule 转为 xray 规则
@@ -457,7 +500,7 @@ func splitHostPort(addr string, defaultPort int) (string, int, bool) {
 		return addr, defaultPort, true
 	}
 	host := addr[:idx]
-	port := defaultPort
+	port := 0
 	for _, c := range addr[idx+1:] {
 		if c < '0' || c > '9' {
 			return addr, defaultPort, false

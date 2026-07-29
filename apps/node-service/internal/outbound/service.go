@@ -23,6 +23,7 @@ type WarpProfileStore interface {
 	GetByCode(ctx context.Context, code string) (*WarpProfile, error)
 	List(ctx context.Context) ([]*WarpProfile, error)
 	ListByNode(ctx context.Context, nodeID uuid.UUID) ([]*WarpProfile, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // OutboundService 封装出站策略的业务逻辑
@@ -177,10 +178,22 @@ func validatePolicyConfig(policyType string, cfg Map) error {
 type WarpProfileService struct {
 	store  WarpProfileStore
 	logger *slog.Logger
+	pool   WarpPoolInterface
+}
+
+// WarpPoolInterface 抽象 warpreg.Pool，避免循环依赖
+type WarpPoolInterface interface {
+	RegisterForNode(ctx context.Context, nodeID uuid.UUID, nodeCode string) (*WarpProfile, error)
+	ImportExisting(ctx context.Context, nodeID uuid.UUID, nodeCode, privateKey, localAddress string) (*WarpProfile, error)
 }
 
 func NewWarpProfileService(store WarpProfileStore, logger *slog.Logger) *WarpProfileService {
 	return &WarpProfileService{store: store, logger: logger}
+}
+
+// SetPool 注入 warpreg.Pool（可选，启用注册功能时需要）
+func (s *WarpProfileService) SetPool(pool WarpPoolInterface) {
+	s.pool = pool
 }
 
 func (s *WarpProfileService) List(ctx context.Context) ([]*WarpProfile, error) {
@@ -242,4 +255,21 @@ func (s *WarpProfileService) Create(ctx context.Context, req *CreateWarpProfileR
 		return nil, err
 	}
 	return w, nil
+}
+
+// ListByNode 返回某节点的全部 WARP 档案
+func (s *WarpProfileService) ListByNode(ctx context.Context, nodeID uuid.UUID) ([]*WarpProfile, error) {
+	return s.store.ListByNode(ctx, nodeID)
+}
+
+// Delete 删除 WARP 档案
+func (s *WarpProfileService) Delete(ctx context.Context, id uuid.UUID) error {
+	w, err := s.store.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if w == nil {
+		return ErrWarpProfileNotFound
+	}
+	return s.store.Delete(ctx, id)
 }

@@ -191,4 +191,7 @@ type ApplyAllResponse struct {
 type RenderedRuntime struct {
 	Outbounds    []Map `json:"outbounds"`
 	RoutingRules []Map `json:"routing_rules"`
+	// Endpoints: sing-box 1.13+ wireguard endpoints (migrated from outbound to endpoint).
+	// Xray 不使用此字段（xray 无 wireguard endpoint 概念）。
+	Endpoints []Map `json:"endpoints,omitempty"`
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/airport-panel/node-service/internal/routing"
 	"github.com/airport-panel/node-service/internal/service"
 	"github.com/airport-panel/node-service/internal/upgrade"
+	"github.com/airport-panel/node-service/internal/warpreg"
 	"github.com/airport-panel/subscription/validator"
 )
 
@@ -512,6 +513,11 @@ func Run() {
 	outboundService := outbound.NewOutboundService(outboundPolicyRepo, logger)
 	warpProfileService := outbound.NewWarpProfileService(warpProfileRepo, logger)
 
+	// WARP 自动注册模块（warpreg）
+	warpRegistrar := warpreg.NewRegistrar(logger)
+	warpPool := warpreg.NewPool(warpRegistrar, &warpProfileStoreAdapter{repo: warpProfileRepo}, logger)
+	warpProfileService.SetPool(&warpPoolAdapter{pool: warpPool})
+
 	// P3-C: 注入 outbound 策略服务到 DeploymentService（WARP 出口接入）
 	deploymentService.SetOutboundService(outboundService)
 
@@ -574,7 +580,7 @@ func Run() {
 	adminTemplateHandler := protocol.NewAdminTemplateHandler(templateService)
 	adminPresetHandler := protocol.NewAdminPresetHandler(presetService)
 	adminOutboundHandler := outbound.NewAdminOutboundHandler(outboundService)
-	adminWarpHandler := outbound.NewAdminWarpHandler(warpProfileService)
+	adminWarpHandler := outbound.NewAdminWarpHandler(warpProfileService, outboundService, &nodeIDListerAdapter{nodeRepo: nodeRepo})
 	adminRoutingHandler := routing.NewAdminRoutingHandler(
 		ruleSetService, policyService, policyRuleService,
 		bindingService, lbPolicyService, outboundGroupService, routingRenderer,
@@ -947,4 +953,142 @@ func Run() {
 	}()
 
 	srv.Start()
+}
+
+// warpProfileStoreAdapter 适配 outbound.WarpProfileRepo → warpreg.WarpProfileStore
+type warpProfileStoreAdapter struct {
+	repo *outbound.WarpProfileRepo
+}
+
+func (a *warpProfileStoreAdapter) Create(ctx context.Context, w *warpreg.WarpProfileInput) error {
+	wp := &outbound.WarpProfile{
+		Code: w.Code, Name: w.Name, WarpMode: w.WarpMode,
+		ConfigJSON: outbound.Map{}, IsDefault: false, MTU: w.MTU,
+		Status: w.Status,
+	}
+	if w.Endpoint != "" {
+		wp.Endpoint = &w.Endpoint
+	}
+	if w.LicenseKey != "" {
+		wp.LicenseKey = &w.LicenseKey
+	}
+	if w.PrivateKey != "" {
+		wp.PrivateKey = &w.PrivateKey
+	}
+	if w.PublicKey != "" {
+		wp.PublicKey = &w.PublicKey
+	}
+	if w.LocalAddress != "" {
+		wp.LocalAddress = &w.LocalAddress
+	}
+	if w.DeviceID != "" {
+		wp.DeviceID = &w.DeviceID
+	}
+	if w.AccessToken != "" {
+		wp.AccessToken = &w.AccessToken
+	}
+	if w.ClientID != "" {
+		wp.ClientID = &w.ClientID
+	}
+	if w.IPv4Address != "" {
+		wp.IPv4Address = &w.IPv4Address
+	}
+	if w.IPv6Address != "" {
+		wp.IPv6Address = &w.IPv6Address
+	}
+	if w.NodeID != nil {
+		wp.NodeID = w.NodeID
+	}
+	if w.OutboundTag != "" {
+		wp.OutboundTag = &w.OutboundTag
+	}
+	return a.repo.Create(ctx, wp)
+}
+
+func (a *warpProfileStoreAdapter) GetByID(ctx context.Context, id uuid.UUID) (*warpreg.WarpProfileOutput, error) {
+	w, err := a.repo.GetByID(ctx, id)
+	if err != nil || w == nil {
+		return nil, err
+	}
+	return warpProfileToOutput(w), nil
+}
+
+func (a *warpProfileStoreAdapter) ListByNode(ctx context.Context, nodeID uuid.UUID) ([]*warpreg.WarpProfileOutput, error) {
+	items, err := a.repo.ListByNode(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*warpreg.WarpProfileOutput, len(items))
+	for i, w := range items {
+		result[i] = warpProfileToOutput(w)
+	}
+	return result, nil
+}
+
+func (a *warpProfileStoreAdapter) Update(ctx context.Context, w *warpreg.WarpProfileInput) error {
+	return nil // 暂未实现，注册流程不需要
+}
+
+func warpProfileToOutput(w *outbound.WarpProfile) *warpreg.WarpProfileOutput {
+	return &warpreg.WarpProfileOutput{
+		ID: w.ID, Code: w.Code, Name: w.Name, WarpMode: w.WarpMode,
+		Endpoint: w.Endpoint, LicenseKey: w.LicenseKey,
+		PrivateKey: w.PrivateKey, PublicKey: w.PublicKey,
+		LocalAddress: w.LocalAddress, MTU: w.MTU,
+		DeviceID: w.DeviceID, AccessToken: w.AccessToken, ClientID: w.ClientID,
+		IPv4Address: w.IPv4Address, IPv6Address: w.IPv6Address,
+		Status: w.Status, NodeID: w.NodeID, OutboundTag: w.OutboundTag,
+		LastRotatedAt: w.LastRotatedAt,
+	}
+}
+
+// warpPoolAdapter 适配 warpreg.Pool → outbound.WarpPoolInterface
+type warpPoolAdapter struct {
+	pool *warpreg.Pool
+}
+
+func (a *warpPoolAdapter) RegisterForNode(ctx context.Context, nodeID uuid.UUID, nodeCode string) (*outbound.WarpProfile, error) {
+	out, err := a.pool.RegisterForNode(ctx, nodeID, nodeCode)
+	if err != nil {
+		return nil, err
+	}
+	return warpOutputToProfile(out), nil
+}
+
+func (a *warpPoolAdapter) ImportExisting(ctx context.Context, nodeID uuid.UUID, nodeCode, privateKey, localAddress string) (*outbound.WarpProfile, error) {
+	out, err := a.pool.ImportExisting(ctx, nodeID, nodeCode, privateKey, localAddress)
+	if err != nil {
+		return nil, err
+	}
+	return warpOutputToProfile(out), nil
+}
+
+func warpOutputToProfile(out *warpreg.WarpProfileOutput) *outbound.WarpProfile {
+	return &outbound.WarpProfile{
+		ID: out.ID, Code: out.Code, Name: out.Name, WarpMode: out.WarpMode,
+		Endpoint: out.Endpoint, LicenseKey: out.LicenseKey,
+		PrivateKey: out.PrivateKey, PublicKey: out.PublicKey,
+		LocalAddress: out.LocalAddress, MTU: out.MTU,
+		DeviceID: out.DeviceID, AccessToken: out.AccessToken, ClientID: out.ClientID,
+		IPv4Address: out.IPv4Address, IPv6Address: out.IPv6Address,
+		Status: out.Status, NodeID: out.NodeID, OutboundTag: out.OutboundTag,
+	}
+}
+
+// nodeIDListerAdapter 适配 repo.NodeRepo → outbound.NodeIDLister
+// 用于解析 serverID → 启用节点 ID 列表（创建 outbound_policies 时按 node_id 存储）
+type nodeIDListerAdapter struct {
+	nodeRepo *repo.NodeRepo
+}
+
+func (a *nodeIDListerAdapter) ListNodeIDsByServer(ctx context.Context, serverID uuid.UUID) ([]uuid.UUID, error) {
+	nodes, err := a.nodeRepo.ListByServerID(ctx, serverID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, 0, len(nodes))
+	for _, n := range nodes {
+		ids = append(ids, n.ID)
+	}
+	return ids, nil
 }

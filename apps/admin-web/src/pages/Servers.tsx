@@ -23,6 +23,9 @@ import {
   Download,
   Upload,
   Check,
+  Globe,
+  Trash2,
+  Cloud,
 } from 'lucide-react'
 import {
   Card,
@@ -41,6 +44,10 @@ import {
   Skeleton,
   EmptyState,
   Switch,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -788,12 +795,555 @@ function RealtimeLogs({ serverId }: { serverId: string }) {
   )
 }
 
+// ===== WARP 管理类型定义 =====
+interface WarpProfile {
+  id: string
+  code: string
+  name: string
+  status: string
+  ipv4_address?: string
+  ipv6_address?: string
+  outbound_tag: string
+  device_id?: string
+  last_rotated_at?: string
+}
+
+interface WarpStatus {
+  profiles: WarpProfile[]
+  profile_count: number
+  load_balance: boolean
+  load_balance_strategy?: string
+  load_balance_outbounds?: string[]
+}
+
+function getWarpStatusBadgeClass(status: string): string {
+  switch (status) {
+    case 'active':
+      return 'bg-emerald-900/50 text-emerald-300 border-emerald-800/50'
+    case 'inactive':
+      return 'bg-zinc-800 text-zinc-400 border-zinc-700'
+    case 'error':
+      return 'bg-red-900/50 text-red-300 border-red-800/50'
+    case 'rotating':
+      return 'bg-amber-900/50 text-amber-300 border-amber-800/50'
+    default:
+      return 'bg-zinc-800 text-zinc-400 border-zinc-700'
+  }
+}
+
+function getWarpStatusText(status: string): string {
+  switch (status) {
+    case 'active': return '正常'
+    case 'inactive': return '未启用'
+    case 'error': return '异常'
+    case 'rotating': return '轮换中'
+    default: return '未知'
+  }
+}
+
+function getWarpStatusDot(status: string): string {
+  switch (status) {
+    case 'active': return 'bg-emerald-500'
+    case 'error': return 'bg-red-500'
+    case 'rotating': return 'bg-amber-500 animate-pulse'
+    default: return 'bg-zinc-500'
+  }
+}
+
+function formatRotatedAt(isoString?: string): string {
+  if (!isoString) return '—'
+  try {
+    const diff = Date.now() - new Date(isoString).getTime()
+    const seconds = Math.floor(diff / 1000)
+    if (seconds < 60) return `${seconds}秒前`
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}分钟前`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}小时前`
+    return `${Math.floor(hours / 24)}天前`
+  } catch {
+    return isoString
+  }
+}
+
+function WarpManagementPanel({ serverId }: { serverId: string }) {
+  const { toast } = useToast()
+  const [status, setStatus] = useState<WarpStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [actionLoading, setActionLoading] = useState(false)
+
+  // 对话框状态
+  const [registerOpen, setRegisterOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [lbOpen, setLbOpen] = useState(false)
+  const [registerCode, setRegisterCode] = useState('')
+  const [importForm, setImportForm] = useState({ private_key: '', local_address: '', code: '' })
+  const [lbStrategy, setLbStrategy] = useState('round_robin')
+
+  const fetchStatus = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await api.get<WarpStatus>(EP.SERVER_WARP_STATUS(serverId))
+      setStatus(data)
+      setError(null)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '加载 WARP 状态失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [serverId])
+
+  useEffect(() => {
+    fetchStatus()
+  }, [fetchStatus])
+
+  // 注册新账号（query param: code）
+  const handleRegister = async () => {
+    if (!registerCode.trim()) {
+      toast({ title: '请填写账号代号', variant: 'destructive' })
+      return
+    }
+    setActionLoading(true)
+    try {
+      await api.post(EP.SERVER_WARP_REGISTER(serverId), {}, { params: { code: registerCode.trim() } })
+      toast({ title: '注册成功', description: `WARP 账号 ${registerCode.trim()} 已注册`, variant: 'success' })
+      setRegisterOpen(false)
+      setRegisterCode('')
+      await fetchStatus()
+    } catch (e) {
+      toast({
+        title: '注册失败',
+        description: e instanceof ApiError ? e.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // 导入已有账号（body: private_key, local_address, code）
+  const handleImport = async () => {
+    if (!importForm.private_key.trim() || !importForm.code.trim()) {
+      toast({ title: '请填写必填字段（私钥、代号）', variant: 'destructive' })
+      return
+    }
+    setActionLoading(true)
+    try {
+      await api.post(EP.SERVER_WARP_IMPORT(serverId), {
+        private_key: importForm.private_key.trim(),
+        local_address: importForm.local_address.trim(),
+        code: importForm.code.trim(),
+      })
+      toast({ title: '导入成功', description: `WARP 账号 ${importForm.code.trim()} 已导入`, variant: 'success' })
+      setImportOpen(false)
+      setImportForm({ private_key: '', local_address: '', code: '' })
+      await fetchStatus()
+    } catch (e) {
+      toast({
+        title: '导入失败',
+        description: e instanceof ApiError ? e.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // 启用负载均衡（body: strategy）
+  const handleEnableLB = async () => {
+    setActionLoading(true)
+    try {
+      await api.post(EP.SERVER_WARP_ENABLE_LOAD_BALANCE(serverId), { strategy: lbStrategy })
+      toast({ title: '负载均衡已启用', description: `策略：${lbStrategy}`, variant: 'success' })
+      setLbOpen(false)
+      await fetchStatus()
+    } catch (e) {
+      toast({
+        title: '启用失败',
+        description: e instanceof ApiError ? e.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // 删除 WARP 账号
+  const handleDelete = async (profile: WarpProfile) => {
+    if (!window.confirm(`确定删除 WARP 账号「${profile.name || profile.code}」吗？此操作不可恢复。`)) return
+    try {
+      await api.delete(EP.WARP_PROFILE(profile.id))
+      toast({ title: '已删除', description: `WARP 账号 ${profile.name || profile.code} 已删除`, variant: 'success' })
+      await fetchStatus()
+    } catch (e) {
+      toast({
+        title: '删除失败',
+        description: e instanceof ApiError ? e.message : '未知错误',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const profiles = status?.profiles || []
+  const activeCount = profiles.filter(p => p.status === 'active').length
+
+  return (
+    <div className="space-y-4">
+      {/* 状态概览卡片 */}
+      <Card className="bg-zinc-900 border-zinc-800">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Cloud className="w-4 h-4 text-cyan-400" />
+              WARP 账号池
+              <Badge variant="secondary" className="bg-zinc-800 text-zinc-400 ml-2">
+                {profiles.length}个账号 · {activeCount}个正常
+              </Badge>
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchStatus}
+              disabled={loading}
+              className="text-indigo-400 hover:text-indigo-300 h-7 px-2"
+            >
+              <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} /> 刷新
+            </Button>
+          </div>
+          <CardDescription className="text-zinc-500">
+            通过 Cloudflare WARP 提供出口 IP，支持多账号负载均衡
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-800">
+              <div className="text-xs text-zinc-500 mb-1">账号总数</div>
+              <div className="text-lg font-bold text-zinc-100">{profiles.length}</div>
+            </div>
+            <div className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-800">
+              <div className="text-xs text-zinc-500 mb-1">活跃账号</div>
+              <div className="text-lg font-bold text-emerald-400">{activeCount}</div>
+            </div>
+            <div className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-800">
+              <div className="text-xs text-zinc-500 mb-1">负载均衡</div>
+              <div className="flex items-center gap-2">
+                {status?.load_balance ? (
+                  <>
+                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-sm font-semibold text-emerald-400">已启用</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-block w-2 h-2 rounded-full bg-zinc-600" />
+                    <span className="text-sm font-semibold text-zinc-500">未启用</span>
+                  </>
+                )}
+              </div>
+              {status?.load_balance_strategy && (
+                <div className="text-xs text-zinc-500 mt-1">策略: {status.load_balance_strategy}</div>
+              )}
+            </div>
+            <div className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-800">
+              <div className="text-xs text-zinc-500 mb-1">负载出站</div>
+              <div className="text-sm font-mono text-cyan-400 truncate">
+                {status?.load_balance_outbounds?.length
+                  ? status.load_balance_outbounds.join(', ')
+                  : '—'}
+              </div>
+            </div>
+          </div>
+
+          {/* 操作按钮 */}
+          <div className="flex flex-wrap gap-2 mt-4">
+            <Button
+              size="sm"
+              className="bg-indigo-600 hover:bg-indigo-500"
+              onClick={() => setRegisterOpen(true)}
+              disabled={actionLoading}
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              注册新账号
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              onClick={() => setImportOpen(true)}
+              disabled={actionLoading}
+            >
+              <Upload className="w-4 h-4 mr-1" />
+              导入已有账号
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className={`border-zinc-700 hover:bg-zinc-800 ${
+                status?.load_balance
+                  ? 'text-zinc-500 cursor-not-allowed'
+                  : 'text-emerald-400 hover:text-emerald-300'
+              }`}
+              onClick={() => setLbOpen(true)}
+              disabled={actionLoading || status?.load_balance}
+            >
+              <Zap className="w-4 h-4 mr-1" />
+              {status?.load_balance ? '负载均衡已启用' : '启用负载均衡'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 账号列表 */}
+      <Card className="bg-zinc-900 border-zinc-800 overflow-hidden">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Globe className="w-4 h-4 text-cyan-400" />
+            WARP 账号列表
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="p-4 space-y-3">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-14 w-full bg-zinc-800 rounded-lg" />
+              ))}
+            </div>
+          ) : error ? (
+            <div className="p-8 text-center">
+              <XCircle className="w-10 h-10 mx-auto mb-3 text-red-500/50" />
+              <p className="text-sm text-red-400">{error}</p>
+              <Button variant="ghost" size="sm" onClick={fetchStatus} className="mt-3 text-indigo-400">
+                <RefreshCw className="w-3 h-3 mr-1" /> 重试
+              </Button>
+            </div>
+          ) : profiles.length === 0 ? (
+            <div className="p-8 text-center">
+              <EmptyState
+                title="暂无 WARP 账号"
+                description="注册新账号或导入已有账号开始使用 WARP 出口"
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-zinc-800 hover:bg-transparent">
+                    <TableHead className="text-zinc-400 text-xs font-medium">代号</TableHead>
+                    <TableHead className="text-zinc-400 text-xs font-medium">出站标签</TableHead>
+                    <TableHead className="text-zinc-400 text-xs font-medium">状态</TableHead>
+                    <TableHead className="text-zinc-400 text-xs font-medium">出口 IPv4</TableHead>
+                    <TableHead className="text-zinc-400 text-xs font-medium hidden md:table-cell">出口 IPv6</TableHead>
+                    <TableHead className="text-zinc-400 text-xs font-medium hidden lg:table-cell">设备ID</TableHead>
+                    <TableHead className="text-zinc-400 text-xs font-medium hidden lg:table-cell">最后轮换</TableHead>
+                    <TableHead className="text-zinc-400 text-xs font-medium w-16">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {profiles.map((profile) => (
+                    <TableRow key={profile.id} className="border-zinc-800 hover:bg-zinc-800/50">
+                      <TableCell className="py-3">
+                        <div className="font-medium text-zinc-200 text-sm">{profile.name || profile.code}</div>
+                        <div className="text-xs text-zinc-500 font-mono">{profile.code}</div>
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <Badge variant="outline" className="bg-cyan-900/30 text-cyan-300 border-cyan-800/50 text-xs font-mono">
+                          {profile.outbound_tag}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <Badge variant="outline" className={`border ${getWarpStatusBadgeClass(profile.status)}`}>
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${getWarpStatusDot(profile.status)}`} />
+                          {getWarpStatusText(profile.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <span className="text-sm text-zinc-300 font-mono">
+                          {profile.ipv4_address || '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-3 hidden md:table-cell">
+                        <span className="text-xs text-zinc-400 font-mono break-all">
+                          {profile.ipv6_address || '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-3 hidden lg:table-cell">
+                        <span className="text-xs text-zinc-500 font-mono">
+                          {profile.device_id ? profile.device_id.slice(0, 8) + '…' : '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-3 hidden lg:table-cell text-sm text-zinc-400">
+                        {formatRotatedAt(profile.last_rotated_at)}
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-zinc-500 hover:text-red-400 hover:bg-red-950/30"
+                          onClick={() => handleDelete(profile)}
+                          title="删除"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 注册新账号对话框 */}
+      <Dialog open={registerOpen} onOpenChange={setRegisterOpen}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-100">注册新 WARP 账号</DialogTitle>
+            <DialogDescription className="text-zinc-500">
+              向 Cloudflare 注册一个新的 WARP 账号并加入账号池
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="warp-reg-code" className="text-zinc-300">账号代号 *</Label>
+              <Input
+                id="warp-reg-code"
+                value={registerCode}
+                onChange={(e) => setRegisterCode(e.target.value)}
+                placeholder="如 warp-1"
+                className="bg-zinc-950 border-zinc-700 text-zinc-100"
+              />
+              <p className="text-xs text-zinc-500">
+                账号代号将作为出站标签使用，建议使用 warp-1 / warp-2 / warp-3
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRegisterOpen(false)} disabled={actionLoading}>
+              取消
+            </Button>
+            <Button
+              onClick={handleRegister}
+              disabled={actionLoading}
+              className="bg-indigo-600 hover:bg-indigo-500"
+            >
+              {actionLoading ? '注册中...' : '注册账号'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 导入已有账号对话框 */}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-100">导入已有 WARP 账号</DialogTitle>
+            <DialogDescription className="text-zinc-500">
+              通过已有的私钥导入 WARP 账号
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="warp-imp-code" className="text-zinc-300">账号代号 *</Label>
+              <Input
+                id="warp-imp-code"
+                value={importForm.code}
+                onChange={(e) => setImportForm((prev) => ({ ...prev, code: e.target.value }))}
+                placeholder="如 warp-2"
+                className="bg-zinc-950 border-zinc-700 text-zinc-100"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="warp-imp-key" className="text-zinc-300">私钥 (Private Key) *</Label>
+              <Input
+                id="warp-imp-key"
+                value={importForm.private_key}
+                onChange={(e) => setImportForm((prev) => ({ ...prev, private_key: e.target.value }))}
+                placeholder="WARP 私钥"
+                className="bg-zinc-950 border-zinc-700 text-zinc-100 font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="warp-imp-addr" className="text-zinc-300">本地地址 (Local Address)</Label>
+              <Input
+                id="warp-imp-addr"
+                value={importForm.local_address}
+                onChange={(e) => setImportForm((prev) => ({ ...prev, local_address: e.target.value }))}
+                placeholder="如 172.16.0.2/32"
+                className="bg-zinc-950 border-zinc-700 text-zinc-100 font-mono text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={actionLoading}>
+              取消
+            </Button>
+            <Button
+              onClick={handleImport}
+              disabled={actionLoading}
+              className="bg-indigo-600 hover:bg-indigo-500"
+            >
+              {actionLoading ? '导入中...' : '导入账号'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 启用负载均衡对话框 */}
+      <Dialog open={lbOpen} onOpenChange={setLbOpen}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-100">启用 WARP 负载均衡</DialogTitle>
+            <DialogDescription className="text-zinc-500">
+              将账号池中的多个 WARP 出站组合为负载均衡组
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="warp-lb-strategy" className="text-zinc-300">负载均衡策略</Label>
+              <Select
+                id="warp-lb-strategy"
+                value={lbStrategy}
+                onChange={(e) => setLbStrategy(e.target.value)}
+                className="bg-zinc-950 border-zinc-700 text-zinc-100"
+              >
+                <option value="round_robin">round_robin（轮询）</option>
+                <option value="random">random（随机）</option>
+                <option value="least_conn">least_conn（最少连接）</option>
+              </Select>
+              <p className="text-xs text-zinc-500">
+                当前账号池: {profiles.map(p => p.outbound_tag).join(', ') || '无'}
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLbOpen(false)} disabled={actionLoading}>
+              取消
+            </Button>
+            <Button
+              onClick={handleEnableLB}
+              disabled={actionLoading}
+              className="bg-emerald-600 hover:bg-emerald-500"
+            >
+              {actionLoading ? '启用中...' : '启用负载均衡'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
 function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: () => void }) {
   const navigate = useNavigate()
   const { toast } = useToast()
   const [showToken, setShowToken] = useState(false)
   const [copied, setCopied] = useState<'token' | 'install' | null>(null)
   const [currentServer, setCurrentServer] = useState(server)
+  const [tab, setTab] = useState<'overview' | 'warp'>('overview')
+
+  // WARP 管理基于服务器维度（warp_profiles.node_id 引用 servers 表）
+  const warpServerId = currentServer.id
 
   useEffect(() => {
     setCurrentServer(server)
@@ -942,7 +1492,26 @@ function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: ()
         </CardContent>
       </Card>
 
-      <RealtimeMetricsPanel server={currentServer} />
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'overview' | 'warp')}>
+        <TabsList className="bg-zinc-900 border border-zinc-800">
+          <TabsTrigger
+            value="overview"
+            className={tab === 'overview' ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}
+          >
+            <Activity className="w-3.5 h-3.5 mr-1.5" />
+            概览
+          </TabsTrigger>
+          <TabsTrigger
+            value="warp"
+            className={tab === 'warp' ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}
+          >
+            <Cloud className="w-3.5 h-3.5 mr-1.5" />
+            WARP 管理
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-6 mt-4">
+          <RealtimeMetricsPanel server={currentServer} />
 
       <Card className="bg-zinc-900 border-zinc-800">
         <CardHeader className="pb-3">
@@ -1260,6 +1829,23 @@ function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: ()
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="warp" className="mt-4">
+          {warpServerId ? (
+            <WarpManagementPanel serverId={warpServerId} />
+          ) : (
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardContent className="p-8 text-center">
+                <EmptyState
+                  title="服务器信息异常"
+                  description="无法获取服务器 ID，请刷新页面重试"
+                />
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

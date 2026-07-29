@@ -185,3 +185,9 @@ func (r *WarpProfileRepo) ListByNode(ctx context.Context, nodeID uuid.UUID) ([]*
 	}
 	return items, rows.Err()
 }
+
+// Delete 删除 WARP 档案
+func (r *WarpProfileRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM warp_profiles WHERE id = $1`, id)
+	return err
+}

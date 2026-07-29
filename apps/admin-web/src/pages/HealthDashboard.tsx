@@ -109,8 +109,8 @@ export default function HealthDashboardPage() {
     setLoading(true)
     setError(null)
     try {
-      const resp = await api.get(EP.SERVER_HEALTH_DASHBOARD)
-      setData(resp.data)
+      const resp = await api.get<any>(EP.SERVER_HEALTH_DASHBOARD)
+      setData(resp.data ?? resp)
     } catch (err: any) {
       setError(err?.message || '获取健康数据失败')
     } finally {
