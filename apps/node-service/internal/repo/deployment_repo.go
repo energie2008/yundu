@@ -337,6 +337,37 @@ func (r *DeploymentRepo) CountTargetsByPhase(ctx context.Context, batchID uuid.U
 	return count, err
 }
 
+// ListActiveTargetsByNodeAndVersion 查询指定节点+目标版本处于非终态（非 success/failed/rolled_back/paused）的部署目标。
+// 用于 agent 回执时反查并推进对应的 deployment_target，避免批次因回执走的是 runtime 维度而永久卡在 running。
+// 排除 paused：paused 属于后续 phase，应由 AdvancePhase 逐 phase 推进，而非被当前回执直接激活。
+func (r *DeploymentRepo) ListActiveTargetsByNodeAndVersion(ctx context.Context, nodeID, versionID uuid.UUID) ([]*model.DeploymentTarget, error) {
+	query := `
+		SELECT id, deployment_batch_id, target_type, target_id, target_version_id, previous_version_id, phase_no,
+			status, precheck_result, apply_result, rollback_result, started_at, finished_at, created_at
+		FROM deployment_targets
+		WHERE target_id = $1 AND target_version_id = $2
+		  AND status IN ('pending', 'precheck', 'applying', 'verifying')
+		ORDER BY created_at DESC`
+	rows, err := r.pool.Query(ctx, query, nodeID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var targets []*model.DeploymentTarget
+	for rows.Next() {
+		t := &model.DeploymentTarget{}
+		if err := rows.Scan(
+			&t.ID, &t.DeploymentBatchID, &t.TargetType, &t.TargetID, &t.TargetVersionID, &t.PreviousVersionID, &t.PhaseNo,
+			&t.Status, &t.PrecheckResult, &t.ApplyResult, &t.RollbackResult, &t.StartedAt, &t.FinishedAt, &t.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		targets = append(targets, t)
+	}
+	return targets, rows.Err()
+}
+
 // ===== P3-1: 加密 Payload Manifest 持久化 =====
 
 // CreatePayload 将加密的 PayloadManifest 写入 config_payloads 表。

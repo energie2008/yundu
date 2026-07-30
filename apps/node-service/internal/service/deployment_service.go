@@ -3249,6 +3249,47 @@ func (s *DeploymentService) ReportConfigResult(ctx context.Context, runtimeID uu
 					errMsg = message
 				}
 				s.markNodesDispatchStatus(ctx, nodes, status, versionNo, errMsg)
+
+				// 部署批次推进：agent 回执走的是 runtime 维度，
+				// 而 deployment_targets 以节点维度记录。若不在此反查并推进对应 target，
+				// 批次会因 target 永远停留在 pending/applying 而卡在 running（前端一直显示"部署中"）。
+				targetStatus := model.TargetStatusSuccess
+				if !success {
+					targetStatus = model.TargetStatusFailed
+				}
+				for _, n := range nodes {
+					if n == nil {
+						continue
+					}
+					activeTargets, tErr := s.deploymentRepo.ListActiveTargetsByNodeAndVersion(ctx, n.ID, cv.ID)
+					if tErr != nil {
+						s.logger.Warn("ReportConfigResult: list active targets failed",
+							"node_id", n.ID, "version_id", cv.ID, "error", tErr)
+						continue
+					}
+					for _, t := range activeTargets {
+						updReq := &model.UpdateDeploymentResultRequest{
+							TargetID: t.ID,
+							Status:   targetStatus,
+							ApplyResult: map[string]interface{}{
+								"reported_via": "config_result",
+								"version_no":   versionNo,
+								"message":      message,
+							},
+						}
+						if !success {
+							m := message
+							updReq.ErrorMessage = &m
+						}
+						if uErr := s.UpdateDeploymentResult(ctx, t.ID, updReq); uErr != nil {
+							s.logger.Warn("ReportConfigResult: advance deployment target failed",
+								"target_id", t.ID, "batch_id", t.DeploymentBatchID, "error", uErr)
+						} else {
+							s.logger.Info("ReportConfigResult: deployment target advanced",
+								"target_id", t.ID, "batch_id", t.DeploymentBatchID, "status", targetStatus)
+						}
+					}
+				}
 			}
 		}
 	}

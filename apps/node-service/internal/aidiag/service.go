@@ -117,8 +117,8 @@ func (s *Service) runDiagnosis(ctx context.Context, sessionID uuid.UUID) {
 	// 4. 调 LLM 分析
 	if s.llm == nil {
 		session.Status = "failed"
-		session.RootCauseCategory = "unknown"
-		session.RootCauseDescription = "LLM client not configured"
+		session.RootCauseCategory = "config"
+		session.RootCauseDescription = "AI 诊断尚未配置大模型（LLM）。请在 node-service 环境变量中配置任一大模型：DeepSeek（LLM_DEEPSEEK_API_KEY，可选 LLM_DEEPSEEK_BASE_URL/LLM_DEEPSEEK_MODEL）或 GLM（LLM_GLM_API_KEY，可选 LLM_GLM_BASE_URL/LLM_GLM_MODEL），配置后重启服务再试。诊断所需的日志与指标已采集，仅缺少大模型分析环节。"
 		now := time.Now()
 		session.CompletedAt = &now
 		d := int(time.Since(start).Milliseconds())

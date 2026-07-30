@@ -160,6 +160,88 @@ func (a *doctorNodeFetcherAdapter) ListEnabledNodeIDs(ctx context.Context) ([]uu
 	return ids, nil
 }
 
+// experienceMetricsProviderAdapter 实现 experience.MetricsProvider。
+// 从 nodes 表（心跳/在线）与最新 node_doctor_reports（真实网络探测的延迟/连通性）
+// 汇总每个启用节点的原始体验指标，供评分引擎计算。此前该 provider 被注入 nil，
+// 导致 CalculateAll 直接 return、节点体验页无任何数据。
+type experienceMetricsProviderAdapter struct {
+	nodeRepo   *repo.NodeRepo
+	reportRepo *doctor.DoctorReportRepo
+}
+
+func (a *experienceMetricsProviderAdapter) CollectAllNodeMetrics(ctx context.Context) ([]experience.NodeMetrics, error) {
+	enabled := true
+	var result []experience.NodeMetrics
+	page, pageSize := 1, 200
+	for {
+		nodes, total, err := a.nodeRepo.List(ctx, page, pageSize, "", "", "", "", &enabled)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range nodes {
+			if n == nil {
+				continue
+			}
+			m := experience.NodeMetrics{NodeID: n.ID}
+
+			// 心跳成功率：最近 3 分钟内有心跳视为在线（1.0），否则 0.0
+			hb := 0.0
+			if n.LastSeenAt != nil && time.Since(*n.LastSeenAt) <= 3*time.Minute {
+				hb = 1.0
+			}
+			m.HeartbeatSuccessRate = &hb
+
+			// 从最新体检报告提取真实探测数据
+			if a.reportRepo != nil {
+				if rep, rErr := a.reportRepo.GetLatestByNodeID(ctx, n.ID); rErr == nil && rep != nil {
+					// 延迟：取 latency/rtt 检查项的 avg_ms
+					for _, c := range rep.Checks {
+						if c.CheckCode == "latency" || c.CheckCode == "rtt" {
+							if c.Details != nil {
+								if v, ok := toFloat(c.Details["avg_ms"]); ok {
+									lat := v
+									m.P50LatencyMs = &lat
+									m.P95LatencyMs = &lat
+									m.P99LatencyMs = &lat
+								}
+							}
+						}
+					}
+					// 连通性成功率：pass /（pass+warn+fail）
+					totalChecks := rep.SummaryOK + rep.SummaryWarn + rep.SummaryFail
+					if totalChecks > 0 {
+						rate := float64(rep.SummaryOK) / float64(totalChecks)
+						m.ConnectionSuccessRate = &rate
+					}
+				}
+			}
+
+			result = append(result, m)
+		}
+		if page*pageSize >= total {
+			break
+		}
+		page++
+	}
+	return result, nil
+}
+
+// toFloat 将 interface{}（JSONB 反序列化可能是 float64/int64/json.Number）转为 float64
+func toFloat(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
 // doctorFixDispatcherAdapter 实现 doctor.FixDispatcher
 // 解析 nodeID → runtimeID → serverID 后调用 aidiag.ActionDispatcher 真实下发。
 type doctorFixDispatcherAdapter struct {
@@ -492,7 +574,9 @@ func Run() {
 
 	// ===== 节点体验评分（Phase 8 新增）=====
 	experienceRepo := experience.NewRepo(pool)
-	experienceService := experience.NewService(experienceRepo, nil, logger)
+	// 注入真实指标提供者：从 nodes 心跳 + 最新体检报告（真实探测）汇总节点原始指标
+	experienceProvider := &experienceMetricsProviderAdapter{nodeRepo: nodeRepo, reportRepo: doctorReportRepo}
+	experienceService := experience.NewService(experienceRepo, experienceProvider, logger)
 	// 启动定时计算循环（5 分钟一次）
 	go experienceService.StartCalculationLoop(ctx)
 
