@@ -200,6 +200,28 @@ func (h *SubscriptionHandler) RegisterPublicRoutes(r *gin.Engine) {
 	r.GET("/sub/:token/info", h.GetSubscriptionInfo)
 }
 
+// PreviewSubscription 管理员订阅预览：GET /admin/subscription/preview?client=<clientKey>
+// 用真实可见节点 + 合成预览凭证渲染指定客户端的真实订阅内容，返回渲染文本、内容类型与节点数。
+func (h *SubscriptionHandler) PreviewSubscription(c *gin.Context) {
+	clientParam := c.Query("client")
+	if clientParam == "" {
+		clientParam = "clash-meta"
+	}
+	clientType := client.NormalizeClientType(clientParam)
+
+	result, err := h.subService.PreviewSubscription(c.Request.Context(), clientType)
+	if err != nil {
+		server.InternalError(c, "failed to render preview: "+err.Error())
+		return
+	}
+	server.OK(c, gin.H{
+		"client":       clientParam,
+		"content":      result.Content,
+		"content_type": result.ContentType,
+		"node_count":   result.NodeCount,
+	})
+}
+
 func (h *SubscriptionHandler) ListTokens(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))

@@ -266,6 +266,7 @@ func Run() {
 		adminAPI.Any("/subscription/templates/*action", subscriptionProxy)
 		adminAPI.Any("/subscription/access-overview", subscriptionProxy)
 		adminAPI.Any("/subscription/access-logs", subscriptionProxy)
+		adminAPI.Any("/subscription/preview", subscriptionProxy)
 		adminAPI.Any("/subscribe/templates", subscriptionProxy)
 		adminAPI.Any("/subscribe/templates/*action", subscriptionProxy)
 		adminAPI.Any("/subscribe", subscriptionProxy)

@@ -503,7 +503,12 @@ func (s *SubscriptionService) injectUserCredentials(ctx context.Context, nodes [
 		return
 	}
 	userUUID := user.UUID
+	s.injectCredentialsWithUUID(nodes, userUUID)
+}
 
+// injectCredentialsWithUUID 用给定 UUID 为每个节点注入凭证（协议规则同 XBoard 模型）。
+// 供正式订阅（真实用户 UUID）与管理员预览（合成示例 UUID）共用。
+func (s *SubscriptionService) injectCredentialsWithUUID(nodes []*model.NodeInfo, userUUID string) {
 	// 为每个节点注入凭证
 	for _, n := range nodes {
 		if n == nil {
@@ -549,6 +554,43 @@ func (s *SubscriptionService) injectUserCredentials(ctx context.Context, nodes [
 			}
 		}
 	}
+}
+
+// previewUUID 是管理员预览使用的固定示例凭证，避免暴露真实用户 UUID。
+const previewUUID = "00000000-0000-4000-8000-0000000000ff"
+
+// PreviewSubscription 管理员订阅预览：使用真实可见节点 + 合成预览凭证，
+// 渲染指定客户端类型的真实订阅内容。不写缓存、不记访问日志、不需要真实用户 token。
+func (s *SubscriptionService) PreviewSubscription(ctx context.Context, clientType model.ClientType) (*SubscriptionResult, error) {
+	ct := client.NormalizeClientType(string(clientType))
+
+	nodes, err := s.nodeProvider.ListVisibleNodes(ctx, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.injectCredentialsWithUUID(nodes, previewUUID)
+
+	r := renderer.NewSubscriptionRenderer(ct)
+	if s.templateSvc != nil {
+		rName := client.ClientToRenderer(ct)
+		switch rName {
+		case "clash", "clashmeta", "singbox":
+			if tmpl, terr := s.templateSvc.GetTemplate(ctx, rName); terr == nil && tmpl != "" {
+				r.WithBaseTemplate(tmpl)
+			}
+		}
+	}
+
+	rc := &model.RenderContext{Token: "preview"}
+	content, renderErr := r.Render(nodes, rc)
+	if renderErr != nil {
+		return nil, renderErr
+	}
+	return &SubscriptionResult{
+		Content:     content,
+		ContentType: r.ContentType(),
+		NodeCount:   len(nodes),
+	}, nil
 }
 
 func clientTypeToCompatCode(ct model.ClientType) string {

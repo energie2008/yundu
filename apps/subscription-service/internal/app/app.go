@@ -128,6 +128,7 @@ func Run() {
 			admin.DELETE("/subscription/short-codes/:code", subscriptionHandler.RevokeShortCode)
 			admin.GET("/subscription/access-overview", subscriptionHandler.GetAccessOverview)
 			admin.GET("/subscription/access-logs", subscriptionHandler.GetAccessLogs)
+			admin.GET("/subscription/preview", subscriptionHandler.PreviewSubscription)
 
 			// 订阅模板管理（按名称索引，对齐 Xboard subscribe_template helper）
 			adminTemplateHandler.RegisterAdminRoutes(admin)
@@ -222,3 +223,4 @@ func Run() {
 
 	srv.Start()
 }
+
