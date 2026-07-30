@@ -8,6 +8,7 @@ import { EP, formatBytes, getTrafficPercentage, getDaysRemaining, formatDate,
 import { useAuth } from '../lib/auth';
 import type {
   SubscriptionResponse, SubscriptionTokenResponse, NodeInfo, TrafficLog,
+  AnnouncementItem, PaginatedResponse,
 } from '../lib/endpoints';
 import { useState, useMemo } from 'react';
 
@@ -59,6 +60,152 @@ function QRCodeDisplay({ url }: { url: string }) {
   return (
     <div className="flex justify-center py-4">
       <img src={qrSrc} alt="订阅二维码" width={200} height={200} style={{ borderRadius: 8 }} />
+    </div>
+  );
+}
+
+// Announcement banner: dismissible cards shown at top of dashboard.
+// Uses server announcements (pinned-first) and remembers dismissed ids locally.
+const DISMISSED_KEY = 'yundu-dismissed-announcements';
+
+function readDismissed(): string[] {
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDismissed(ids: string[]) {
+  try {
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify(ids.slice(-100)));
+  } catch {}
+}
+
+const ANNOUNCEMENT_TONE: Record<string, { bg: string; color: string; icon: string }> = {
+  notice: { bg: 'rgba(217,119,87,0.1)', color: '#d97757', icon: '📢' },
+  update: { bg: 'rgba(95,141,78,0.1)', color: '#5f8d4e', icon: '✨' },
+  maintenance: { bg: 'rgba(232,163,61,0.12)', color: '#e8a33d', icon: '🛠️' },
+  alert: { bg: 'rgba(205,92,77,0.1)', color: '#cd5c4d', icon: '⚠️' },
+};
+
+function AnnouncementBanner() {
+  const navigate = useNavigate();
+  const [dismissed, setDismissed] = useState<string[]>(() => readDismissed());
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const { data } = useQuery<PaginatedResponse<AnnouncementItem> | AnnouncementItem[]>({
+    queryKey: ['dashboard-announcements'],
+    queryFn: () => api.get(EP.ANNOUNCEMENTS, { params: { page: 1, page_size: 20 } }),
+    retry: 1,
+    staleTime: 60_000,
+  });
+
+  const markRead = useMutation({
+    mutationFn: (id: string) => api.post(EP.ANNOUNCEMENT_READ(id)),
+  });
+
+  const visible = useMemo(() => {
+    const raw = Array.isArray(data) ? data : data?.items || [];
+    return [...raw]
+      .filter((a) => !dismissed.includes(a.id))
+      .sort((a, b) => {
+        if (!!b.is_pinned !== !!a.is_pinned) return (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0);
+        return (
+          new Date(b.published_at || b.created_at || '').getTime() -
+          new Date(a.published_at || a.created_at || '').getTime()
+        );
+      })
+      .slice(0, 3);
+  }, [data, dismissed]);
+
+  const dismiss = (item: AnnouncementItem) => {
+    const next = [...dismissed, item.id];
+    setDismissed(next);
+    writeDismissed(next);
+    if (!item.is_read) markRead.mutate(item.id);
+  };
+
+  if (visible.length === 0) return null;
+
+  return (
+    <div className="mb-5 space-y-3">
+      {visible.map((item) => {
+        const tone = ANNOUNCEMENT_TONE[(item as any).type] || ANNOUNCEMENT_TONE.notice;
+        const expanded = expandedId === item.id;
+        const body = item.content || item.summary || '';
+        return (
+          <div
+            key={item.id}
+            className="xboard-card p-4 flex items-start gap-3 animate-slide-up"
+            style={{ borderLeft: `3px solid ${tone.color}` }}
+          >
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-lg flex-shrink-0"
+              style={{ background: tone.bg }}
+            >
+              {tone.icon}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                {item.is_pinned && (
+                  <span
+                    className="text-[11px] px-1.5 py-0.5 rounded font-medium"
+                    style={{ background: 'rgba(232,163,61,0.12)', color: '#e8a33d' }}
+                  >
+                    置顶
+                  </span>
+                )}
+                <span className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>
+                  {item.title}
+                </span>
+                {item.published_at && (
+                  <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                    {formatDate(item.published_at)}
+                  </span>
+                )}
+              </div>
+              {body && (
+                <p
+                  className={`text-sm mt-1 leading-relaxed ${expanded ? 'whitespace-pre-line' : 'line-clamp-2'}`}
+                  style={{ color: 'var(--secondary-foreground)' }}
+                >
+                  {body}
+                </p>
+              )}
+              <div className="flex items-center gap-4 mt-2">
+                {body && body.length > 60 && (
+                  <button
+                    onClick={() => setExpandedId(expanded ? null : item.id)}
+                    className="text-xs font-medium transition-colors"
+                    style={{ color: tone.color }}
+                  >
+                    {expanded ? '收起' : '展开全文'}
+                  </button>
+                )}
+                <button
+                  onClick={() => navigate('/dashboard/announcements')}
+                  className="text-xs transition-colors"
+                  style={{ color: 'var(--muted-foreground)' }}
+                >
+                  查看全部公告 ›
+                </button>
+              </div>
+            </div>
+            <button
+              onClick={() => dismiss(item)}
+              aria-label="关闭公告"
+              className="text-lg leading-none flex-shrink-0 transition-colors px-1"
+              style={{ color: 'var(--muted-foreground)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--foreground)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--muted-foreground)')}
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -300,6 +447,9 @@ export function Dashboard() {
           欢迎回来，这是您的账户概览。
         </p>
       </div>
+
+      {/* Announcement banner - dismissible cards */}
+      <AnnouncementBanner />
 
       {/* Two column layout: My Subscription + Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 mb-5">
