@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Server,
@@ -515,17 +515,54 @@ function MetricCard({ icon: Icon, label, value, subValue, color, progress }: {
 function RealtimeMetricsPanel({ server }: { server: ServerDetail }) {
   const [metrics, setMetrics] = useState(server.metrics)
   const [timeRange, setTimeRange] = useState<'1m' | '5m' | '15m' | '1h'>('5m')
-  const [cpuData] = useState<number[]>(generateSparklineData())
-  const [memData] = useState<number[]>(generateSparklineData())
-  const [netInData] = useState<number[]>(generateSparklineData())
-  const [netOutData] = useState<number[]>(generateSparklineData())
+  const [cpuData, setCpuData] = useState<number[]>(generateSparklineData())
+  const [memData, setMemData] = useState<number[]>(generateSparklineData())
+  const [netInData, setNetInData] = useState<number[]>(generateSparklineData())
+  const [netOutData, setNetOutData] = useState<number[]>(generateSparklineData())
+  const [live, setLive] = useState(false)
 
   useEffect(() => {
     setMetrics(server.metrics)
   }, [server.metrics])
 
-  // TODO: 当 agent 上报 metrics 后，通过 SSE/WebSocket 推送真实数据更新 cpuData/memData/netInData/netOutData
-  // 当前仅展示 server.metrics（来自后端），不再用 Math.random() 模拟
+  // 时间范围决定轮询间隔（30 个采样点覆盖对应时间窗）：1m→2s / 5m→10s / 15m→30s / 1h→120s
+  const pollIntervalMs = useMemo(() => {
+    switch (timeRange) {
+      case '1m': return 2000
+      case '5m': return 10000
+      case '15m': return 30000
+      case '1h': return 120000
+      default: return 10000
+    }
+  }, [timeRange])
+
+  // 定时拉取服务器详情，把真实指标追加进滚动数组，实现真正的实时走势图
+  useEffect(() => {
+    if (server.status === 'offline') {
+      setLive(false)
+      return
+    }
+    let cancelled = false
+    const push = (arr: number[], v: number) => [...arr.slice(1), Number.isFinite(v) ? v : 0]
+    const tick = async () => {
+      try {
+        const data = await api.get<ServerResponseItem>(EP.SERVER_DETAIL(server.id))
+        if (cancelled) return
+        const m = mapServerResponse(data).metrics
+        setMetrics(m)
+        setCpuData((d) => push(d, m.cpuPercent))
+        setMemData((d) => push(d, m.memoryPercent))
+        setNetInData((d) => push(d, m.networkInKBps))
+        setNetOutData((d) => push(d, m.networkOutKBps))
+        setLive(true)
+      } catch {
+        if (!cancelled) setLive(false)
+      }
+    }
+    tick()
+    const timer = setInterval(tick, pollIntervalMs)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [server.id, server.status, pollIntervalMs])
 
   const renderLine = (data: number[], color: string) => {
     const max = Math.max(...data, 1)
@@ -580,10 +617,17 @@ function RealtimeMetricsPanel({ server }: { server: ServerDetail }) {
           <CardTitle className="text-base flex items-center gap-2">
             <Activity className="w-4 h-4 text-emerald-400" />
             实时指标
-            <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              实时更新中
-            </span>
+            {live ? (
+              <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                实时更新中
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-xs font-normal text-zinc-500">
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                连接中…
+              </span>
+            )}
           </CardTitle>
           <div className="flex gap-1">
             {(['1m', '5m', '15m', '1h'] as const).map((range) => (
@@ -900,6 +944,7 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
   // 节点 WARP 分配状态
   const [nodesStatus, setNodesStatus] = useState<NodeWarpStatus[]>([])
   const [nodesLoading, setNodesLoading] = useState(false)
+  const [nodesError, setNodesError] = useState<string | null>(null)
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set())
 
   const fetchStatus = useCallback(async () => {
@@ -921,15 +966,17 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
     try {
       const data = await api.get<{ nodes: NodeWarpStatus[]; total: number }>(EP.SERVER_WARP_NODES_STATUS(serverId))
       setNodesStatus(data.nodes || [])
+      setNodesError(null)
       // 同步已选中状态：warp_enabled=true 的节点默认勾选
       const selected = new Set<string>()
       for (const n of data.nodes || []) {
         if (n.warp_enabled) selected.add(n.id)
       }
       setSelectedNodeIds(selected)
-    } catch {
-      // 节点状态加载失败不阻断主流程
+    } catch (e) {
+      // 展示错误原因（404 通常表示节点服务版本过旧未含 WARP 分配接口，需升级 node-service）
       setNodesStatus([])
+      setNodesError(e instanceof ApiError ? e.message : '加载节点 WARP 分配状态失败')
     } finally {
       setNodesLoading(false)
     }
@@ -1391,6 +1438,13 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
               {[1, 2, 3].map((i) => (
                 <Skeleton key={i} className="h-12 w-full bg-zinc-800 rounded-lg" />
               ))}
+            </div>
+          ) : nodesError ? (
+            <div className="p-6 text-center">
+              <EmptyState
+                title="节点分配状态加载失败"
+                description={`${nodesError}。若为 404，通常是节点服务(node-service)版本过旧未包含 WARP 分配接口，请升级 node-service 后重试。`}
+              />
             </div>
           ) : nodesStatus.length === 0 ? (
             <div className="p-6 text-center">
@@ -1930,6 +1984,7 @@ function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: ()
                     variant="ghost"
                     size="sm"
                     className="flex-1 h-8 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700"
+                    onClick={() => document.getElementById('server-realtime-logs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                   >
                     <FileText className="w-3 h-3 mr-1" />
                     查看日志
@@ -2113,7 +2168,9 @@ function ServerDetailView({ server, onBack }: { server: ServerDetail; onBack: ()
         </Card>
       </div>
 
-      <RealtimeLogs serverId={currentServer.id} />
+      <div id="server-realtime-logs">
+        <RealtimeLogs serverId={currentServer.id} />
+      </div>
 
       <Card className="bg-zinc-900 border-zinc-800">
         <CardHeader className="pb-3">

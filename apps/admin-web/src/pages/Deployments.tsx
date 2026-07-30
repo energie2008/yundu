@@ -124,7 +124,7 @@ function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending
   const label = STATUS_LABELS[status] || status
   const Icon = cfg.icon
-  const isSpinning = status === 'deploying'
+  const isSpinning = ['running', 'precheck', 'applying', 'verifying', 'rolling_back'].includes(status)
   return (
     <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded ${cfg.bg} ${cfg.text}`}>
       <Icon className={`w-3 h-3 ${isSpinning ? 'animate-spin' : ''}`} />

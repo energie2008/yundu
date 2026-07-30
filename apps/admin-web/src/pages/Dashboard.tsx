@@ -13,6 +13,7 @@ import {
   Ticket,
   ArrowRight,
   BarChart3,
+  DollarSign,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, Badge, Button, Skeleton } from '@airport/ui'
 import { api } from '@/lib/api'
@@ -25,6 +26,15 @@ interface TrafficOverview {
   today_total: number
   online_count: number
   top_nodes?: Array<{ node_id: string; node_name: string; upload: number; download: number; total: number }>
+}
+
+interface RevenueStats {
+  today_revenue_usdt: number
+  today_revenue_cny: number
+  today_order_count: number
+  month_revenue_usdt: number
+  month_revenue_cny: number
+  month_order_count: number
 }
 
 interface AdminNode {
@@ -128,6 +138,7 @@ export default function Dashboard() {
   const [traffic, setTraffic] = useState<TrafficOverview | null>(null)
   const [nodes, setNodes] = useState<AdminNode[]>([])
   const [plans, setPlans] = useState<AdminPlan[]>([])
+  const [revenue, setRevenue] = useState<RevenueStats | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -135,14 +146,16 @@ export default function Dashboard() {
       try {
         setLoading(true)
         setError(null)
-        const [trafficData, nodesResp, plansResp] = await Promise.all([
+        const [trafficData, nodesResp, plansResp, revenueResp] = await Promise.all([
           api.get<TrafficOverview>(EP.TRAFFIC_OVERVIEW).catch(() => null),
           api.get<{ items: AdminNode[]; total: number }>(EP.NODES, { params: { page: 1, page_size: 200 } }).catch(() => ({ items: [], total: 0 })),
           api.get<{ items: AdminPlan[]; total: number }>(EP.PLANS, { params: { page: 1, page_size: 200 } }).catch(() => ({ items: [], total: 0 })),
+          api.get<RevenueStats>(EP.ORDER_STATS).catch(() => null),
         ])
         setTraffic(trafficData)
         setNodes(nodesResp?.items || [])
         setPlans(plansResp?.items || [])
+        setRevenue(revenueResp)
       } catch (e: any) {
         console.error('Dashboard load error:', e)
         setError(e.message || '加载失败')
@@ -187,6 +200,46 @@ export default function Dashboard() {
           <p className="text-sm" style={{ color: 'var(--accent-rose-foreground)' }}>{error}</p>
         </div>
       )}
+
+      {/* 营收概览（参考 xboard 仪表盘） */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard
+          title="当日营业收入"
+          value={`¥${(revenue?.today_revenue_cny || 0).toFixed(2)}`}
+          icon={DollarSign}
+          iconBg="var(--accent-emerald)"
+          iconColor="text-emerald-400"
+          subValue={`$${(revenue?.today_revenue_usdt || 0).toFixed(2)} USDT`}
+          loading={loading}
+        />
+        <KpiCard
+          title="当日成交订单"
+          value={revenue?.today_order_count || 0}
+          icon={CreditCard}
+          iconBg="var(--accent-sky)"
+          iconColor="text-sky-400"
+          subValue="笔已支付"
+          loading={loading}
+        />
+        <KpiCard
+          title="当月营业收入"
+          value={`¥${(revenue?.month_revenue_cny || 0).toFixed(2)}`}
+          icon={BarChart3}
+          iconBg="var(--accent)"
+          iconColor="text-indigo-400"
+          subValue={`$${(revenue?.month_revenue_usdt || 0).toFixed(2)} USDT`}
+          loading={loading}
+        />
+        <KpiCard
+          title="当月成交订单"
+          value={revenue?.month_order_count || 0}
+          icon={Ticket}
+          iconBg="var(--accent-pink)"
+          iconColor="text-pink-400"
+          subValue="笔已支付"
+          loading={loading}
+        />
+      </div>
 
       {/* KPI Row 1 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

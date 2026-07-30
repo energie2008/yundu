@@ -78,6 +78,7 @@ export const EP = {
 
   // ===== Orders (identity-service) =====
   ORDERS: '/admin/orders',
+  ORDER_STATS: '/admin/orders/stats',
   ORDER_DETAIL: (id: string) => `/admin/orders/${id}`,
   ORDER_CANCEL: (id: string) => `/admin/orders/${id}/cancel`,
   ORDER_MARK_PAID: (id: string) => `/admin/orders/${id}/mark-paid`,
@@ -130,6 +131,8 @@ export const EP = {
   // ===== 订阅模板 - 按 code+target_client 索引 (subscription-service) =====
   SUB_TEMPLATES: '/admin/subscription/templates',
   SUB_TEMPLATE_SET_DEFAULT: (id: string) => `/admin/subscription/templates/${id}/default`,
+  // 订阅预览：用真实可见节点渲染指定客户端的真实订阅内容
+  SUB_PREVIEW: (client: string) => `/admin/subscription/preview?client=${encodeURIComponent(client)}`,
 
   // ===== 订阅模板 - 按名称索引 (subscription-service, admin_template_handler) =====
   // 对齐 Xboard subscribe_template('clash') helper，渲染器按内核名取模板内容

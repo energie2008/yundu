@@ -67,6 +67,18 @@ const CLIENT_LABELS: Record<ClientKey, string> = {
 const TEMPLATE_CLIENT_KEYS = ['clash', 'clashmeta', 'singbox', 'shadowrocket', 'v2rayn', 'surge', 'quantumultx', 'loon'] as const
 type TemplateClientKey = typeof TEMPLATE_CLIENT_KEYS[number]
 
+// CLIENT_PARAM 将前端 ClientKey 映射为后端订阅预览接口可识别的 client 参数
+const CLIENT_PARAM: Record<ClientKey, string> = {
+  clash: 'clash',
+  clashmeta: 'clash-meta',
+  singbox: 'sing-box',
+  shadowrocket: 'shadowrocket',
+  surge: 'surge',
+  quantumultx: 'quantumultx',
+  loon: 'loon',
+  v2rayn: 'v2rayn',
+}
+
 const TEMPLATE_CLIENT_OPTIONS: { value: TemplateClientKey; label: string }[] = [
   { value: 'clash', label: 'Clash' },
   { value: 'clashmeta', label: 'Clash Meta' },
@@ -515,6 +527,10 @@ function PreviewTab() {
   const [showQR, setShowQR] = useState(false)
   const [activeTab, setActiveTab] = useState<ClientKey>('clashmeta')
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [previewContent, setPreviewContent] = useState<Record<string, string>>({})
+  const [previewNodeCount, setPreviewNodeCount] = useState<number>(0)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -552,12 +568,33 @@ function PreviewTab() {
     loadNodes()
   }, [toast])
 
+  // 拉取当前客户端的真实渲染内容（后端用真实可见节点 + 合成预览凭证生成）
+  useEffect(() => {
+    let cancelled = false
+    const fetchPreview = async () => {
+      setPreviewLoading(true)
+      setPreviewError(null)
+      try {
+        const resp = await api.get<{ content: string; node_count: number }>(EP.SUB_PREVIEW(CLIENT_PARAM[activeTab]))
+        if (cancelled) return
+        setPreviewContent((prev) => ({ ...prev, [activeTab]: resp.content || '' }))
+        setPreviewNodeCount(resp.node_count || 0)
+      } catch (err) {
+        if (cancelled) return
+        setPreviewError(err instanceof ApiError ? err.message : '生成预览失败')
+      } finally {
+        if (!cancelled) setPreviewLoading(false)
+      }
+    }
+    fetchPreview()
+    return () => { cancelled = true }
+  }, [activeTab])
+
   const node = nodes.find((n) => n.id === selectedNodeId) || nodes[0]
-  const configs = (node && PREVIEW_CONFIGS[node.proto]) || PREVIEW_CONFIGS['VLESS+Reality+WS']
-  const fieldChecks = node ? buildFieldChecks(node, configs) : []
+  const activeContent = previewContent[activeTab] || ''
 
   const handleCopy = async (clientKey: ClientKey) => {
-    const code = configs[clientKey]?.code || ''
+    const code = previewContent[clientKey] || ''
     try {
       await navigator.clipboard.writeText(code)
       setCopiedKey(clientKey)
@@ -670,18 +707,12 @@ function PreviewTab() {
             {CLIENT_KEYS.map((key) => (
               <TabsTrigger key={key} value={key} className="text-xs">
                 {CLIENT_LABELS[key]}
-                {configs[key]?.passed ? (
-                  <Check className="w-3 h-3 ml-1.5 text-emerald-400" />
-                ) : (
-                  <X className="w-3 h-3 ml-1.5 text-red-400" />
-                )}
               </TabsTrigger>
             ))}
           </TabsList>
 
           {CLIENT_KEYS.map((key) => {
-            const cfg = configs[key]
-            if (!cfg) return null
+            const content = key === activeTab ? activeContent : (previewContent[key] || '')
             return (
               <TabsContent key={key} value={key}>
                 <Card className="bg-zinc-900 border-zinc-800">
@@ -689,13 +720,20 @@ function PreviewTab() {
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-zinc-200">{CLIENT_LABELS[key]}</span>
-                        {statusBadge(cfg.passed)}
+                        {previewLoading && key === activeTab ? (
+                          <Badge variant="secondary" className="text-xs bg-zinc-800 text-zinc-300">生成中…</Badge>
+                        ) : previewError && key === activeTab ? (
+                          <Badge variant="destructive" className="text-xs"><X className="w-3 h-3 mr-1" />{previewError}</Badge>
+                        ) : (
+                          <Badge variant="success" className="text-xs"><Check className="w-3 h-3 mr-1" />实时渲染 · {previewNodeCount} 节点</Badge>
+                        )}
                       </div>
                       <Button
                         variant="outline"
                         size="sm"
                         className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
                         onClick={() => handleCopy(key)}
+                        disabled={!content}
                       >
                         {copiedKey === key ? (
                           <Check className="w-3.5 h-3.5 mr-1.5 text-emerald-400" />
@@ -706,24 +744,14 @@ function PreviewTab() {
                       </Button>
                     </div>
                     <pre className="bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-xs font-mono text-zinc-300 overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap break-all">
-                      {cfg.code}
+                      {content || (key === activeTab && previewLoading ? '正在生成预览…' : '(暂无内容，可能没有可见节点)')}
                     </pre>
-                    {showURI && key !== 'clash' && key !== 'clashmeta' && key !== 'singbox' && (
-                      <div className="mt-3">
-                        <div className="text-xs text-zinc-500 mb-1">URI 链接</div>
-                        <div className="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3 text-xs font-mono text-zinc-400 break-all">
-                          {key === 'shadowrocket' || key === 'v2rayn'
-                            ? cfg.code
-                            : '(该客户端不使用URI格式，配置已在上方展示)'}
-                        </div>
-                      </div>
-                    )}
                     {showQR && (
                       <div className="mt-3 flex items-center justify-center p-6 bg-zinc-950/60 border border-zinc-800 rounded-lg">
                         <div className="text-center text-zinc-500">
                           <QrCode className="w-16 h-16 mx-auto mb-2 opacity-40" />
                           <p className="text-xs">QR码预览（{CLIENT_LABELS[key]}）</p>
-                          <p className="text-[10px] text-zinc-600 mt-1">模拟数据：实际渲染时将生成二维码图片</p>
+                          <p className="text-[10px] text-zinc-600 mt-1">扫码导入需在客户端侧生成，此处仅展示占位</p>
                         </div>
                       </div>
                     )}
@@ -776,67 +804,6 @@ function PreviewTab() {
             <span className="flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-amber-400" />部分支持/版本要求</span>
             <span className="flex items-center gap-1"><X className="w-3 h-3 text-red-400" />不支持</span>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-zinc-900 border-zinc-800">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Eye className="w-4 h-4 text-indigo-400" />
-            字段一致性检查
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {fieldChecks.length === 0 ? (
-            <div className="py-8 text-center text-zinc-500">
-              <Eye className="w-10 h-10 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">暂无字段校验数据</p>
-              <p className="text-xs mt-1">请先选择节点</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-zinc-800 hover:bg-transparent">
-                    <TableHead className="text-zinc-400 text-xs font-medium w-40">字段</TableHead>
-                    <TableHead className="text-zinc-400 text-xs font-medium w-48">期望值</TableHead>
-                    {CLIENT_KEYS.map((key) => (
-                      <TableHead key={key} className="text-zinc-400 text-xs font-medium text-center whitespace-nowrap">
-                        {CLIENT_LABELS[key]}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {fieldChecks.map((check) => {
-                    const hasMismatch = Object.values(check.values).some((v) => !v.match)
-                    return (
-                      <TableRow key={check.field} className="border-zinc-800 hover:bg-zinc-800/30">
-                        <TableCell className="py-3 text-sm text-zinc-300 font-medium">
-                          {check.label}
-                          {hasMismatch && <AlertTriangle className="w-3 h-3 text-red-400 inline ml-1.5" />}
-                        </TableCell>
-                        <TableCell className="py-3 text-xs font-mono text-zinc-400">{check.expected}</TableCell>
-                        {CLIENT_KEYS.map((key) => {
-                          const v = check.values[key]
-                          return (
-                            <TableCell
-                              key={key}
-                              className={`py-3 text-center text-xs font-mono ${
-                                v.match ? 'text-emerald-400' : 'text-red-400 bg-red-950/20'
-                              }`}
-                            >
-                              {v.match ? <Check className="w-3.5 h-3.5 mx-auto" /> : v.value}
-                            </TableCell>
-                          )
-                        })}
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
         </CardContent>
       </Card>
 
