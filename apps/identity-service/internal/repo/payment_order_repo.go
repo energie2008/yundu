@@ -254,3 +254,38 @@ func (r *PaymentOrderRepo) MarkExpired(ctx context.Context, before time.Time) (i
 func itoa(i int) string {
 	return strconv.Itoa(i)
 }
+
+// RevenueStats 营收统计（参考 xboard 仪表盘）：基于 status='paid' 且 paid_at 落在对应时间窗内的订单，
+// 按 final_amount（USDT）与 amount_cny（CNY）聚合，并统计当日/当月成交订单数。
+type RevenueStats struct {
+	TodayRevenueUSDT float64 `json:"today_revenue_usdt"`
+	TodayRevenueCNY  float64 `json:"today_revenue_cny"`
+	TodayOrderCount  int     `json:"today_order_count"`
+	MonthRevenueUSDT float64 `json:"month_revenue_usdt"`
+	MonthRevenueCNY  float64 `json:"month_revenue_cny"`
+	MonthOrderCount  int     `json:"month_order_count"`
+}
+
+// GetRevenueStats 汇总当日与当月的营收。时间窗以数据库本地时区的 date_trunc 计算，
+// 避免应用侧时区换算偏差；未成交（非 paid）订单不计入。
+func (r *PaymentOrderRepo) GetRevenueStats(ctx context.Context) (*RevenueStats, error) {
+	query := `
+		SELECT
+			COALESCE(SUM(COALESCE(final_amount, amount_usdt)) FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8   AS today_usdt,
+			COALESCE(SUM(COALESCE(amount_cny, 0))            FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8   AS today_cny,
+			COUNT(*)                                         FILTER (WHERE paid_at >= date_trunc('day', now()))               AS today_count,
+			COALESCE(SUM(COALESCE(final_amount, amount_usdt)) FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_usdt,
+			COALESCE(SUM(COALESCE(amount_cny, 0))            FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_cny,
+			COUNT(*)                                         FILTER (WHERE paid_at >= date_trunc('month', now()))             AS month_count
+		FROM payment_orders
+		WHERE status = 'paid' AND paid_at IS NOT NULL`
+	s := &RevenueStats{}
+	err := r.pool.QueryRow(ctx, query).Scan(
+		&s.TodayRevenueUSDT, &s.TodayRevenueCNY, &s.TodayOrderCount,
+		&s.MonthRevenueUSDT, &s.MonthRevenueCNY, &s.MonthOrderCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}

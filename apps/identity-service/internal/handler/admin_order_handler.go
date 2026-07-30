@@ -26,10 +26,22 @@ func (h *AdminOrderHandler) RegisterRoutesWithGroup(rg *gin.RouterGroup) {
 	orders := rg.Group("/orders")
 	{
 		orders.GET("", h.AdminListOrders)
+		orders.GET("/stats", h.AdminOrderStats)
 		orders.GET("/:id", h.AdminGetOrder)
 		orders.POST("/:id/cancel", h.AdminCancelOrder)
 		orders.POST("/:id/mark-paid", h.AdminMarkPaid)
 	}
+}
+
+// AdminOrderStats 订单营收统计（当日/当月营业收入，参考 xboard 仪表盘）
+// GET /admin/orders/stats
+func (h *AdminOrderHandler) AdminOrderStats(c *gin.Context) {
+	stats, err := h.orderRepo.GetRevenueStats(c.Request.Context())
+	if err != nil {
+		server.InternalError(c, "failed to get revenue stats")
+		return
+	}
+	server.OK(c, stats)
 }
 
 // AdminListQuery 管理员订单列表查询参数
