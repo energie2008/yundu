@@ -50,7 +50,7 @@ function OrderRow({ order }: { order: OrderResponse }) {
       style={{ borderColor: 'var(--border)' }}
       onMouseEnter={e => (e.currentTarget.style.background = 'var(--muted)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-      onClick={() => navigate(`/orders/${order.id}`)}
+      onClick={() => navigate(`/dashboard/orders/${order.id}`)}
     >
       <td className="px-5 py-4">
         <span className="text-sm font-mono" style={{ color: 'var(--foreground)' }}>{order.order_no}</span>
@@ -76,7 +76,7 @@ function OrderRow({ order }: { order: OrderResponse }) {
           <button
             onClick={(e) => {
               e.stopPropagation()
-              navigate(`/orders/${order.id}`)
+              navigate(`/dashboard/orders/${order.id}`)
             }}
             className="text-sm font-medium transition-colors flex items-center gap-1"
             style={{ color: 'var(--primary)' }}
@@ -90,7 +90,7 @@ function OrderRow({ order }: { order: OrderResponse }) {
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                navigate(`/orders/${order.id}`)
+                navigate(`/dashboard/orders/${order.id}`)
               }}
               className="text-sm font-medium text-white px-3 py-1 rounded-lg transition-opacity flex items-center gap-1"
               style={{ background: 'var(--primary)' }}
@@ -179,7 +179,7 @@ export default function Orders() {
           <FileText className="w-14 h-14 mx-auto mb-4" style={{ color: 'var(--muted-foreground)' }} />
           <p className="mb-5" style={{ color: 'var(--muted-foreground)' }}>暂无订单</p>
           <Button
-            onClick={() => navigate('/plans')}
+            onClick={() => navigate('/dashboard/plans')}
             className="text-white px-6 h-10 rounded-lg border-0 shadow-sm"
             style={{ background: 'var(--primary)' }}
           >
