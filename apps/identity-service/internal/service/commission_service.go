@@ -64,24 +64,9 @@ func (s *CommissionService) SetLogger(logger *slog.Logger) {
 }
 
 func (s *CommissionService) RequestWithdraw(ctx context.Context, userID uuid.UUID, req *model.CreateWithdrawRequest) (*model.Withdraw, error) {
-	withdrawEnabled := true
-	minWithdraw := 10.0
-
-	enableSetting, err := s.settingRepo.GetByGroupKey(ctx, "invite", "commission.withdraw_enable")
-	if err == nil && enableSetting != nil {
-		var enabled bool
-		if json.Unmarshal(enableSetting.ValueJSON, &enabled) == nil {
-			withdrawEnabled = enabled
-		}
-	}
-
-	minSetting, err := s.settingRepo.GetByGroupKey(ctx, "invite", "commission.min_withdraw")
-	if err == nil && minSetting != nil {
-		var minVal float64
-		if json.Unmarshal(minSetting.ValueJSON, &minVal) == nil {
-			minWithdraw = minVal
-		}
-	}
+	cfg := s.loadCommissionSettings(ctx)
+	withdrawEnabled := cfg.WithdrawEnable
+	minWithdraw := cfg.MinWithdraw
 
 	if !withdrawEnabled {
 		return nil, ErrWithdrawDisabled
@@ -140,33 +125,10 @@ func (s *CommissionService) GetSummary(ctx context.Context, userID uuid.UUID) (*
 		return nil, ErrUserNotFound
 	}
 
-	withdrawEnabled := true
-	minWithdraw := 10.0
-	rate := 100
-
-	enableSetting, err := s.settingRepo.GetByGroupKey(ctx, "invite", "commission.withdraw_enable")
-	if err == nil && enableSetting != nil {
-		var enabled bool
-		if json.Unmarshal(enableSetting.ValueJSON, &enabled) == nil {
-			withdrawEnabled = enabled
-		}
-	}
-
-	minSetting, err := s.settingRepo.GetByGroupKey(ctx, "invite", "commission.min_withdraw")
-	if err == nil && minSetting != nil {
-		var minVal float64
-		if json.Unmarshal(minSetting.ValueJSON, &minVal) == nil {
-			minWithdraw = minVal
-		}
-	}
-
-	rateSetting, err := s.settingRepo.GetByGroupKey(ctx, "invite", "commission.rate")
-	if err == nil && rateSetting != nil {
-		var rateVal int
-		if json.Unmarshal(rateSetting.ValueJSON, &rateVal) == nil {
-			rate = rateVal
-		}
-	}
+	cfg := s.loadCommissionSettings(ctx)
+	withdrawEnabled := cfg.WithdrawEnable
+	minWithdraw := cfg.MinWithdraw
+	rate := int(math.Round(cfg.Rate))
 
 	invitedCount, err := s.userRepo.CountInvitedByUser(ctx, userID)
 	if err != nil {
@@ -257,23 +219,48 @@ func (s *CommissionService) ProcessWithdrawal(ctx context.Context, withdrawID uu
 	return w, nil
 }
 
-// commissionConfirmConfig 仅读取佣金结算所需的配置子集。
-type commissionConfirmConfig struct {
-	Enabled     bool `json:"enabled"`
-	ConfirmDays int  `json:"confirm_days"`
+// commissionSettings 是 invite/commission 系统设置 JSON 对象的完整映射。
+// 后端所有读取佣金配置的地方都应通过 loadCommissionSettings 统一读取，
+// 避免历史上用 "commission.rate" 这类点号拼接 key（数据库里并不存在，
+// 会导致读不到而回退默认值，例如佣金比例被错误显示为 100%）。
+type commissionSettings struct {
+	Enabled        bool    `json:"enabled"`
+	Rate           float64 `json:"rate"`
+	FirstPullback  float64 `json:"first_pullback"`
+	RegisterReward float64 `json:"register_reward"`
+	InviteReward   float64 `json:"invite_reward"`
+	ConfirmDays    int     `json:"confirm_days"`
+	WithdrawEnable bool    `json:"withdraw_enable"`
+	MinWithdraw    float64 `json:"min_withdraw"`
 }
 
-// loadConfirmDays 读取佣金确认天数，读不到时返回默认值 3 天。
-func (s *CommissionService) loadConfirmDays() (bool, int) {
-	cfg := commissionConfirmConfig{Enabled: true, ConfirmDays: 3}
-	data, err := s.settingRepo.GetJSON(context.Background(), "invite", "commission")
+// loadCommissionSettings 读取 invite/commission 配置对象；
+// 读不到或解析失败时返回与种子数据一致的默认值。
+func (s *CommissionService) loadCommissionSettings(ctx context.Context) commissionSettings {
+	cfg := commissionSettings{
+		Enabled:        true,
+		Rate:           20,
+		ConfirmDays:    3,
+		WithdrawEnable: false,
+		MinWithdraw:    10,
+	}
+	data, err := s.settingRepo.GetJSON(ctx, "invite", "commission")
 	if err != nil {
-		return cfg.Enabled, cfg.ConfirmDays
+		return cfg
 	}
 	_ = json.Unmarshal(data, &cfg)
 	if cfg.ConfirmDays <= 0 {
 		cfg.ConfirmDays = 3
 	}
+	if cfg.Rate < 0 {
+		cfg.Rate = 0
+	}
+	return cfg
+}
+
+// loadConfirmDays 读取佣金是否启用与确认天数（结算定时任务使用）。
+func (s *CommissionService) loadConfirmDays() (bool, int) {
+	cfg := s.loadCommissionSettings(context.Background())
 	return cfg.Enabled, cfg.ConfirmDays
 }
 

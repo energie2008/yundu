@@ -151,6 +151,15 @@ export default function Settings() {
     setSettings((prev) => ({ ...prev, [key]: value }))
   }
 
+  // 邀请返利配置存储为 invite/commission 单个 JSON 对象，整体读写
+  const commission = (settings.commission as Record<string, unknown> | undefined) || {}
+  const updateCommission = (key: string, value: unknown) => {
+    setSettings((prev) => ({
+      ...prev,
+      commission: { ...((prev.commission as Record<string, unknown>) || {}), [key]: value },
+    }))
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -158,7 +167,7 @@ export default function Settings() {
       for (const [key, value] of Object.entries(settings)) {
         const original = originalSettings.current[key]
         if (JSON.stringify(value) !== JSON.stringify(original)) {
-          const group = keyToGroup.current[key] || 'site'
+          const group = keyToGroup.current[key] || (key === 'commission' ? 'invite' : 'site')
           updates.push(api.put(EP.SYSTEM_SETTING_UPDATE(group, key), { value }))
         }
       }
@@ -283,6 +292,7 @@ export default function Settings() {
                 { v: 'subscribe', l: '订阅设置' },
                 { v: 'email', l: '邮件设置' },
                 { v: 'payment', l: '支付设置' },
+                { v: 'invite', l: '邀请返利' },
                 { v: 'other', l: '其他设置' },
               ].map((t) => (
                 <TabsTrigger
@@ -294,6 +304,77 @@ export default function Settings() {
                 </TabsTrigger>
               ))}
             </TabsList>
+
+            <TabsContent value="invite" className="p-4 space-y-5 mt-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-zinc-300 text-sm">启用邀请返利</Label>
+                  <p className="text-xs text-zinc-500 mt-1">关闭后不再产生新的佣金记录</p>
+                </div>
+                <Switch
+                  checked={toBool(commission.enabled)}
+                  onChange={(e) => updateCommission('enabled', e.target.checked)}
+                />
+              </div>
+
+              <Separator className="bg-zinc-800" />
+
+              <div className="space-y-2">
+                <Label htmlFor="commission_rate" className="text-zinc-300 text-sm">返利比例（%）</Label>
+                <Input
+                  id="commission_rate"
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={commission.rate === undefined || commission.rate === null ? '' : String(commission.rate)}
+                  onChange={(e) => updateCommission('rate', e.target.value === '' ? 0 : Number(e.target.value))}
+                  placeholder="20"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                />
+                <p className="text-xs text-zinc-500">好友完成支付后，邀请人获得「实付金额 × 该比例」的佣金。例如 20 表示返利 20%</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="commission_confirm_days" className="text-zinc-300 text-sm">确认结算天数</Label>
+                <Input
+                  id="commission_confirm_days"
+                  type="number"
+                  min={0}
+                  value={commission.confirm_days === undefined || commission.confirm_days === null ? '' : String(commission.confirm_days)}
+                  onChange={(e) => updateCommission('confirm_days', e.target.value === '' ? 0 : Number(e.target.value))}
+                  placeholder="3"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                />
+                <p className="text-xs text-zinc-500">订单支付后经过该天数（防退款期）自动结算佣金到邀请人余额，默认 3 天</p>
+              </div>
+
+              <Separator className="bg-zinc-800" />
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-zinc-300 text-sm">允许提现</Label>
+                  <p className="text-xs text-zinc-500 mt-1">关闭后用户无法申请佣金提现</p>
+                </div>
+                <Switch
+                  checked={toBool(commission.withdraw_enable)}
+                  onChange={(e) => updateCommission('withdraw_enable', e.target.checked)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="commission_min_withdraw" className="text-zinc-300 text-sm">最低提现金额</Label>
+                <Input
+                  id="commission_min_withdraw"
+                  type="number"
+                  min={0}
+                  value={commission.min_withdraw === undefined || commission.min_withdraw === null ? '' : String(commission.min_withdraw)}
+                  onChange={(e) => updateCommission('min_withdraw', e.target.value === '' ? 0 : Number(e.target.value))}
+                  placeholder="10"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                />
+                <p className="text-xs text-zinc-500">佣金余额达到该金额才可申请提现</p>
+              </div>
+            </TabsContent>
 
             <TabsContent value="general" className="p-4 space-y-5 mt-0">
               <div className="space-y-2">
