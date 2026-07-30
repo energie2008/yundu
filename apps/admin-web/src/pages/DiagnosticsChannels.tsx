@@ -246,6 +246,7 @@ export default function DiagnosticsChannels() {
     setSwitchingServers((prev) => new Set(prev).add(item.server_id))
     try {
       await api.post(EP.CHANNEL_SWITCH, {
+        server_id: item.server_id,
         target_channel: item.active_channel,
         reason: 'manual_reconnect',
       })
@@ -272,6 +273,7 @@ export default function DiagnosticsChannels() {
     setSwitchingServers((prev) => new Set(prev).add(switchDialogServer.server_id))
     try {
       await api.post(EP.CHANNEL_SWITCH, {
+        server_id: switchDialogServer.server_id,
         target_channel: switchTargetChannel,
         reason: switchReason || `manual_switch_to_${switchTargetChannel}`,
       })
