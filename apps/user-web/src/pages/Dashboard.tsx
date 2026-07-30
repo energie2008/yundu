@@ -6,6 +6,7 @@ import { EP, formatBytes, getTrafficPercentage, getDaysRemaining, formatDate,
   bytesToGB,
 } from '../lib/endpoints';
 import { useAuth } from '../lib/auth';
+import { t } from '../lib/i18n';
 import type {
   SubscriptionResponse, SubscriptionTokenResponse, NodeInfo, TrafficLog,
   AnnouncementItem, PaginatedResponse,
@@ -420,7 +421,7 @@ export function Dashboard() {
   const subscriptionUrl = activeToken?.token ? getSubscriptionUrl(activeToken.token) : '';
 
   const handleResetToken = () => {
-    if (confirm('确定要重置订阅链接吗？重置后旧链接将失效。')) {
+    if (confirm(t('确定要重置订阅链接吗？重置后旧链接将失效。'))) {
       resetTokenMut.mutate();
     }
   };

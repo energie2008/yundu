@@ -1,7 +1,9 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { ThemeProvider } from './lib/theme';
+import { I18nProvider } from './lib/i18n';
+import { FloatingLanguageSelector } from './components/LanguageSelector';
 import { useAuthStore } from './lib/auth';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Landing } from './pages/Landing';
@@ -48,13 +50,21 @@ function AuthInit() {
   return null;
 }
 
+function AuthLangFloat() {
+  const { pathname } = useLocation();
+  const show = ['/login', '/register', '/forgot-password', '/reset-password'].includes(pathname);
+  return show ? <FloatingLanguageSelector /> : null;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <ToastProvider>
-          <BrowserRouter>
-            <AuthInit />
+        <I18nProvider>
+          <ToastProvider>
+            <BrowserRouter>
+              <AuthInit />
+              <AuthLangFloat />
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
@@ -84,8 +94,9 @@ export default function App() {
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          </BrowserRouter>
-        </ToastProvider>
+            </BrowserRouter>
+          </ToastProvider>
+        </I18nProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

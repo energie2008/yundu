@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
+import { LanguageSelector } from './LanguageSelector';
 
 const navItems = [
   { to: '/dashboard', icon: '🏠', label: '仪表盘' },
@@ -96,8 +97,8 @@ export function Layout() {
             {/* Breadcrumb or title handled by pages */}
           </div>
           <div className="flex items-center gap-3">
-            {/* Language selector placeholder */}
-            <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>CN 简体中文 ▾</span>
+            {/* Language selector */}
+            <LanguageSelector />
             {/* Theme toggle */}
             <button
               onClick={toggleTheme}

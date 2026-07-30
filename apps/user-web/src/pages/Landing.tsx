@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useTheme } from '../lib/theme';
+import { LanguageSelector } from '../components/LanguageSelector';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { EP, adaptPlan, bytesToGB, getPeriodLabel, type PlanResponse } from '../lib/endpoints';
@@ -332,6 +333,7 @@ export function Landing() {
             </a>
           </nav>
           <div className="flex items-center gap-2">
+            <LanguageSelector />
             <button
               onClick={toggleTheme}
               className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-[var(--muted)] transition-colors"
