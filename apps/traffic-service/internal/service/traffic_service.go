@@ -227,8 +227,14 @@ func (s *TrafficService) GetOverview(ctx context.Context) (*model.OverviewRespon
 		topNodes = []*model.NodeTrafficItem{}
 	}
 
+	// P2-I: 从 channel_health_current 表聚合全站在线人数。
+	// node-agent 每 10s 心跳上报 online_users（基于连接生命周期计数：connect +1 / close -1），
+	// 写入 channel_health_current.online_users。此处 SUM 所有服务器的值，返回全站实时在线人数。
+	// 优先使用 channel_health_current（精确）；查询失败时回退到 Redis/session 方式（近似）。
 	onlineCount := int64(0)
-	if s.redisClient != nil {
+	if totalOnline, err := s.trafficRepo.GetTotalOnlineUsers(ctx); err == nil {
+		onlineCount = totalOnline
+	} else if s.redisClient != nil {
 		pattern := fmt.Sprintf("%s*", repo.OnlineUserKeyPrefix)
 		keys, err := s.redisClient.Keys(ctx, pattern).Result()
 		if err == nil {

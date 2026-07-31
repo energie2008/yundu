@@ -15,6 +15,7 @@ import (
 	"github.com/airport-panel/node-service/internal/service"
 	pb "github.com/airport-panel/proto/agent/v1"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -273,27 +274,74 @@ func (h *WSHandler) handleWSHeartbeat(sess *wsSession, seq int64, hb *pb.Heartbe
 		}
 	}
 
+	// P2-I: 从 Heartbeat.nodes 聚合在线人数（与 gRPC handler 对齐）。
+	// proto ChannelHealth 没有 online_users 字段，agent 用 nodes 承载，服务端求和写入
+	// ChannelHealthReport.OnlineUsers，使 WS 主路径与 HTTP fallback 路径一致地填充
+	// channel_health_current.online_users。
+	// 同时设置 hbReq.OnlineUsers 顶层字段，使 health_service 能将其写入
+	// server.Metadata["system"]["online_users"] 和 NodeHealthStatus.CurrentOnlineUsers。
+	if nodes := hb.GetNodes(); len(nodes) > 0 {
+		var totalOnline int64
+		for _, n := range nodes {
+			totalOnline += n.GetOnlineUsers()
+		}
+		hbReq.OnlineUsers = int(totalOnline)
+		if hbReq.ChannelHealth == nil {
+			hbReq.ChannelHealth = &model.ChannelHealthReport{
+				ActiveChannel: "ws",
+			}
+		}
+		hbReq.ChannelHealth.OnlineUsers = int(totalOnline)
+	}
+
 	if h.healthService != nil {
 		_ = h.healthService.ReportHeartbeat(context.Background(), serverCode, nil, hbReq)
 	}
 
 	action := pb.HeartbeatAction_HEARTBEAT_ACTION_NONE
 	latestVersion := int64(0)
+	var reconcileRtID uuid.UUID // 心跳自愈：版本一致且 runtime 运行中时清除陈旧 failed 状态
 
 	// Check if config needs reload
 	if h.serverService != nil && h.runtimeService != nil && h.deploymentService != nil {
 		serverSrv, err := h.serverService.GetServerByCode(context.Background(), serverCode)
 		if err == nil && serverSrv != nil {
 			providerType := model.RuntimeProviderNodeAgent
-			rt, err := h.runtimeService.GetRuntimeByServerAndProvider(context.Background(), serverSrv.ID, providerType, nil)
+			// 从心跳 KernelInfo.Type 推导 runtime ref，确保解析到与 agent 内核一致的 runtime，
+			// 避免 nil-ref 回退误选到 xray runtime（会把 xray 配置推给 sing-box agent）。
+			runtimeRef := kernelRuntimeRef(hb)
+			rt, err := h.runtimeService.GetRuntimeByServerAndProvider(context.Background(), serverSrv.ID, providerType, runtimeRef)
 			if err == nil && rt != nil {
+				reconcileRtID = rt.ID
 				targetVersion, err := h.deploymentService.GetRuntimeConfig(context.Background(), rt.ID, "")
 				if err == nil && targetVersion != nil {
 					latestVersion = targetVersion.VersionNo
-					if hb.GetConfigVersion() < targetVersion.VersionNo {
+					// 面板为唯一真相源：agent 版本 != 面板最新版本即 reload（而非 <），
+					// 修复 DB 重建导致 agent 版本号高于面板时永不 reload 的漂移。
+					if hb.GetConfigVersion() != targetVersion.VersionNo {
 						action = pb.HeartbeatAction_HEARTBEAT_ACTION_RELOAD
 					}
 				}
+			}
+		}
+	}
+
+	// 心跳自愈：action==NONE（agent 版本 == 面板最新）且 runtime 运行中时，
+	// 任何 "failed" 下发状态都是陈旧的（修复重启后版本相等不触发 reload，状态不会被刷新）。
+	// 自动刷为 "applied"，使面板显示与实际一致，避免人工 SQL 介入。
+	// 与 gRPC handler (app.go) 对齐，两条心跳通道都需要自愈。
+	if action == pb.HeartbeatAction_HEARTBEAT_ACTION_NONE && reconcileRtID != uuid.Nil && h.deploymentService != nil {
+		kernelRunning := true
+		if kernel := hb.GetKernel(); kernel != nil {
+			kernelRunning = kernel.GetRunning()
+		}
+		if kernelRunning {
+			if affected, err := h.deploymentService.ReconcileDispatchStatusOnHeartbeat(context.Background(), reconcileRtID, latestVersion); err != nil {
+				h.logger.Warn("ws heartbeat reconcile dispatch status failed",
+					"runtime_id", reconcileRtID, "version", latestVersion, "error", err)
+			} else if affected > 0 {
+				h.logger.Info("ws heartbeat reconciled stale failed dispatch status",
+					"runtime_id", reconcileRtID, "version", latestVersion, "affected_nodes", affected)
 			}
 		}
 	}
@@ -313,6 +361,28 @@ func (h *WSHandler) handleWSHeartbeat(sess *wsSession, seq int64, hb *pb.Heartbe
 	if err := h.sendToSession(sess, ack); err != nil {
 		h.logger.Warn("failed to send heartbeat ack via ws", "server_code", serverCode, "error", err)
 	}
+}
+
+// kernelRuntimeRef 从心跳 KernelInfo.Type 推导 X-Runtime-Ref 等价值（sing-box/xray），
+// 供 runtime 解析按内核类型精确匹配。无法判定时返回 nil（保持既有回退行为）。
+func kernelRuntimeRef(hb *pb.Heartbeat) *string {
+	if hb == nil {
+		return nil
+	}
+	kernel := hb.GetKernel()
+	if kernel == nil {
+		return nil
+	}
+	var ref string
+	switch kernel.GetType() {
+	case pb.KernelType_KERNEL_TYPE_SINGBOX:
+		ref = "sing-box"
+	case pb.KernelType_KERNEL_TYPE_XRAY:
+		ref = "xray"
+	default:
+		return nil
+	}
+	return &ref
 }
 
 func (h *WSHandler) sendToSession(sess *wsSession, msg *pb.PanelMessage) error {

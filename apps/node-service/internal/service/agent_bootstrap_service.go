@@ -342,8 +342,24 @@ func (s *AgentBootstrapService) MachineCloudflaredTunnels(ctx context.Context, t
 					}
 				}
 			}
-			if exposureMode != "argo_tunnel" && exposureMode != "cdn_saas" {
+			// 防御性保护：即使 exposure_mode 被误改，
+			// 只要节点持有 cloudflared_token 或 cloudflared_tunnel_id，
+			// 仍下发隧道配置，避免连接器被删（与单节点模式 handler 对齐）。
+			hasTunnelCred := false
+			if t, ok := n.ConfigJSON["cloudflared_token"].(string); ok && t != "" {
+				hasTunnelCred = true
+			}
+			if !hasTunnelCred {
+				if tid, ok := n.ConfigJSON["cloudflared_tunnel_id"].(string); ok && tid != "" {
+					hasTunnelCred = true
+				}
+			}
+			if exposureMode != "argo_tunnel" && exposureMode != "cdn_saas" && !hasTunnelCred {
 				continue
+			}
+			if exposureMode != "argo_tunnel" && exposureMode != "cdn_saas" {
+				s.logger.Warn("machine cloudflared-tunnels: node has tunnel credential but exposure_mode mismatch, still dispatching to protect connector",
+					"node_id", n.ID, "name", n.Name, "exposure_mode", exposureMode)
 			}
 
 			tunnel := MachineCloudflaredTunnel{}

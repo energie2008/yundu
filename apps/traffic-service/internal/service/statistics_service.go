@@ -33,7 +33,7 @@ func NewStatisticsService(repo *repo.TrafficRepo, logger *slog.Logger) *Statisti
 //   - upload_bytes / download_bytes：当日全站上传/下载字节数（GetTodayTotalUsage）
 //   - total_bytes：上传+下载
 //   - active_users：当前活跃订阅用户数（ListActiveUserIDs 计数）
-//   - online_count：在线用户数（暂记 0，可由 online 设备上报或 Redis 在线集合补全）
+//   - online_count：在线用户数（从 channel_health_current 聚合，由 node-agent 心跳上报）
 //
 // 统计日期取当天（按服务器本地时区截断到日）。失败仅记录日志并返回错误。
 func (s *StatisticsService) DailyStatistics(ctx context.Context) error {
@@ -50,13 +50,23 @@ func (s *StatisticsService) DailyStatistics(ctx context.Context) error {
 		activeUsers = len(ids)
 	}
 
+	// P2-I: 从 channel_health_current 表聚合全站在线人数。
+	// node-agent 每 10s 心跳上报 online_users（基于连接生命周期计数），写入 channel_health_current。
+	// 此处 SUM 所有服务器的值，作为当日在线人数快照归档到 traffic_statistics_daily。
+	onlineCount := int64(0)
+	if total, err := s.repo.GetTotalOnlineUsers(ctx); err == nil {
+		onlineCount = total
+	} else {
+		s.logger.Warn("statistics: get total online users failed, fallback to 0", "error", err)
+	}
+
 	stat := &model.DailyStatistic{
 		StatDate:      time.Now(),
 		UploadBytes:   upload,
 		DownloadBytes: download,
 		TotalBytes:    upload + download,
 		ActiveUsers:   activeUsers,
-		OnlineCount:   0, // TODO: 接入在线设备/Redis 在线集合后补全
+		OnlineCount:   onlineCount,
 	}
 
 	if err := s.repo.RecordDailyStatistics(ctx, stat); err != nil {
@@ -67,6 +77,7 @@ func (s *StatisticsService) DailyStatistics(ctx context.Context) error {
 		"date", stat.StatDate.Format("2006-01-02"),
 		"upload", stat.UploadBytes, "download", stat.DownloadBytes,
 		"total", stat.TotalBytes, "active_users", stat.ActiveUsers,
+		"online_count", stat.OnlineCount,
 	)
 	return nil
 }

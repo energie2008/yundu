@@ -557,6 +557,15 @@ func (s *NativeSingbox) GetTrafficStatsNoReset(ctx context.Context) (map[string]
 	return stats, nil
 }
 
+// ActiveUserCount 返回当前有活跃连接的用户数（精确在线人数）。
+// 基于 ConnTracker 的连接生命周期计数，不受流量上报周期和基线污染影响。
+func (s *NativeSingbox) ActiveUserCount() int {
+	if s.tracker == nil {
+		return 0
+	}
+	return s.tracker.ActiveUserCount()
+}
+
 // extractSingboxNameToUUID 从 sing-box 配置 JSON 中提取 inbound users 的 name→UUID 映射。
 // 遍历所有 inbound 的 users 数组，将 name 字段映射到 uuid 字段。
 // 对于没有 uuid 字段的协议（如 Trojan/Hysteria2/AnyTLS），不加入映射（UUID 回退为 name 本身）。

@@ -286,31 +286,48 @@ func (s *RuntimeService) GetRuntimeByServerAndProvider(ctx context.Context, serv
 	if rt != nil {
 		return rt, nil
 	}
-	if providerRef == nil {
-		runtimes, err := s.runtimeRepo.ListByServer(ctx, serverID)
-		if err != nil {
-			return nil, err
+	// 回退解析：精确 provider_ref 未命中时，按 runtime_type 语义匹配 X-Runtime-Ref。
+	// 根因修复：历史注册数据中主内核(sing-box)runtime 的 provider_ref 为空，而 agent 始终以
+	// RuntimeType("sing-box") 作为 X-Runtime-Ref 上报，导致 provider_ref='sing-box' 精确匹配
+	// 永远失败 → 心跳 "runtime not found" → 永不下发 reload（内核配置无法收敛到面板真相源）。
+	runtimes, err := s.runtimeRepo.ListByServer(ctx, serverID)
+	if err != nil {
+		return nil, err
+	}
+	wantType := ""
+	if providerRef != nil {
+		wantType = normalizeRuntimeType(*providerRef)
+	}
+	var typeMatch, xrayRT, firstRT *model.Runtime
+	for _, r := range runtimes {
+		if r.ProviderType != providerType {
+			continue
 		}
-		var xrayRT *model.Runtime
-		var firstRT *model.Runtime
-		for _, r := range runtimes {
-			if r.ProviderType != providerType {
-				continue
-			}
-			if firstRT == nil {
-				firstRT = r
-			}
-			if normalizeRuntimeType(r.RuntimeType) == "xray" {
-				xrayRT = r
-				break
-			}
+		if firstRT == nil {
+			firstRT = r
 		}
-		if xrayRT != nil {
-			return xrayRT, nil
+		if wantType != "" && normalizeRuntimeType(r.RuntimeType) == wantType {
+			typeMatch = r
+			break
 		}
-		if firstRT != nil {
-			return firstRT, nil
+		if normalizeRuntimeType(r.RuntimeType) == "xray" {
+			xrayRT = r
 		}
+	}
+	// 指定了内核类型时严格按 runtime_type 匹配：找不到即视为未注册，
+	// 避免把 xray 配置误推给 sing-box agent（反之亦然）。
+	if wantType != "" {
+		if typeMatch != nil {
+			return typeMatch, nil
+		}
+		return nil, ErrRuntimeNotFound
+	}
+	// 未指定 ref（历史 nil 调用）时保持既有回退：优先 xray，其次首个 node-agent runtime。
+	if xrayRT != nil {
+		return xrayRT, nil
+	}
+	if firstRT != nil {
+		return firstRT, nil
 	}
 	return nil, ErrRuntimeNotFound
 }

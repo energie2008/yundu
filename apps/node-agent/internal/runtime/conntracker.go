@@ -59,9 +59,12 @@ type IPChecker interface {
 // userStats 每用户的流量统计（无锁化设计）。
 // 流量计数使用 atomic.Int64，在每个数据包的 Read/Write 时直接累加，
 // 读取时使用 Swap(0) 原子读取并清零（GetAndReset）或 Load 原子读取（Get）。
+// activeConns 跟踪当前活跃连接数（连接建立时 +1，关闭时 -1），
+// 用于精确统计在线人数（区别于流量计数法：后者无法区分"已断开但本周期有流量"的用户）。
 type userStats struct {
-	upload   atomic.Int64 // 上传字节（用户 → 入站 Read）
-	download atomic.Int64 // 下载字节（入站 → 用户 Write）
+	upload     atomic.Int64 // 上传字节（用户 → 入站 Read）
+	download   atomic.Int64 // 下载字节（入站 → 用户 Write）
+	activeConns atomic.Int64 // 当前活跃连接数（用于在线人数统计）
 }
 
 // ConnTracker 实现 sing-box 的 adapter.ConnectionTracker 接口。
@@ -145,6 +148,46 @@ func (t *ConnTracker) addUpload(userID string, n int64) {
 func (t *ConnTracker) addDownload(userID string, n int64) {
 	us := t.getOrCreateUser(userID)
 	us.download.Add(n)
+}
+
+// incActive 增加用户活跃连接计数（连接建立时调用）。
+func (t *ConnTracker) incActive(userID string) {
+	t.getOrCreateUser(userID).activeConns.Add(1)
+}
+
+// decActive 减少用户活跃连接计数（连接关闭时调用）。
+// 使用 max(0, ...) 语义避免负值（防御性：UDP 会话超时未调 Close 的情况下可能不配对）。
+func (t *ConnTracker) decActive(userID string) {
+	t.mu.RLock()
+	us, ok := t.users[userID]
+	t.mu.RUnlock()
+	if !ok {
+		return
+	}
+	for {
+		old := us.activeConns.Load()
+		if old <= 0 {
+			return // 已经是 0，不再递减（防止负值）
+		}
+		if us.activeConns.CompareAndSwap(old, old-1) {
+			return
+		}
+	}
+}
+
+// ActiveUserCount 返回当前有活跃连接的用户数（精确在线人数）。
+// 区别于 Get()（基于流量计数，受上报周期和基线污染影响），
+// 此方法基于连接生命周期（connect +1 / close -1），反映实时在线状态。
+func (t *ConnTracker) ActiveUserCount() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	count := 0
+	for _, us := range t.users {
+		if us.activeConns.Load() > 0 {
+			count++
+		}
+	}
+	return count
 }
 
 // GetAndReset 原子读取所有用户流量并清零（用于增量上报）。
@@ -267,6 +310,7 @@ func (t *ConnTracker) RoutedConnection(
 
 	// 创建可取消的 context，用于在连接关闭时中断限速 Wait
 	cancelCtx, cancel := context.WithCancel(context.Background())
+	t.incActive(userID) // 在线人数统计：连接建立 +1
 	return &trackedConn{
 		Conn:     conn,
 		tracker:  t,
@@ -312,6 +356,7 @@ func (t *ConnTracker) RoutedPacketConnection(
 	}
 
 	cancelCtx, cancel := context.WithCancel(context.Background())
+	t.incActive(userID) // 在线人数统计：UDP 会话建立 +1
 	return &trackedPacketConn{
 		PacketConn: conn,
 		tracker:    t,
@@ -374,6 +419,7 @@ func (c *trackedConn) Write(b []byte) (int, error) {
 // 同时通知 DeviceChecker 释放设备计数，通知 IPLimiter 释放 IP 引用计数。
 func (c *trackedConn) Close() error {
 	c.cancel()
+	c.tracker.decActive(c.userID) // 在线人数统计：连接关闭 -1
 	if dc := c.tracker.getDeviceChecker(); dc != nil && c.sourceIP != "" {
 		dc.OnDisconnect(c.userID, c.sourceIP)
 	}
@@ -430,6 +476,7 @@ func (c *trackedPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksa
 // Close 关闭连接并取消限速 context，释放设备计数和 IP 引用计数。
 func (c *trackedPacketConn) Close() error {
 	c.cancel()
+	c.tracker.decActive(c.userID) // 在线人数统计：UDP 会话关闭 -1
 	if dc := c.tracker.getDeviceChecker(); dc != nil && c.sourceIP != "" {
 		dc.OnDisconnect(c.userID, c.sourceIP)
 	}

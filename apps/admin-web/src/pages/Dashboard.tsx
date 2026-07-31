@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Activity,
   Users,
@@ -14,6 +14,7 @@ import {
   ArrowRight,
   BarChart3,
   DollarSign,
+  Clock,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, Badge, Button, Skeleton } from '@airport/ui'
 import { api } from '@/lib/api'
@@ -140,31 +141,47 @@ export default function Dashboard() {
   const [plans, setPlans] = useState<AdminPlan[]>([])
   const [revenue, setRevenue] = useState<RevenueStats | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
+  const load = useCallback(async () => {
+    try {
+      setError(null)
+      const [trafficData, nodesResp, plansResp, revenueResp] = await Promise.all([
+        api.get<TrafficOverview>(EP.TRAFFIC_OVERVIEW).catch(() => null),
+        api.get<{ items: AdminNode[]; total: number }>(EP.NODES, { params: { page: 1, page_size: 200 } }).catch(() => ({ items: [], total: 0 })),
+        api.get<{ items: AdminPlan[]; total: number }>(EP.PLANS, { params: { page: 1, page_size: 200 } }).catch(() => ({ items: [], total: 0 })),
+        api.get<RevenueStats>(EP.ORDER_STATS).catch(() => null),
+      ])
+      setTraffic(trafficData)
+      setNodes(nodesResp?.items || [])
+      setPlans(plansResp?.items || [])
+      setRevenue(revenueResp)
+      setLastRefresh(new Date())
+    } catch (e: any) {
+      console.error('Dashboard load error:', e)
+      setError(e.message || '加载失败')
+    }
+  }, [])
+
+  // 首次加载
   useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true)
-        setError(null)
-        const [trafficData, nodesResp, plansResp, revenueResp] = await Promise.all([
-          api.get<TrafficOverview>(EP.TRAFFIC_OVERVIEW).catch(() => null),
-          api.get<{ items: AdminNode[]; total: number }>(EP.NODES, { params: { page: 1, page_size: 200 } }).catch(() => ({ items: [], total: 0 })),
-          api.get<{ items: AdminPlan[]; total: number }>(EP.PLANS, { params: { page: 1, page_size: 200 } }).catch(() => ({ items: [], total: 0 })),
-          api.get<RevenueStats>(EP.ORDER_STATS).catch(() => null),
-        ])
-        setTraffic(trafficData)
-        setNodes(nodesResp?.items || [])
-        setPlans(plansResp?.items || [])
-        setRevenue(revenueResp)
-      } catch (e: any) {
-        console.error('Dashboard load error:', e)
-        setError(e.message || '加载失败')
-      } finally {
-        setLoading(false)
+    setLoading(true)
+    load().finally(() => setLoading(false))
+  }, [load])
+
+  // 自动刷新：每 10s 轮询一次，使在线人数、今日流量等指标实时更新
+  // 与 node-agent 心跳周期（10s）对齐，确保看到最新的在线人数变化
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    refreshTimerRef.current = setInterval(() => {
+      load()
+    }, 10_000)
+    return () => {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current)
       }
     }
-    load()
-  }, [])
+  }, [load])
 
   const totalNodes = nodes.length
   const onlineCount = nodes.filter(n => n.is_enabled && n.health_status === 'healthy').length
@@ -192,6 +209,12 @@ export default function Dashboard() {
           <span className="text-xs font-medium" style={{ color: 'var(--accent-emerald-foreground)' }}>系统运行正常</span>
         </div>
       </div>
+      {lastRefresh && (
+        <div className="text-xs flex items-center gap-1.5" style={{ color: ADMIN_TEXT_MUTED }}>
+          <Clock className="w-3 h-3" />
+          <span>最后更新: {lastRefresh.toLocaleTimeString('zh-CN')}</span>
+        </div>
+      )}
 
       {/* Error */}
       {error && (

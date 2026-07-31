@@ -83,15 +83,15 @@ func isDownstreamInboundFromMap(inbMap map[string]interface{}) bool {
 // 下行 inbound 身份识别优先使用 kernelrender 注入的显式字段 _inbound_role="downstream"，
 // 不再依赖 tag 字符串后缀匹配做安全路径判定。tag 后缀仅作展示命名。
 //
-// 判定规则：
-//  1. 若 inbound 有 _inbound_role="downstream"（显式标识）：返回 node.DownstreamExposureMode
-//     - 若 DownstreamExposureMode 独立列有值 → 使用
-//     - 否则从 config_json.downstream_exposure_mode 回退
-//     - 都没有则回退到 "direct"（下行默认 REALITY 直连不剥离）
+// 判定规则（P1-A 单一真相源：config_json 是唯一来源，独立列 node.DownstreamExposureMode /
+// node.ExposureMode 仅为 DB 索引投影，本函数不读取独立列）：
+//  1. 若 inbound 有 _inbound_role="downstream"（显式标识）：返回下行 exposure mode
+//     - 读 config_json.downstream_exposure_mode
+//     - 没有则回退到 "direct"（下行默认 REALITY 直连不剥离）
 //  2. 否则（上行/普通 inbound）：返回上行 exposure mode
-//     - 优先 node.ExposureMode 独立列
-//     - 回退 config_json.exposure_mode
-//     - 最终回退到 isCDNNode 旧逻辑（历史节点兼容性）
+//     - 读 config_json.exposure_mode
+//     - 没有则回退到 isCDNNode 旧逻辑推断 "cdn_saas"（历史节点兼容性）
+//     - 最终回退 "direct"
 func determineInboundExposureMode(node *model.Node, inbMap map[string]interface{}) string {
 	if node == nil {
 		return "direct"

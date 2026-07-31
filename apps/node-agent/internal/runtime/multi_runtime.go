@@ -320,6 +320,28 @@ func (m *MultiRuntimePlugin) GetTrafficStatsNoReset(ctx context.Context) (map[st
 	return merged, nil
 }
 
+// ActiveUserCount 返回当前有活跃连接的用户数（精确在线人数）。
+// sing-box 主内核通过 ConnTracker 连接生命周期计数；xray 内核无连接追踪，
+// 回退到流量计数法（有流量的用户数，近似值）。
+func (m *MultiRuntimePlugin) ActiveUserCount() int {
+	m.mu.Lock()
+	xrayStarted := m.xrayStarted
+	sbStarted := m.singboxStarted
+	m.mu.Unlock()
+
+	count := 0
+	if sbStarted && m.singboxPlugin != nil {
+		count += m.singboxPlugin.ActiveUserCount()
+	}
+	if xrayStarted && m.xrayPlugin != nil {
+		// xray 无 ConnTracker，回退到流量计数法（近似）
+		if stats, err := m.xrayPlugin.GetTrafficStatsNoReset(context.Background()); err == nil {
+			count += len(stats)
+		}
+	}
+	return count
+}
+
 // Status 返回主内核（sing-box）的状态。P2 翻转补改。
 // sing-box 未启动时回退到 xray 状态（兼容过渡期）。
 func (m *MultiRuntimePlugin) Status(ctx context.Context) (*PluginStatus, error) {

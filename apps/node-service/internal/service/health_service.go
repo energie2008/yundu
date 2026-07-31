@@ -54,7 +54,9 @@ func (s *HealthService) ReportHeartbeat(ctx context.Context, serverCode string, 
 	}
 
 	// 保存系统metrics到 server.Metadata（CPU/内存/磁盘/网络等）
-	if req.Metrics != nil && len(req.Metrics) > 0 {
+	// 同时将 online_users 写入 system.online_users，使 Servers 页面能展示实时在线人数。
+	// online_users 来自 agent 的 ActiveUserCount()（连接生命周期计数），精确反映当前在线状态。
+	if req.Metrics != nil && len(req.Metrics) > 0 || req.OnlineUsers > 0 {
 		if server.Metadata == nil {
 			server.Metadata = make(map[string]interface{})
 		}
@@ -68,6 +70,9 @@ func (s *HealthService) ReportHeartbeat(ctx context.Context, serverCode string, 
 		for k, v := range req.Metrics {
 			sysMetrics[k] = v
 		}
+		// P2-I: 将 agent 上报的在线人数写入 system.online_users，
+		// 供 NewServerResponseWithDetails / GetHealthDashboard 读取展示。
+		sysMetrics["online_users"] = req.OnlineUsers
 		sysMetrics["updated_at"] = now
 		server.Metadata["system"] = sysMetrics
 

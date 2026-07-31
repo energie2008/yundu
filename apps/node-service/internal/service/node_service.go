@@ -548,7 +548,17 @@ func (s *NodeService) UpdateNode(ctx context.Context, id uuid.UUID, req *model.U
 		node.IsSplitMode = *req.IsSplitMode
 	}
 
-	// P0-3: XHTTP mode 空值校验前移 — 更新时拦截，而非渲染时报错
+	// P0-2: 先规范化 config_json（拍平嵌套字段到顶层），确保后续验证/标准化读到的是规范化结构。
+	// 必须在 xhttp mode 验证之前执行：前端 NodeConfigEditor 把 mode 存在 config_json.xhttp.mode
+	// 嵌套位置，NormalizeNodeConfigJSON 的 copyFlatKey 会将其拍平到顶层 mode。
+	secStr := ""
+	if node.SecurityType != nil {
+		secStr = *node.SecurityType
+	}
+	node.ConfigJSON = NormalizeNodeConfigJSON(node.ConfigJSON, node.ProtocolType, node.TransportType, secStr)
+
+	// P0-3: XHTTP mode 空值校验前移 — 更新时拦截，而非渲染时报错。
+	// 规范化已执行，mode 在顶层 config_json["mode"]，直接读取即可。
 	if node.TransportType == string(nodespec.TransportXHTTP) && node.ConfigJSON != nil {
 		mode, _ := node.ConfigJSON["mode"].(string)
 		if mode == "" || mode == "auto" {
@@ -564,13 +574,6 @@ func (s *NodeService) UpdateNode(ctx context.Context, id uuid.UUID, req *model.U
 	if err := validateExposureMode(node); err != nil {
 		return nil, err
 	}
-
-	// P0-2: 规范化 config_json（与 CreateNode 一致）
-	secStr := ""
-	if node.SecurityType != nil {
-		secStr = *node.SecurityType
-	}
-	node.ConfigJSON = NormalizeNodeConfigJSON(node.ConfigJSON, node.ProtocolType, node.TransportType, secStr)
 
 	// Bug-B1: 更新节点时也自动补全REALITY密钥（主连接+下行downloadSettings）
 	if err := autoGenerateREALITYKeys(ctx, node); err != nil {
@@ -771,8 +774,16 @@ func validateProtocolCombo(req *model.CreateNodeRequest) error {
 	}
 
 	// 4. P0-3: XHTTP mode 空值校验前移 — 保存时拦截，而非渲染时报错
+	// fallback: 顶层 mode > xhttp.mode（前端可能将 mode 存在嵌套 xhttp 对象中）
 	if transport == nodespec.TransportXHTTP && req.ConfigJSON != nil {
 		mode, _ := req.ConfigJSON["mode"].(string)
+		if mode == "" {
+			if xhttp, ok := req.ConfigJSON["xhttp"].(map[string]interface{}); ok {
+				if m, ok := xhttp["mode"].(string); ok {
+					mode = m
+				}
+			}
+		}
 		if mode == "" || mode == "auto" {
 			return fmt.Errorf("%w: xhttp mode 禁止为空或 auto，必须显式指定 packet-up/stream-up/stream-down", ErrConfigValidation)
 		}

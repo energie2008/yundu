@@ -949,23 +949,61 @@ func Run() {
 					}
 				}
 
+				// P2-I: 从 Heartbeat.nodes 聚合在线人数（agent 在 gRPC 路径通过 NodeStatus.online_users 上报）。
+				// proto ChannelHealth 没有 online_users 字段，agent 用 nodes 承载，服务端求和写入
+				// ChannelHealthReport.OnlineUsers，使 gRPC 主路径与 HTTP fallback 路径一致地填充
+				// channel_health_current.online_users（此前 gRPC 路径恒为 0，导致走 gRPC 的节点在线人数不更新）。
+				// 同时设置 hbReq.OnlineUsers 顶层字段，使 health_service 能将其写入
+				// server.Metadata["system"]["online_users"] 和 NodeHealthStatus.CurrentOnlineUsers。
+				if nodes := hb.GetNodes(); len(nodes) > 0 {
+					var totalOnline int64
+					for _, n := range nodes {
+						totalOnline += n.GetOnlineUsers()
+					}
+					hbReq.OnlineUsers = int(totalOnline)
+					if hbReq.ChannelHealth == nil {
+						hbReq.ChannelHealth = &model.ChannelHealthReport{
+							ActiveChannel: "grpc",
+						}
+					}
+					hbReq.ChannelHealth.OnlineUsers = int(totalOnline)
+				}
+
 				if healthService != nil {
 					_ = healthService.ReportHeartbeat(ctx, serverCode, nil, hbReq)
 				}
 
 				action := pb.HeartbeatAction_HEARTBEAT_ACTION_NONE
 				latestVersion := int64(0)
+				var reconcileRtID uuid.UUID // 心跳自愈：版本一致且 runtime 运行中时清除陈旧 failed 状态
 
 				if serverService != nil && runtimeService != nil && deploymentService != nil {
 					serverSrv, err := serverService.GetServerByCode(ctx, serverCode)
 					if err == nil && serverSrv != nil {
 						providerType := model.RuntimeProviderNodeAgent
-						rt, err := runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, nil)
+						// 从心跳 KernelInfo.Type 推导 runtime ref，确保解析到与 agent 内核一致的
+						// runtime，避免 nil-ref 回退误选到 xray runtime（会把 xray 配置推给 sing-box agent）。
+						var runtimeRef *string
+						if kernel := hb.GetKernel(); kernel != nil {
+							switch kernel.GetType() {
+							case pb.KernelType_KERNEL_TYPE_SINGBOX:
+								r := "sing-box"
+								runtimeRef = &r
+							case pb.KernelType_KERNEL_TYPE_XRAY:
+								r := "xray"
+								runtimeRef = &r
+							}
+						}
+						rt, err := runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, runtimeRef)
 						if err == nil && rt != nil {
+							reconcileRtID = rt.ID
 							targetVersion, err := deploymentService.GetRuntimeConfig(ctx, rt.ID, "")
 							if err == nil && targetVersion != nil {
 								latestVersion = targetVersion.VersionNo
-								if hb.GetConfigVersion() < targetVersion.VersionNo {
+								// 面板为唯一真相源：只要 agent 上报版本与面板最新版本不一致即下发 reload。
+								// 用 != 而非 <，修复历史 DB 重建导致 agent 版本号(如137)高于面板(如38)时
+								// "面板认为节点更新→永不 reload"的漂移，使节点确定性收敛到面板 latest。
+								if hb.GetConfigVersion() != targetVersion.VersionNo {
 									action = pb.HeartbeatAction_HEARTBEAT_ACTION_RELOAD
 								}
 							}
@@ -976,6 +1014,20 @@ func Run() {
 				if kernel := hb.GetKernel(); kernel != nil {
 					if !kernel.GetRunning() {
 						action = pb.HeartbeatAction_HEARTBEAT_ACTION_RESTART
+					}
+				}
+
+				// 心跳自愈：action==NONE 意味着 agent 版本 == 面板最新版本；若 runtime 同时在运行，
+				// 说明 agent 已用当前配置成功启动。此时任何 "failed" 下发状态都是陈旧的
+				//（来自之前 bug 导致的失败上报，修复重启后版本相等不触发 reload，状态不会被刷新）。
+				// 自动将其刷为 "applied"，使面板显示与实际一致，避免人工 SQL 介入。
+				if action == pb.HeartbeatAction_HEARTBEAT_ACTION_NONE && reconcileRtID != uuid.Nil && deploymentService != nil {
+					if affected, err := deploymentService.ReconcileDispatchStatusOnHeartbeat(ctx, reconcileRtID, latestVersion); err != nil {
+						logger.Warn("heartbeat reconcile dispatch status failed",
+							"runtime_id", reconcileRtID, "version", latestVersion, "error", err)
+					} else if affected > 0 {
+						logger.Info("heartbeat reconciled stale failed dispatch status",
+							"runtime_id", reconcileRtID, "version", latestVersion, "affected_nodes", affected)
 					}
 				}
 
@@ -1136,8 +1188,16 @@ type warpPoolAdapter struct {
 	pool *warpreg.Pool
 }
 
-func (a *warpPoolAdapter) RegisterForNode(ctx context.Context, nodeID uuid.UUID, nodeCode string) (*outbound.WarpProfile, error) {
-	out, err := a.pool.RegisterForNode(ctx, nodeID, nodeCode)
+func (a *warpPoolAdapter) RegisterForNode(ctx context.Context, nodeID uuid.UUID, nodeCode string, opts *outbound.WarpRegisterOptions) (*outbound.WarpProfile, error) {
+	// 转换 outbound.WarpRegisterOptions → warpreg.RegisterOptions（避免 outbound 包依赖 warpreg）
+	var regOpts *warpreg.RegisterOptions
+	if opts != nil {
+		regOpts = &warpreg.RegisterOptions{
+			LicenseKey: opts.LicenseKey,
+			Endpoint:   opts.Endpoint,
+		}
+	}
+	out, err := a.pool.RegisterForNode(ctx, nodeID, nodeCode, regOpts)
 	if err != nil {
 		return nil, err
 	}

@@ -187,7 +187,10 @@ func (h *AgentHandler) Heartbeat(c *gin.Context) {
 			} else {
 				var currentVer int64
 				if _, err := fmt.Sscanf(currentVersion, "%d", &currentVer); err == nil {
-					if currentVer < targetVersion.VersionNo {
+					// 面板为唯一真相源：agent 版本 != 面板最新版本即 reload（而非 <），
+					// 修复 DB 重建导致 agent 版本号高于面板时永不 reload 的漂移，
+					// 使节点确定性收敛到面板 latest。
+					if currentVer != targetVersion.VersionNo {
 						needsReload = true
 					}
 				} else {
@@ -215,6 +218,17 @@ func (h *AgentHandler) Heartbeat(c *gin.Context) {
 				// 消除 nginx reconciler 30s 轮询延迟，实现"保存即下发"。
 				// agent 收到 sync_external_resources 会立即调用 NginxReconciler.TriggerSync
 				resp.ExtraActions = []string{"sync_external_resources"}
+			} else if req.RuntimeStatus == "running" {
+				// 心跳自愈：版本一致（!needsReload）且 runtime 运行中时，
+				// 清除该 runtime 下陈旧 "failed" 下发状态。
+				// 与 gRPC/WS handler 对齐，HTTP fallback 通道也需要自愈。
+				if affected, err := h.deploymentService.ReconcileDispatchStatusOnHeartbeat(c.Request.Context(), rt.ID, targetVersion.VersionNo); err != nil {
+					h.logger.Warn("heartbeat: reconcile dispatch status failed",
+						"server_code", serverCode, "runtime_id", rt.ID, "error", err)
+				} else if affected > 0 {
+					h.logger.Info("heartbeat: reconciled stale failed dispatch status",
+						"server_code", serverCode, "runtime_id", rt.ID, "affected_nodes", affected)
+				}
 			}
 		}
 	}
@@ -578,8 +592,26 @@ func (h *AgentHandler) CloudflaredTunnels(c *gin.Context) {
 				}
 			}
 		}
-		if exposureMode != "argo_tunnel" {
+		// 防御性保护：即使 exposure_mode 被误改为 cdn_saas/direct，
+		// 只要节点持有 cloudflared_token 或 cloudflared_tunnel_id，
+		// 仍下发隧道配置，避免 argo_tunnel 节点因 exposure_mode 误改
+		// 导致 agent 收到空 tunnels 后停止 cloudflared（连接器被删事故）。
+		// 设计原则：token 存在 = 需要隧道，面板第一真相源的防御性兜底。
+		hasTunnelCred := false
+		if t, ok := node.ConfigJSON["cloudflared_token"].(string); ok && t != "" {
+			hasTunnelCred = true
+		}
+		if !hasTunnelCred {
+			if tid, ok := node.ConfigJSON["cloudflared_tunnel_id"].(string); ok && tid != "" {
+				hasTunnelCred = true
+			}
+		}
+		if exposureMode != "argo_tunnel" && !hasTunnelCred {
 			continue
+		}
+		if exposureMode != "argo_tunnel" {
+			h.logger.Warn("cloudflared-tunnels: node has tunnel credential but exposure_mode mismatch, still dispatching to protect connector",
+				"node_id", node.ID, "name", node.Name, "exposure_mode", exposureMode)
 		}
 		nodeCount++
 

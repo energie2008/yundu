@@ -390,3 +390,16 @@ func (r *TrafficRepo) GetNodeIDByServerCode(ctx context.Context, serverCode stri
 	}
 	return &nodeID, nil
 }
+
+// GetTotalOnlineUsers 从 channel_health_current 表聚合所有服务器的在线人数总和。
+// node-agent 每 10s 心跳上报 online_users（基于连接生命周期计数：connect +1 / close -1），
+// 写入 channel_health_current.online_users。此方法 SUM 所有服务器的值，返回全站在线人数。
+// 用于 Dashboard 仪表盘的 online_count 指标，替代此前硬编码的 0。
+func (r *TrafficRepo) GetTotalOnlineUsers(ctx context.Context) (int64, error) {
+	var total int64
+	err := r.pool.QueryRow(ctx, `SELECT COALESCE(SUM(online_users), 0) FROM channel_health_current`).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
+}

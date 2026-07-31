@@ -17,7 +17,7 @@ import (
 	pb "github.com/airport-panel/proto/agent/v1"
 )
 
-func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus, runtimeVersion string, pid int) (*pb.HeartbeatAck, error) {
+func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus, runtimeVersion string, pid int, onlineUsers int) (*pb.HeartbeatAck, error) {
 	configVersionNum := int64(0)
 	if currentVersion != "" {
 		if v, err := strconv.ParseInt(currentVersion, 10, 64); err == nil {
@@ -47,6 +47,15 @@ func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus
 
 	load := collectServerLoad()
 
+	// P2-I: 通过 Heartbeat.nodes 承载服务器级聚合在线人数。
+	// proto 的 ChannelHealth 没有 online_users 字段，而 NodeStatus.online_users 已存在，
+	// 因此用 nodes[0] 携带聚合值，服务端 gRPC handler 遍历 nodes 求和写入 channel_health_current。
+	// 这打通了 gRPC 主路径的在线人数上报（此前仅 HTTP fallback 路径能上报，导致走 gRPC 的节点恒为 0）。
+	var nodeStatuses []*pb.NodeStatus
+	if onlineUsers > 0 {
+		nodeStatuses = []*pb.NodeStatus{{OnlineUsers: int64(onlineUsers)}}
+	}
+
 	hb := &pb.AgentMessage{
 		Seq:       a.nextSeq(),
 		Timestamp: time.Now().UnixMilli(),
@@ -62,7 +71,8 @@ func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus
 				Channel: &pb.ChannelHealth{
 					State: chanState,
 				},
-				Load: load,
+				Load:  load,
+				Nodes: nodeStatuses,
 			},
 		},
 	}
@@ -219,12 +229,25 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 	}
 
 	chanHealth := a.cm.GetHealthStatus()
+	// P2-I: 获取在线用户数。
+	// 优先使用 ActiveUserCount()（基于连接生命周期：connect +1 / close -1），
+	// 精确反映实时在线状态，不受流量上报周期和基线污染影响。
+	// 回退到 GetTrafficStatsNoReset（流量计数法，近似值）用于不支持连接追踪的内核。
+	onlineUsers := 0
+	if a.runtimePlugin != nil && a.useNative {
+		if counter, ok := a.runtimePlugin.(interface{ ActiveUserCount() int }); ok {
+			onlineUsers = counter.ActiveUserCount()
+		} else if stats, err := a.runtimePlugin.GetTrafficStatsNoReset(context.Background()); err == nil {
+			onlineUsers = len(stats)
+		}
+	}
 	var channelHealthReport *client.ChannelHealthReport
 	if chanHealth.ActiveChannel != "unknown" {
 		channelHealthReport = &client.ChannelHealthReport{
 			ActiveChannel: chanHealth.ActiveChannel,
 			ChannelState:  chanHealth.State,
 			FailCount1h:   chanHealth.FailCount,
+			OnlineUsers:   onlineUsers,
 		}
 	}
 
@@ -242,6 +265,7 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 		ConfigVersion:    a.currentVersion,
 		XrayAPIPort:      xrayPort,
 		SingboxClashPort: singboxPort,
+		OnlineUsers:      onlineUsers,
 		ChannelHealth:    channelHealthReport,
 		OS:               runtime.GOOS,
 		Arch:             runtime.GOARCH,
@@ -271,7 +295,7 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 	var hbResp *pb.HeartbeatAck
 	var extraActions []pb.HeartbeatAction
 	if a.channelsAvailable {
-		resp, err := a.sendHeartbeat(ctx, a.currentVersion, runtimeStatusStr, runtimeVersionStr, pid)
+		resp, err := a.sendHeartbeat(ctx, a.currentVersion, runtimeStatusStr, runtimeVersionStr, pid, onlineUsers)
 		if err != nil {
 			a.logger.Warn("protobuf heartbeat failed, using HTTP fallback", "error", err)
 			fallbackResp, fbErr := a.httpClient.Heartbeat(ctx, hbReq)
@@ -296,7 +320,8 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 		"response_action", hbResp.Action,
 		"extra_actions", len(extraActions),
 		"channel", chanHealth.ActiveChannel,
-		"channel_state", chanHealth.State)
+		"channel_state", chanHealth.State,
+		"online_users", onlineUsers)
 
 	// P1 fix: 每次心跳成功也清除升级 sentinel，防止健康进程被误回滚
 	if err := upgrader.CommitUpgradeHealthy(""); err != nil {
