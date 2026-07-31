@@ -113,7 +113,9 @@ func (r *RoutingRenderer) RenderRouting(ctx context.Context, nodeID uuid.UUID) (
 				if !seenRuleSets[rsID] {
 					seenRuleSets[rsID] = true
 					if rs, err := r.reader.GetRuleSetByID(ctx, rsID); err == nil && rs != nil {
-						singBoxRuleSets = append(singBoxRuleSets, buildSingBoxRuleSet(rs))
+						if sbRS := buildSingBoxRuleSet(rs); sbRS != nil {
+							singBoxRuleSets = append(singBoxRuleSets, sbRS)
+						}
 					}
 				}
 			}
@@ -350,11 +352,22 @@ func buildXrayBalancer(g *OutboundGroup) Map {
 	}
 }
 
-// buildSingBoxRuleSet 把 route_rule_set 渲染为 sing-box rule_set 声明
+// buildSingBoxRuleSet 把 route_rule_set 渲染为 sing-box rule_set 声明。
+// 内置规则集（inline/geoip/geosite）已被 applyEntry 展开到规则的匹配字段中，
+// 不需要声明为 sing-box remote rule_set（否则 sing-box 尝试从空 URL 下载会失败）。
+// 只有 source_type=remote_url 且有 SourceURL 的规则集才声明为 remote rule_set。
 func buildSingBoxRuleSet(rs *RouteRuleSet) Map {
-	return Map{
+	m := Map{
 		"tag":    rs.Code,
-		"type":   "remote",
 		"format": "binary",
 	}
+	if rs.SourceType == "remote_url" && rs.SourceURL != nil && *rs.SourceURL != "" {
+		m["type"] = "remote"
+		m["url"] = *rs.SourceURL
+	} else {
+		// inline/geoip/geosite 类型：规则已被展开到 routing rules 中，
+		// 跳过 rule_set 声明（返回 nil 由调用方过滤）
+		return nil
+	}
+	return m
 }
