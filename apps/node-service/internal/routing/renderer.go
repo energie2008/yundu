@@ -233,11 +233,11 @@ func (r *RoutingRenderer) renderRule(ctx context.Context, rule *RoutePolicyRule)
 			sbRule["domain"] = sbGeoSites
 		}
 	}
-	if len(sbGeoIPs) > 0 {
-		if existing, ok := sbRule["ip_cidr"].([]interface{}); ok {
-			sbRule["ip_cidr"] = append(existing, sbGeoIPs...)
-		} else {
-			sbRule["ip_cidr"] = sbGeoIPs
+	// sing-box 1.12+ 已移除 geoip 支持。geoip:private → ip_is_private: true；
+	// 其他 geoip 条目已废弃，跳过（应迁移到 rule_set 引用）。
+	for _, g := range sbGeoIPs {
+		if s, ok := g.(string); ok && s == "geoip:private" {
+			sbRule["ip_is_private"] = true
 		}
 	}
 
