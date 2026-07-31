@@ -534,19 +534,33 @@ func defaultWarpRoutingRules() []Map {
 
 // splitLocalAddresses 将 local_address 字符串按逗号拆分为多个 CIDR。
 // 支持双栈输入如 "172.16.0.2/32, 2606:4700:xxx/128"，输出 ["172.16.0.2/32","2606:4700:xxx/128"]。
-// sing-box wireguard outbound 的 local_address 期望每个 CIDR 为独立数组元素，
-// 不能把含逗号的整个字符串作为单个元素，否则双栈地址解析失败。
+// sing-box wireguard endpoint 的 address 期望每个元素是带前缀的 CIDR（netip.Prefix），
+// 缺前缀时会报 "netip.ParsePrefix: no '/'" 校验失败。因此对无前缀地址自动补 /32（IPv4）或 /128（IPv6），
+// 兼容历史 warpreg 版本写入的无前缀 local_address（如 vps206 的 "172.16.0.2"）。
 func splitLocalAddresses(addr string) []string {
 	parts := strings.Split(addr, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
+		if p == "" {
+			continue
 		}
+		out = append(out, ensureCIDR(p))
 	}
 	if len(out) == 0 {
-		return []string{addr}
+		return []string{ensureCIDR(strings.TrimSpace(addr))}
 	}
 	return out
+}
+
+// ensureCIDR 为无前缀的 IP 地址补全 CIDR 前缀：IPv4 补 /32，IPv6 补 /128。
+// 已带前缀（含 '/'）的原样返回。
+func ensureCIDR(ip string) string {
+	if ip == "" || strings.Contains(ip, "/") {
+		return ip
+	}
+	if strings.Contains(ip, ":") {
+		return ip + "/128"
+	}
+	return ip + "/32"
 }
