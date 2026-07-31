@@ -718,37 +718,37 @@ func (h *AdminWarpHandler) EnableWarpForNodes(c *gin.Context) {
 				break
 			}
 		}
-		if alreadyHasWarp {
-			skipped++
-			continue
-		}
-		// 为节点创建 N 条 warp outbound_policy（每个 profile 一条）
-		for _, w := range profiles {
-			if w.PrivateKey == nil || w.OutboundTag == nil {
-				continue
-			}
-			cfg := Map{
-				"private_key":   *w.PrivateKey,
-				"public_key":    "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
-				"endpoint":      "engage.cloudflareclient.com:2408",
-				"local_address": *w.LocalAddress,
-				"mtu":           w.MTU,
-				"tag":           *w.OutboundTag,
-			}
-			if w.Endpoint != nil {
-				cfg["endpoint"] = *w.Endpoint
-			}
-			if w.PublicKey != nil {
-				cfg["public_key"] = *w.PublicKey
-			}
-			_, err := h.outboundSvc.Create(c.Request.Context(), nodeID, &CreatePolicyRequest{
-				PolicyType: "warp",
-				Priority:   &priority,
-				ConfigJSON: cfg,
-				IsEnabled:  &enabled,
-			})
-			if err != nil {
-				failed++
+		// 已有 warp policy 时不重复创建，但仍继续检查/补建 load_balance policy（自愈）：
+		// 旧版多步骤流程可能只建了 warp 而未建 load_balance，导致勾选后流量仍直连
+		if !alreadyHasWarp {
+			// 为节点创建 N 条 warp outbound_policy（每个 profile 一条）
+			for _, w := range profiles {
+				if w.PrivateKey == nil || w.OutboundTag == nil {
+					continue
+				}
+				cfg := Map{
+					"private_key":   *w.PrivateKey,
+					"public_key":    "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+					"endpoint":      "engage.cloudflareclient.com:2408",
+					"local_address": *w.LocalAddress,
+					"mtu":           w.MTU,
+					"tag":           *w.OutboundTag,
+				}
+				if w.Endpoint != nil {
+					cfg["endpoint"] = *w.Endpoint
+				}
+				if w.PublicKey != nil {
+					cfg["public_key"] = *w.PublicKey
+				}
+				_, err := h.outboundSvc.Create(c.Request.Context(), nodeID, &CreatePolicyRequest{
+					PolicyType: "warp",
+					Priority:   &priority,
+					ConfigJSON: cfg,
+					IsEnabled:  &enabled,
+				})
+				if err != nil {
+					failed++
+				}
 			}
 		}
 		// 创建 load_balance policy 聚合所有 warp outbound，让 deployment_service LB-3 逻辑
@@ -786,7 +786,11 @@ func (h *AdminWarpHandler) EnableWarpForNodes(c *gin.Context) {
 				}
 			}
 		}
-		created++
+		if alreadyHasWarp && alreadyHasLB {
+			skipped++
+		} else {
+			created++
+		}
 	}
 
 	// 按需分配模式：EnableWarpForNodes 创建 warp outbound_policy 后，自动创建 load_balance policy
