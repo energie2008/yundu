@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   Server,
   Activity,
@@ -1055,8 +1055,8 @@ export default function Nodes() {
     }
   }, [searchParams, setSearchParams])
 
-  const loadNodes = async () => {
-    setLoading(true)
+  const loadNodes = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const data = await api.get<{ items: Node[]; total: number; page: number; page_size: number }>(EP.NODES, {
         params: { page: 1, page_size: 200 },
@@ -1096,6 +1096,20 @@ export default function Nodes() {
 
   useEffect(() => {
     loadNodes()
+  }, [])
+
+  // 自动刷新：每 10s 静默轮询一次，使在线人数实时更新（不触发 loading 闪烁）
+  // 与 node-agent 心跳周期（10s）对齐，确保看到最新的在线人数变化
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    refreshTimerRef.current = setInterval(() => {
+      loadNodes(true)
+    }, 10_000)
+    return () => {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current)
+      }
+    }
   }, [])
 
   const stats = useMemo(() => {
@@ -1562,7 +1576,7 @@ export default function Nodes() {
                   <option key={f.value} value={f.value} className="bg-zinc-800">{f.label}</option>
                 ))}
               </select>
-              <Button variant="ghost" size="sm" onClick={loadNodes} className="text-zinc-400 hover:text-zinc-200 h-9">
+              <Button variant="ghost" size="sm" onClick={() => loadNodes()} className="text-zinc-400 hover:text-zinc-200 h-9">
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </Button>
             </div>
@@ -1729,6 +1743,9 @@ export default function Nodes() {
                       <Globe className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
                       <span className="text-xs font-mono text-zinc-400 truncate flex-1">
                         {node.address}:{node.port}
+                        {node.server_port && Number(node.server_port) > 0 && Number(node.server_port) !== Number(node.port) && (
+                          <span className="text-zinc-600" title="服务器监听端口"> ({node.server_port})</span>
+                        )}
                       </span>
                       {copiedId === node.id ? (
                         <Check className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />

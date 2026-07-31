@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Server,
@@ -933,13 +933,11 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
   // 对话框状态
   const [registerOpen, setRegisterOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
-  const [lbOpen, setLbOpen] = useState(false)
   const [licenseOpen, setLicenseOpen] = useState(false)
   const [licenseProfile, setLicenseProfile] = useState<WarpProfile | null>(null)
   const [licenseValue, setLicenseValue] = useState('')
   const [registerCode, setRegisterCode] = useState('')
   const [importForm, setImportForm] = useState({ private_key: '', local_address: '', code: '' })
-  const [lbStrategy, setLbStrategy] = useState('round_robin')
 
   // 节点 WARP 分配状态
   const [nodesStatus, setNodesStatus] = useState<NodeWarpStatus[]>([])
@@ -1039,25 +1037,6 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
     }
   }
 
-  // 启用负载均衡（body: strategy）
-  const handleEnableLB = async () => {
-    setActionLoading(true)
-    try {
-      await api.post(EP.SERVER_WARP_ENABLE_LOAD_BALANCE(serverId), { strategy: lbStrategy })
-      toast({ title: '负载均衡已启用', description: `策略：${lbStrategy}`, variant: 'success' })
-      setLbOpen(false)
-      await fetchStatus()
-    } catch (e) {
-      toast({
-        title: '启用失败',
-        description: e instanceof ApiError ? e.message : '未知错误',
-        variant: 'destructive',
-      })
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
   // 切换节点勾选
   const toggleNodeSelection = (nodeId: string) => {
     setSelectedNodeIds(prev => {
@@ -1068,59 +1047,48 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
     })
   }
 
-  // 批量启用节点 WARP
-  const handleEnableNodesWarp = async () => {
-    const nodeIds = Array.from(selectedNodeIds)
-    if (nodeIds.length === 0) {
-      toast({ title: '请至少选择一个节点', variant: 'destructive' })
-      return
-    }
-    setActionLoading(true)
-    try {
-      const resp = await api.post<{ nodes_affected: number; nodes_skipped: number; profiles_count: number }>(
-        EP.SERVER_WARP_ENABLE_NODES(serverId),
-        { node_ids: nodeIds }
-      )
-      toast({
-        title: 'WARP 已启用',
-        description: `影响 ${resp.nodes_affected} 个节点，跳过 ${resp.nodes_skipped} 个（已启用）`,
-        variant: 'success',
-      })
-      await fetchNodesStatus()
-    } catch (e) {
-      toast({
-        title: '启用失败',
-        description: e instanceof ApiError ? e.message : '未知错误',
-        variant: 'destructive',
-      })
-    } finally {
-      setActionLoading(false)
-    }
-  }
+  // 勾选状态与线上状态的差异（待启用/待恢复直连）
+  const pendingEnable = nodesStatus.filter(n => selectedNodeIds.has(n.id) && !n.warp_enabled)
+  const pendingDisable = nodesStatus.filter(n => !selectedNodeIds.has(n.id) && n.warp_enabled)
+  const hasPendingChanges = pendingEnable.length > 0 || pendingDisable.length > 0
 
-  // 批量禁用节点 WARP
-  const handleDisableNodesWarp = async () => {
-    const nodeIds = Array.from(selectedNodeIds)
-    if (nodeIds.length === 0) {
-      toast({ title: '请至少选择一个节点', variant: 'destructive' })
+  // 一键应用勾选：勾选→启用 WARP（自动创建 warp + warp-pool 策略），
+  // 取消勾选→恢复直连（删除策略），随后自动逐节点下发配置，无需单独开启负载均衡
+  const handleApplyWarpSelection = async () => {
+    const toEnable = pendingEnable.map(n => n.id)
+    const toDisable = pendingDisable.map(n => n.id)
+    if (toEnable.length === 0 && toDisable.length === 0) {
+      toast({ title: '没有变更', description: '勾选状态与当前一致，无需应用' })
       return
     }
-    if (!window.confirm(`确定禁用 ${nodeIds.length} 个节点的 WARP 出口吗？相关 outbound_policy 将被删除。`)) return
+    if (toDisable.length > 0 && !window.confirm(`将有 ${toDisable.length} 个节点恢复直连（删除其 WARP 出站策略），确定应用吗？`)) return
     setActionLoading(true)
     try {
-      const resp = await api.post<{ policies_deleted: number; nodes_skipped: number }>(
-        EP.SERVER_WARP_DISABLE_NODES(serverId),
-        { node_ids: nodeIds }
-      )
+      if (toEnable.length > 0) {
+        await api.post(EP.SERVER_WARP_ENABLE_NODES(serverId), { node_ids: toEnable })
+      }
+      if (toDisable.length > 0) {
+        await api.post(EP.SERVER_WARP_DISABLE_NODES(serverId), { node_ids: toDisable })
+      }
+      // 自动下发配置：逐节点刷新配置版本，节点下次心跳拉取后生效
+      let refreshFailed = 0
+      for (const id of [...toEnable, ...toDisable]) {
+        try {
+          await api.post(EP.DEPLOYMENT_REFRESH, { scope_type: 'node', scope_id: id })
+        } catch {
+          refreshFailed++
+        }
+      }
       toast({
-        title: 'WARP 已禁用',
-        description: `删除 ${resp.policies_deleted} 条策略`,
-        variant: 'success',
+        title: 'WARP 分配已应用',
+        description: `启用 ${toEnable.length} 个 · 恢复直连 ${toDisable.length} 个${refreshFailed > 0 ? `（${refreshFailed} 个节点配置下发失败，请到节点管理手动发布）` : '，配置已自动下发，节点心跳后生效'}`,
+        variant: refreshFailed > 0 ? 'destructive' : 'success',
       })
       await fetchNodesStatus()
+      await fetchStatus()
     } catch (e) {
       toast({
-        title: '禁用失败',
+        title: '应用失败',
         description: e instanceof ApiError ? e.message : '未知错误',
         variant: 'destructive',
       })
@@ -1271,20 +1239,6 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
               <Upload className="w-4 h-4 mr-1" />
               导入已有账号
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className={`border-zinc-700 hover:bg-zinc-800 ${
-                status?.load_balance
-                  ? 'text-zinc-500 cursor-not-allowed'
-                  : 'text-emerald-400 hover:text-emerald-300'
-              }`}
-              onClick={() => setLbOpen(true)}
-              disabled={actionLoading || status?.load_balance}
-            >
-              <Zap className="w-4 h-4 mr-1" />
-              {status?.load_balance ? '负载均衡已启用' : '启用负载均衡'}
-            </Button>
           </div>
         </CardContent>
       </Card>
@@ -1429,7 +1383,7 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
             </Button>
           </div>
           <CardDescription className="text-zinc-500">
-            按需勾选节点启用 WARP 出口，未勾选的节点走直连/socks5/chain 等其他策略
+            勾选节点后点“应用”：仅该节点流量走 WARP 池（多账号自动选优+故障切换）；取消勾选即恢复直连，各节点互不影响
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1546,28 +1500,25 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
                   </TableBody>
                 </Table>
               </div>
-              <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-zinc-800">
+              <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-zinc-800">
                 <Button
                   size="sm"
                   className="bg-indigo-600 hover:bg-indigo-500"
-                  onClick={handleEnableNodesWarp}
-                  disabled={actionLoading || selectedNodeIds.size === 0}
+                  onClick={handleApplyWarpSelection}
+                  disabled={actionLoading || !hasPendingChanges}
                 >
                   <Zap className="w-4 h-4 mr-1" />
-                  启用 WARP
+                  {actionLoading ? '应用中...' : '应用勾选（未勾选恢复直连）'}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-red-800/50 text-red-400 hover:bg-red-950/30 hover:text-red-300"
-                  onClick={handleDisableNodesWarp}
-                  disabled={actionLoading || selectedNodeIds.size === 0}
-                >
-                  <Trash2 className="w-4 h-4 mr-1" />
-                  禁用 WARP
-                </Button>
+                {hasPendingChanges ? (
+                  <span className="text-xs text-amber-400">
+                    待启用 {pendingEnable.length} 个 · 待恢复直连 {pendingDisable.length} 个（尚未生效）
+                  </span>
+                ) : (
+                  <span className="text-xs text-zinc-500">勾选状态与线上一致</span>
+                )}
                 <span className="text-xs text-zinc-500 self-center ml-auto">
-                  已选 {selectedNodeIds.size} / 共 {nodesStatus.length} 个节点
+                  已勾选 {selectedNodeIds.size} / 共 {nodesStatus.length} 个节点
                 </span>
               </div>
             </>
@@ -1665,48 +1616,6 @@ function WarpManagementPanel({ serverId }: { serverId: string }) {
               className="bg-indigo-600 hover:bg-indigo-500"
             >
               {actionLoading ? '导入中...' : '导入账号'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 启用负载均衡对话框 */}
-      <Dialog open={lbOpen} onOpenChange={setLbOpen}>
-        <DialogContent className="bg-zinc-900 border-zinc-800 max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-zinc-100">启用 WARP 负载均衡</DialogTitle>
-            <DialogDescription className="text-zinc-500">
-              将账号池中的多个 WARP 出站组合为负载均衡组
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="warp-lb-strategy" className="text-zinc-300">负载均衡策略</Label>
-              <Select
-                id="warp-lb-strategy"
-                value={lbStrategy}
-                onChange={(e) => setLbStrategy(e.target.value)}
-                className="bg-zinc-950 border-zinc-700 text-zinc-100"
-              >
-                <option value="round_robin">round_robin（轮询）</option>
-                <option value="random">random（随机）</option>
-                <option value="least_conn">least_conn（最少连接）</option>
-              </Select>
-              <p className="text-xs text-zinc-500">
-                当前账号池: {profiles.map(p => p.outbound_tag).join(', ') || '无'}
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setLbOpen(false)} disabled={actionLoading}>
-              取消
-            </Button>
-            <Button
-              onClick={handleEnableLB}
-              disabled={actionLoading}
-              className="bg-emerald-600 hover:bg-emerald-500"
-            >
-              {actionLoading ? '启用中...' : '启用负载均衡'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2657,6 +2566,25 @@ export default function Servers() {
   useEffect(() => {
     loadServers()
   }, [loadServers])
+
+  // 自动刷新：每 10s 轮询服务器列表，使在线人数汇总实时更新
+  // 静默刷新：不触发 loading 状态，避免页面闪烁
+  const listTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    listTimerRef.current = setInterval(() => {
+      api.get<unknown>(EP.SERVERS, { params: { page: 1, page_size: 100 } })
+        .then((data) => {
+          const list = normalizeList<ServerResponseItem>(data)
+          setServers(list.map(mapServerResponse))
+        })
+        .catch(() => {})
+    }, 10_000)
+    return () => {
+      if (listTimerRef.current) {
+        clearInterval(listTimerRef.current)
+      }
+    }
+  }, [])
 
   // 进入详情视图时加载 agent_token、install_cmd 和关联节点（后端 GET /admin/servers/:id 返回 ServerDetailResponse）
   const loadServerDetail = useCallback(async (serverId: string) => {

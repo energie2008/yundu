@@ -255,7 +255,6 @@ func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config m
 			}
 		}
 	}
-	urltestFinalSet := false
 	for _, node := range nodes {
 		resp, err := s.outboundService.ApplyAll(ctx, node.ID)
 		if err != nil {
@@ -306,28 +305,56 @@ func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config m
 				seenTags[tag] = true
 			}
 			config["outbounds"] = outbounds
+		}
 
-			// LB-3: 检测 urltest outbound（由 load_balance policy 转译而来），
-			// 设置 route.final 实现"全部流量走 WARP"。
-			if isSingbox && !urltestFinalSet {
-				for _, ob := range renderedOutbounds {
-					if t, ok := ob["type"].(string); ok && t == "urltest" {
-						if tag, ok := ob["tag"].(string); ok && tag != "" {
-							route, ok := config["route"].(map[string]interface{})
-							if !ok {
-								route = map[string]interface{}{}
-								config["route"] = route
-							}
-							route["final"] = tag
-							urltestFinalSet = true
-							if s.logger != nil {
-								s.logger.Info("injectOutboundPolicies: route.final set to urltest",
-									"node_id", node.ID, "final_outbound", tag)
-							}
-							break
-						}
-					}
+		// LB-3 (节点级重构): 检测 urltest outbound（由 load_balance policy 转译而来），
+		// 按该节点的 inbound 注入精确路由规则，替代旧的全局 route.final 方案。
+		// 旧方案 route.final=urltest 是 sing-box 全局兜底出口，同一 VPS 上所有节点
+		// 共享一个 sing-box 进程，任一节点勾选 WARP 会把未勾选节点的流量也导入 WARP 池。
+		// 新方案仅对勾选节点的 inbound 注入 inbound→warp-pool 规则：
+		//   - 勾选节点：inbound 流量路由到 warp-pool（urltest 自动选优+故障切换）
+		//   - 未勾选节点：无规则命中，走默认直连（route.final 不再被设置）
+		if isSingbox {
+			for _, ob := range renderedOutbounds {
+				t, _ := ob["type"].(string)
+				if t != "urltest" {
+					continue
 				}
+				tag, _ := ob["tag"].(string)
+				if tag == "" {
+					continue
+				}
+				inboundTags := collectNodeInboundTags(config, node.Code)
+				if len(inboundTags) == 0 {
+					// 配置中找不到该节点的 inbound（tag 约定不符或 inbound 未渲染），
+					// 记录警告便于排查，不注入规则避免引用不存在的 inbound
+					if s.logger != nil {
+						s.logger.Warn("injectOutboundPolicies: no inbound tags found for warp routing",
+							"node_id", node.ID, "node_code", node.Code, "pool_tag", tag)
+					}
+					break
+				}
+				route, ok := config["route"].(map[string]interface{})
+				if !ok {
+					route = map[string]interface{}{}
+					config["route"] = route
+				}
+				var rules []interface{}
+				if existing, ok := route["rules"].([]interface{}); ok {
+					rules = existing
+				}
+				rules = append(rules, map[string]interface{}{
+					"action":   "route",
+					"inbound":  inboundTags,
+					"outbound": tag,
+				})
+				route["rules"] = rules
+				if s.logger != nil {
+					s.logger.Info("injectOutboundPolicies: warp inbound routing rule injected",
+						"node_id", node.ID, "node_code", node.Code,
+						"inbound_tags", inboundTags, "outbound", tag)
+				}
+				break
 			}
 		}
 		if len(renderedRules) > 0 {
@@ -351,6 +378,29 @@ func (s *DeploymentService) injectOutboundPolicies(ctx context.Context, config m
 				"rule_count", len(renderedRules), "runtime", runtimeType)
 		}
 	}
+}
+
+// collectNodeInboundTags 从内核配置中收集属于指定节点的 inbound tag。
+// tag 约定（kernelrender）：主 inbound 为 "in-<code>"，split 模式下行 inbound 为
+// "in-<code>" + DownstreamTagSuffix。仅返回配置中真实存在的 tag，
+// 避免路由规则引用不存在的 inbound 导致 sing-box 校验失败。
+func collectNodeInboundTags(config map[string]interface{}, nodeCode string) []string {
+	want := map[string]bool{
+		"in-" + nodeCode:                       true,
+		"in-" + nodeCode + DownstreamTagSuffix: true,
+	}
+	inbounds, _ := config["inbounds"].([]interface{})
+	var tags []string
+	for _, inb := range inbounds {
+		m, ok := inb.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if tag, _ := m["tag"].(string); tag != "" && want[tag] {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
 }
 
 // getAuditConfig 返回生效的审计配置，nil 时回退到默认值。
@@ -1201,7 +1251,7 @@ func (s *DeploymentService) pushConfigToRuntime(ctx context.Context, runtimeID u
 				agentVer, MinAgentVersionForP2)
 			s.logger.Error("pushConfig: agent version too old, rejecting config push",
 				"server_code", server.Code, "agent_version", agentVer, "min_version", MinAgentVersionForP2)
-			return fmt.Errorf(errMsg)
+			return fmt.Errorf("%s", errMsg)
 		}
 	}
 	if err := s.configPusher.PushConfig(ctx, server.Code, cv); err != nil {
@@ -1569,6 +1619,20 @@ func (s *DeploymentService) buildNginxVhosts(nodes []*model.Node) map[string]int
 
 		cdnAddr, _ := n.ConfigJSON["cdn_address"].(string)
 		cdnAddr = strings.TrimSpace(cdnAddr)
+		// 回退修复：cdn/cdn_saas 节点（TerminationNginx）config_json.cdn_address 缺失时以 SNI 回退。
+		// 历史/导入数据未写入 cdn_address 会导致 WS/gRPC/HTTPUpgrade CDN 节点跳过 nginx 8445 vhost
+		// 生成，且 stream 误将 SNI 透传到无 TLS 的本地端口（upstream_tls_*→plainport）→ TLS 握手失败。
+		// CDN 节点必须由 nginx 持证书在 8445 终止 TLS，故以 SNI 作为 CDN 域名单一真相源回退。
+		if cdnAddr == "" && tc == TerminationNginx {
+			if n.SNI != nil {
+				cdnAddr = strings.TrimSpace(*n.SNI)
+			}
+			if cdnAddr == "" {
+				if sn, ok := n.ConfigJSON["sni"].(string); ok {
+					cdnAddr = strings.TrimSpace(sn)
+				}
+			}
+		}
 		isReality := tc == TerminationReality
 
 		if cdnAddr != "" {
@@ -3294,6 +3358,33 @@ func (s *DeploymentService) ReportConfigResult(ctx context.Context, runtimeID uu
 		}
 	}
 	return nil
+}
+
+// ReconcileDispatchStatusOnHeartbeat 心跳自愈：当 agent 上报版本 == 面板最新版本 且 runtime 运行中时，
+// 清除该 runtime 下节点的陈旧 "failed" 下发状态。
+//
+// 场景：agent 修复 bug 后重启，sing-box 用 LKG 配置正常启动，版本与面板一致。
+// 此时心跳返回 NONE（不触发 reload），agent 不会重新部署，不上报新的 ConfigResult，
+// 导致 nodes.metadata._dispatch_status 永远停留在上次失败的 "failed"。
+// 此方法在心跳路径自动将匹配版本的 "failed" 刷为 "applied"，使面板状态与实际一致。
+//
+// 仅当 agentVersion > 0 时执行；无陈旧状态时返回 affected=0，调用方可据此决定是否记日志。
+// 设计为幂等：重复调用无副作用，已 "applied" 的节点不会被触碰。
+func (s *DeploymentService) ReconcileDispatchStatusOnHeartbeat(ctx context.Context, runtimeID uuid.UUID, agentVersion int64) (affected int64, err error) {
+	if agentVersion <= 0 {
+		return 0, nil
+	}
+	affected, err = s.nodeRepo.ClearStaleFailedDispatchStatus(ctx, runtimeID, agentVersion)
+	if err != nil {
+		s.logger.Warn("ReconcileDispatchStatusOnHeartbeat: clear stale failed status failed",
+			"runtime_id", runtimeID, "version", agentVersion, "error", err)
+		return 0, err
+	}
+	if affected > 0 {
+		s.logger.Info("ReconcileDispatchStatusOnHeartbeat: cleared stale failed dispatch status",
+			"runtime_id", runtimeID, "version", agentVersion, "affected_nodes", affected)
+	}
+	return affected, nil
 }
 
 // PrecheckDeployment 部署预检：在 Publish/Deploy 前自动运行，提前拦截错误配置。

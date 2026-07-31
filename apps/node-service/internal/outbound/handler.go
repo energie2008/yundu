@@ -171,7 +171,7 @@ type NodeListerEx interface {
 
 // WarpPoolRegistrar 抽象 warpreg 池的注册/导入能力（用于 handler 调用）
 type WarpPoolRegistrar interface {
-	RegisterForNode(ctx context.Context, serverID uuid.UUID, code string) (*WarpProfile, error)
+	RegisterForNode(ctx context.Context, serverID uuid.UUID, code string, opts *WarpRegisterOptions) (*WarpProfile, error)
 	ImportExisting(ctx context.Context, serverID uuid.UUID, code, privateKey, localAddress string) (*WarpProfile, error)
 }
 
@@ -335,6 +335,25 @@ func (h *AdminWarpHandler) ListNodeWarpProfiles(c *gin.Context) {
 	server.OK(c, gin.H{"items": resp, "total": len(resp)})
 }
 
+// RegisterWarpForNode 一键注册 WARP 账户（对齐 3x-ui 体验）
+// URL: POST /servers/:id/warp/register
+//
+// 请求体（JSON，可选字段，对齐 3x-ui "填 License/Endpoint 后一键注册"）：
+//
+//	{
+//	  "code": "vps081",         // 可选：节点 code，用于生成 profile 名称（默认 "node"）
+//	  "license_key": "xxx-xxx", // 可选：WARP+ License Key（团队零信任 Key 或个人 WARP+ Key）
+//	  "endpoint": "162.159.193.1:2408"  // 可选：优选 Endpoint，覆盖默认 engage.cloudflareclient.com:2408
+//	}
+//
+// 也兼容 query 参数（旧版）：?code=vps081
+//
+// 注册流程：
+//  1. 面板调用 Cloudflare WARP API 注册新账户（自动生成 curve25519 密钥对）
+//  2. 若提供 license_key → 自动调用 Cloudflare API 绑定 WARP+ License
+//  3. 若提供 endpoint → 覆盖默认 Endpoint（接入优选 IP）
+//  4. 自动填满 Private Key / Address / ClientID(reserved) / DeviceID / AccessToken 写入 warp_profiles 表
+//  5. 按需分配：仅创建 warp_profile 记录，不自动展开到节点（用户通过 EnableWarpForNodes 手动勾选）
 func (h *AdminWarpHandler) RegisterWarpForNode(c *gin.Context) {
 	serverID, ok := parseNodeID(c) // URL :id 是 servers.id
 	if !ok {
@@ -344,11 +363,32 @@ func (h *AdminWarpHandler) RegisterWarpForNode(c *gin.Context) {
 		server.Fail(c, config.CodeInternalError, "warp registration not configured")
 		return
 	}
-	nodeCode := c.Query("code")
-	if nodeCode == "" {
-		nodeCode = "node"
+
+	// 优先从 JSON body 读取（支持 license_key 和 endpoint），兼容 query 参数 code
+	var req struct {
+		Code       string `json:"code"`
+		LicenseKey string `json:"license_key"`
+		Endpoint   string `json:"endpoint"`
 	}
-	w, err := h.svc.pool.RegisterForNode(c.Request.Context(), serverID, nodeCode)
+	_ = c.ShouldBindJSON(&req)
+	// query 参数 code 作为兜底（旧版兼容）
+	if req.Code == "" {
+		req.Code = c.Query("code")
+	}
+	if req.Code == "" {
+		req.Code = "node"
+	}
+
+	// 构造注册选项（仅在有 license_key 或 endpoint 时传非空 opts）
+	var opts *WarpRegisterOptions
+	if req.LicenseKey != "" || req.Endpoint != "" {
+		opts = &WarpRegisterOptions{
+			LicenseKey: req.LicenseKey,
+			Endpoint:   req.Endpoint,
+		}
+	}
+
+	w, err := h.svc.pool.RegisterForNode(c.Request.Context(), serverID, req.Code, opts)
 	if err != nil {
 		server.Fail(c, config.CodeInternalError, err.Error())
 		return
@@ -411,8 +451,8 @@ func (h *AdminWarpHandler) EnableLoadBalance(c *gin.Context) {
 		server.InternalError(c, "")
 		return
 	}
-	if len(profiles) < 2 {
-		server.BadRequest(c, "at least 2 warp profiles required for load balancing")
+	if len(profiles) < 1 {
+		server.BadRequest(c, "at least 1 warp profile required")
 		return
 	}
 
@@ -423,8 +463,8 @@ func (h *AdminWarpHandler) EnableLoadBalance(c *gin.Context) {
 			outboundTags = append(outboundTags, *p.OutboundTag)
 		}
 	}
-	if len(outboundTags) < 2 {
-		server.BadRequest(c, "at least 2 warp outbound tags required")
+	if len(outboundTags) < 1 {
+		server.BadRequest(c, "at least 1 warp outbound tag required")
 		return
 	}
 
@@ -657,6 +697,17 @@ func (h *AdminWarpHandler) EnableWarpForNodes(c *gin.Context) {
 	created := 0
 	skipped := 0
 	failed := 0
+
+	// 收集所有 warp profile 的 outbound_tag（用于 load_balance policy 的 outbounds 字段）
+	// 所有勾选节点共用同一组 warp_profiles，warpTags 在循环外收集一次即可
+	var warpTags []interface{}
+	for _, w := range profiles {
+		if w.PrivateKey == nil || w.OutboundTag == nil {
+			continue
+		}
+		warpTags = append(warpTags, *w.OutboundTag)
+	}
+
 	for _, nodeID := range req.NodeIDs {
 		// 检查是否已有 warp policy（幂等）
 		existing, _ := h.outboundSvc.ListByNode(c.Request.Context(), nodeID)
@@ -700,33 +751,51 @@ func (h *AdminWarpHandler) EnableWarpForNodes(c *gin.Context) {
 				failed++
 			}
 		}
+		// 创建 load_balance policy 聚合所有 warp outbound，让 deployment_service LB-3 逻辑
+		// 注入 inbound→warp-pool 路由规则，实现"勾选启用 WARP → 该节点流量走 WARP"。
+		// 幂等：若节点已有 load_balance policy 则跳过
+		alreadyHasLB := false
+		for _, p := range existing {
+			if p.PolicyType == "load_balance" && p.IsEnabled {
+				alreadyHasLB = true
+				break
+			}
+		}
+		if !alreadyHasLB && len(warpTags) > 0 {
+			lbPriority := 20 // 高优先级（低于 warp 本身的 100）
+			lbCfg := Map{
+				"tag":            "warp-pool",
+				"outbounds":      warpTags,
+				"check_url":      "https://www.gstatic.com/generate_204",
+				"check_interval": "3m",
+			}
+			_, err := h.outboundSvc.Create(c.Request.Context(), nodeID, &CreatePolicyRequest{
+				PolicyType: "load_balance",
+				Priority:   &lbPriority,
+				ConfigJSON: lbCfg,
+				IsEnabled:  &enabled,
+			})
+			if err != nil {
+				// load_balance 创建失败不阻断 warp 启用（warp outbound 已创建，
+				// 用户可通过 EnableLoadBalance API 手动重试）
+				if s, ok := c.Get("logger"); ok {
+					if logger, ok := s.(interface{ Warn(string, ...any) }); ok {
+						logger.Warn("auto create load_balance policy failed",
+							"node_id", nodeID, "error", err)
+					}
+				}
+			}
+		}
 		created++
 	}
 
-	// 若启用了多个节点且有多个 profile，自动为这些节点创建 load_balance policy
-	if created > 0 && len(profiles) >= 2 {
-		var outboundTags []interface{}
-		for _, p := range profiles {
-			if p.OutboundTag != nil {
-				outboundTags = append(outboundTags, *p.OutboundTag)
-			}
-		}
-		lbPriority := 20
-		for _, nodeID := range req.NodeIDs {
-			_, _ = h.outboundSvc.Create(c.Request.Context(), nodeID, &CreatePolicyRequest{
-				PolicyType: "load_balance",
-				Priority:   &lbPriority,
-				ConfigJSON: Map{
-					"tag":            "warp-pool",
-					"outbounds":      outboundTags,
-					"strategy":       "round_robin",
-					"check_url":      "https://www.gstatic.com/generate_204",
-					"check_interval": "3m",
-				},
-				IsEnabled: &enabled,
-			})
-		}
-	}
+	// 按需分配模式：EnableWarpForNodes 创建 warp outbound_policy 后，自动创建 load_balance policy
+	// 聚合所有 warp outbound，让 deployment_service 的 LB-3 逻辑按节点 inbound 注入
+	// inbound→warp-pool 路由规则，实现"勾选启用 WARP → 仅该节点流量走 WARP"的节点级语义。
+	//   - 单 warp：load_balance policy 含 1 个 outbound → urltest → inbound 规则 → 该节点流量走 WARP
+	//   - 多 warp：load_balance policy 含 N 个 outbound → urltest → inbound 规则 → 该节点流量走 WARP 池（自动选优+故障切换）
+	//   - 取消勾选（DisableWarpForNodes）→ 删除 warp + load_balance policy → 无 inbound 规则 → 该节点流量走直连
+	//   - 同 VPS 其他未勾选节点：始终无规则命中，直连不受影响
 
 	server.OK(c, gin.H{
 		"enabled":        true,

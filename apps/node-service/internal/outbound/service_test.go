@@ -102,6 +102,22 @@ func (f *fakeWarpStore) List(ctx context.Context) ([]*WarpProfile, error) {
 	}
 	return out, nil
 }
+func (f *fakeWarpStore) Delete(ctx context.Context, id uuid.UUID) error {
+	if w, ok := f.byID[id]; ok {
+		delete(f.byID, id)
+		delete(f.byCode, w.Code)
+	}
+	return nil
+}
+func (f *fakeWarpStore) ListByNode(ctx context.Context, nodeID uuid.UUID) ([]*WarpProfile, error) {
+	var out []*WarpProfile
+	for _, w := range f.byID {
+		if w.NodeID != nil && *w.NodeID == nodeID {
+			out = append(out, w)
+		}
+	}
+	return out, nil
+}
 
 func TestCreatePolicy_Happy(t *testing.T) {
 	store := newFakePolicyStore()

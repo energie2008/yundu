@@ -24,16 +24,13 @@ func RenderOutbounds(policies []*OutboundPolicy) (*ApplyAllResponse, error) {
 	xrayRules := make([]Map, 0)
 	singBoxRules := make([]Map, 0)
 
-	// LB-1: 预扫描是否存在 load_balance policy。
-	// 若存在 load_balance，则跳过各 warp policy 的 P3-F 自动注入（避免 3 条 warp
-	// 各注入一份相同流媒体规则导致 routing 冲突），改由 load_balance policy 统一注入。
-	hasLoadBalance := false
-	for _, p := range policies {
-		if p != nil && p.IsEnabled && p.PolicyType == "load_balance" {
-			hasLoadBalance = true
-			break
-		}
-	}
+	// P3-F / LB-2 自动注入已移除（按需分配模式）：
+	//   - warp policy 未配置 routing_rules 时不再自动注入流媒体规则
+	//   - load_balance policy 未配置 routing_rules 时不再自动注入流媒体规则
+	// 节点在 admin-web WARP 管理页显式启用 WARP 仅生成 warp outbound/endpoint，
+	// 流量是否走 WARP 由用户显式配置的 routing_rules 决定；未配置则保持 direct。
+	// load_balance policy 由 EnableLoadBalance API 显式创建，配合 deployment_service
+	// 的 route.final=urltest 实现"全部流量走 WARP 池"的显式策略。
 
 	for _, p := range policies {
 		if p == nil || !p.IsEnabled {
@@ -62,43 +59,13 @@ func RenderOutbounds(policies []*OutboundPolicy) (*ApplyAllResponse, error) {
 		}
 
 		// routing rules（同形式：policy 配置里的 routing_rules 直接转译）
+		// 按需模式：仅渲染用户显式配置的 routing_rules，不再自动注入默认流媒体规则。
 		for _, rule := range p.RoutingRules {
 			if r := renderXrayRoutingRule(p, rule); r != nil {
 				xrayRules = append(xrayRules, r)
 			}
 			if r := renderSingBoxRoutingRule(p, rule); r != nil {
 				singBoxRules = append(singBoxRules, r)
-			}
-		}
-
-		// P3-F: WARP 路由规则自动注入
-		// 如果 warp policy 未配置任何 routing_rules，自动注入常见流媒体解锁规则。
-		// 设计原则：仅在用户未自定义路由时注入默认规则，避免覆盖用户显式配置。
-		// outbound tag 由 renderXrayRoutingRule/renderSingBoxRoutingRule 通过 policyTag(p) 自动设置。
-		// LB-1: 当存在 load_balance policy 时跳过 warp 自动注入（由 load_balance 统一注入）。
-		if p.PolicyType == "warp" && len(p.RoutingRules) == 0 && !hasLoadBalance {
-			for _, rule := range defaultWarpRoutingRules() {
-				if r := renderXrayRoutingRule(p, rule); r != nil {
-					xrayRules = append(xrayRules, r)
-				}
-				if r := renderSingBoxRoutingRule(p, rule); r != nil {
-					singBoxRules = append(singBoxRules, r)
-				}
-			}
-		}
-
-		// LB-2: load_balance 路由规则自动注入
-		// 当 load_balance policy 未配置 routing_rules 时，自动注入流媒体解锁规则，
-		// outbound 为 load_balance 的 tag（如 warp-pool），实现流量聚合到 WARP 池。
-		// 与 P3-F 对称：仅在用户未自定义路由时注入，避免覆盖显式配置。
-		if p.PolicyType == "load_balance" && len(p.RoutingRules) == 0 {
-			for _, rule := range defaultWarpRoutingRules() {
-				if r := renderXrayRoutingRule(p, rule); r != nil {
-					xrayRules = append(xrayRules, r)
-				}
-				if r := renderSingBoxRoutingRule(p, rule); r != nil {
-					singBoxRules = append(singBoxRules, r)
-				}
 			}
 		}
 	}
@@ -528,12 +495,10 @@ func buildSingBoxSocksUser(cfg Map) (string, string) {
 	return user, pwd
 }
 
-// defaultWarpRoutingRules P3-F: WARP 默认路由规则（常见流媒体解锁）。
-// 仅在 warp policy 未配置任何 routing_rules 时自动注入，避免覆盖用户显式配置。
+// defaultWarpRoutingRules WARP 默认路由规则（常见流媒体解锁）。
 //
-// 规则内容：将常见受地区限制的流媒体域名路由到 WARP 出口，利用 Cloudflare WARP IP 解锁。
-// 包含：Netflix / ChatGPT / Disney+ / YouTube Premium / Hulu / HBO Max / Spotify / TikTok 等。
-//
+// Deprecated: P3-F/LB-2 自动注入已移除（按需分配模式）。此函数不再被 RenderOutbounds 自动调用，
+// 保留供 admin-web WARP 管理页"一键填充流媒体规则"功能显式复用。
 // 返回的 rule Map 仅包含匹配条件（domains/ip_cidr），
 // outbound tag 由 renderXrayRoutingRule/renderSingBoxRoutingRule 通过 policyTag(p) 自动设置。
 func defaultWarpRoutingRules() []Map {

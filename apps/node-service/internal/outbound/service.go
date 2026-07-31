@@ -161,12 +161,14 @@ func validatePolicyConfig(policyType string, cfg Map) error {
 		}
 		return nil
 	case "load_balance":
-		// load_balance 需要至少 2 个 outbound tag
+		// load_balance 聚合 warp outbound，渲染为 sing-box urltest，由 deployment_service 设置 route.final。
+		// 允许 >=1 个 outbound：单 warp 时作为 route.final 引用（非真负载均衡但保证流量走 WARP）；
+		// 多 warp 时实现自动选优 + 故障切换。
 		if cfg == nil {
 			return ErrInvalidPolicyConfig
 		}
 		outbounds, ok := cfg["outbounds"].([]interface{})
-		if !ok || len(outbounds) < 2 {
+		if !ok || len(outbounds) < 1 {
 			return ErrInvalidPolicyConfig
 		}
 		return nil
@@ -181,9 +183,18 @@ type WarpProfileService struct {
 	pool   WarpPoolInterface
 }
 
+// WarpRegisterOptions 控制注册行为的可选参数（对齐 3x-ui 一键注册体验）。
+// 在 outbound 包定义以避免对 warpreg 包的循环依赖，由 app 层适配器转换为 warpreg.RegisterOptions。
+//   - LicenseKey: WARP+ License（团队零信任 Key 或个人 WARP+ Key），非空时注册后自动应用
+//   - Endpoint: 优选 Endpoint（如 162.159.193.1:2408），非空时覆盖默认 Endpoint
+type WarpRegisterOptions struct {
+	LicenseKey string
+	Endpoint   string
+}
+
 // WarpPoolInterface 抽象 warpreg.Pool，避免循环依赖
 type WarpPoolInterface interface {
-	RegisterForNode(ctx context.Context, nodeID uuid.UUID, nodeCode string) (*WarpProfile, error)
+	RegisterForNode(ctx context.Context, nodeID uuid.UUID, nodeCode string, opts *WarpRegisterOptions) (*WarpProfile, error)
 	ImportExisting(ctx context.Context, nodeID uuid.UUID, nodeCode, privateKey, localAddress string) (*WarpProfile, error)
 }
 

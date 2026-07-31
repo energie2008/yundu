@@ -113,7 +113,7 @@ func (r *WarpProfileRepo) Create(ctx context.Context, w *WarpProfile) error {
 		INSERT INTO warp_profiles (code, name, warp_mode, endpoint, license_key, config_json, is_default,
 			private_key, public_key, local_address, mtu,
 			device_id, access_token, client_id, ipv4_address, ipv6_address, status, node_id, outbound_tag)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		RETURNING id, created_at, updated_at`
 	return r.pool.QueryRow(ctx, query,
 		w.Code, w.Name, w.WarpMode, w.Endpoint, w.LicenseKey, w.ConfigJSON, w.IsDefault,
