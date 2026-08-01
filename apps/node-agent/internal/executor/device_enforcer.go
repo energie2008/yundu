@@ -35,8 +35,11 @@ type DeviceEnforcerConfig struct {
 	// Interval 是设备限制检查间隔（默认 15s）。
 	Interval time.Duration
 	// InboundTag 是需要执行用户移除操作的 inbound tag。
-	// 为空时从配置中自动推断（取第一个非 api 的 inbound）。
+	// 保留兼容：为空时使用 InboundTags 的第一个值。
 	InboundTag string
+	// InboundTags 是需要执行用户移除操作的全部 inbound tag（非 api）。
+	// 多节点共享同一 xray 内核时，超限用户应从所有 inbound 移除。
+	InboundTags []string
 }
 
 // ReloadFunc 是配置重载回调，用于在用户被拉黑后连接清零时重新加载配置以恢复用户。
@@ -77,6 +80,9 @@ func NewDeviceEnforcer(provider DeviceLimiterProvider, cfg DeviceEnforcerConfig,
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = defaultEnforceInterval
+	}
+	if len(cfg.InboundTags) == 0 && cfg.InboundTag != "" {
+		cfg.InboundTags = []string{cfg.InboundTag}
 	}
 	return &DeviceEnforcer{
 		cfg:      cfg,
@@ -296,19 +302,32 @@ func (e *DeviceEnforcer) enforceOnce(ctx context.Context) error {
 
 // removeUser 通过 HandlerService.AlterInbound + RemoveUserOperation 从 inbound 中移除用户。
 func (e *DeviceEnforcer) removeUser(ctx context.Context, conn *grpc.ClientConn, email string) error {
-	if e.cfg.InboundTag == "" {
-		return fmt.Errorf("inbound tag not configured")
+	if len(e.cfg.InboundTags) == 0 {
+		return fmt.Errorf("inbound tags not configured")
 	}
 
 	handlerClient := proxymanCmd.NewHandlerServiceClient(conn)
 	op := &proxymanCmd.RemoveUserOperation{Email: email}
-	req := &proxymanCmd.AlterInboundRequest{
-		Tag:       e.cfg.InboundTag,
-		Operation: serial.ToTypedMessage(op),
+	var lastErr error
+	removed := 0
+	for _, tag := range e.cfg.InboundTags {
+		req := &proxymanCmd.AlterInboundRequest{
+			Tag:       tag,
+			Operation: serial.ToTypedMessage(op),
+		}
+		if _, err := handlerClient.AlterInbound(ctx, req); err != nil {
+			lastErr = err
+			continue
+		}
+		removed++
 	}
-
-	_, err := handlerClient.AlterInbound(ctx, req)
-	return err
+	if removed == 0 {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("no inbound tag matched")
+		}
+		return lastErr
+	}
+	return nil
 }
 
 // pingStatsService 通过 QueryStats 查询 "user>>>" 前缀的流量统计，

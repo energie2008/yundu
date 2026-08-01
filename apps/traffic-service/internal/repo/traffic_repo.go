@@ -38,6 +38,7 @@ func (r *TrafficRepo) RecordUsage(ctx context.Context, userID uuid.UUID, nodeID 
 		UPDATE traffic_usage_daily
 		SET upload_bytes = upload_bytes + $4,
 		    download_bytes = download_bytes + $5,
+		    total_bytes = total_bytes + $4 + $5,
 		    updated_at = now()
 		WHERE usage_date = $1 AND user_id = $2 AND node_id IS NOT DISTINCT FROM $3`
 	tag, err := r.pool.Exec(ctx, updateQuery, date, userID, nodeID, uploadBytes, downloadBytes)
@@ -155,7 +156,8 @@ func (r *TrafficRepo) GetTopNodes(ctx context.Context, date time.Time, limit int
 	dayStart := date.Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
 	query := `
-		SELECT node_id, SUM(upload_bytes) as upload, SUM(download_bytes) as download, SUM(total_bytes) as total
+		SELECT node_id, SUM(upload_bytes) as upload, SUM(download_bytes) as download,
+		       SUM(upload_bytes + download_bytes) as total
 		FROM traffic_usage_daily
 		WHERE node_id IS NOT NULL AND usage_date >= $1 AND usage_date < $2
 		GROUP BY node_id
@@ -444,7 +446,10 @@ func (r *TrafficRepo) GetNodeIDByServerCode(ctx context.Context, serverCode stri
 // 用于 Dashboard 仪表盘的 online_count 指标，替代此前硬编码的 0。
 func (r *TrafficRepo) GetTotalOnlineUsers(ctx context.Context) (int64, error) {
 	var total int64
-	err := r.pool.QueryRow(ctx, `SELECT COALESCE(SUM(online_users), 0) FROM channel_health_current`).Scan(&total)
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(online_users), 0)
+		FROM channel_health_current
+		WHERE updated_at > now() - interval '90 seconds'`).Scan(&total)
 	if err != nil {
 		return 0, err
 	}

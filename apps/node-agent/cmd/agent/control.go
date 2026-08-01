@@ -162,12 +162,15 @@ func (a *Agent) ctrlRestart(w http.ResponseWriter, r *http.Request) {
 
 // ctrlDiag GET /diag — 诊断信息（端口/gRPC/证书）
 func (a *Agent) ctrlDiag(w http.ResponseWriter, r *http.Request) {
+	xrayAPI := a.xrayAPIEndpoint()
 	diag := map[string]interface{}{
-		"xray_grpc_10085": testDialTCP("127.0.0.1:10085"),
+		"xray_grpc":      xrayAPI,
+		"xray_grpc_alive": testDialTCP(xrayAPI),
 		"runtime_type":    a.cfg.RuntimeType,
 		"config_dir":      a.cfg.ConfigDir,
 		"config_version":  a.currentVersion,
 		"use_native":      a.useNative,
+		"tc_speed_limit":  a.speedEnforcer != nil,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(diag)

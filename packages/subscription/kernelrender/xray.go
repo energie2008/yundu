@@ -104,10 +104,11 @@ func (r *XrayRenderer) Render(spec *nodespec.NodeSpec) (map[string]interface{}, 
 	return result, nil
 }
 
-// renderPolicy 渲染 Xray policy 配置（限速级别 + 流量统计开关）。
+// renderPolicy 渲染 Xray policy 配置（级别 + 流量统计开关）。
 //
-// Xray 通过 policy.levels 实现级别管理：level 数字对应用户的 rate limit 级别。
-// level 0 = 不限速（默认），level 1+ = 不同限速值对应的级别。
+// Xray 通过 policy.levels 实现级别管理：level 数字用于区分用户组（保留限速级别映射，
+// 供未来内核能力使用）。注意：xray-core 的 policy 不支持 up_mbps/down_mbps 带宽字段，
+// 实际带宽限制由 node-agent 侧 SpeedLimiter/tc 整形执行，渲染器不再伪造限速字段。
 // 每个 level 开启 statsUserUplink/Downlink/Online 以支持流量统计和设备在线追踪（P1-8）。
 // 同时开启 system.statsOutboundUplink/Downlink 以支持流量统计。
 func (r *XrayRenderer) renderPolicy(spec *nodespec.NodeSpec, sl *speedLevelAssignment) map[string]interface{} {
@@ -123,8 +124,9 @@ func (r *XrayRenderer) renderPolicy(spec *nodespec.NodeSpec, sl *speedLevelAssig
 // speedLevelAssignment 持有限速值到 xray level 的映射，以及对应的 policy.levels 配置。
 //
 // P1-7: 为不同限速值（节点级 + 每用户）分配独立的 xray level，
-// 在 policy.levels 中设置 up_mbps/down_mbps 实现实际限速。
+// 保留 level 映射供统计分组与未来内核能力使用。
 // P1-8: 所有 level 开启 statsUserOnline 以支持设备在线 IP 追踪。
+// 注意：xray-core 不识别 policy.levels 中的 up_mbps/down_mbps，带宽限制由 agent 执行。
 type speedLevelAssignment struct {
 	speedToLevel map[int]int            // speed Mbps → level (0 = no limit)
 	levels       map[string]interface{} // xray policy.levels config
@@ -136,7 +138,7 @@ type speedLevelAssignment struct {
 //   - Level 0: 默认（不限速）
 //   - Level 1+: 每个唯一限速值分配一个 level（节点级 + 每用户）
 //
-// 每个 level 设置 up_mbps/down_mbps 为限速值，并开启统计开关。
+// 每个 level 仅开启统计开关；xray-core 无带宽字段，带宽限制由 agent 侧执行。
 func computeSpeedLevels(spec *nodespec.NodeSpec) *speedLevelAssignment {
 	a := &speedLevelAssignment{
 		speedToLevel: make(map[int]int),
@@ -161,8 +163,6 @@ func computeSpeedLevels(spec *nodespec.NodeSpec) *speedLevelAssignment {
 		lvl := nextLevel
 		a.speedToLevel[speedMbps] = lvl
 		a.levels[fmt.Sprintf("%d", lvl)] = map[string]interface{}{
-			"up_mbps":           speedMbps,
-			"down_mbps":         speedMbps,
 			"bufferSize":        1024,
 			"statsUserUplink":   true,
 			"statsUserDownlink": true,

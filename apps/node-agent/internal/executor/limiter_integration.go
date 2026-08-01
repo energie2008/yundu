@@ -42,6 +42,7 @@ type LimiterIntegration struct {
 	deviceLimiter    *limiter.DeviceLimiter
 	ipLimiter        *limiter.IPLimiter
 	userDeviceLimits sync.Map // uuid/email -> int (device limit)
+	userSpeedLimits  sync.Map // uuid/email -> int (speed limit Mbps)
 	userIPLimits     sync.Map // uuid/email -> int (ip limit)
 	nodeIPLimit      int      // 节点级 IP 数限制默认值（用户未配置 per-user 限制时生效）
 	logger           *slog.Logger
@@ -123,6 +124,12 @@ func (li *LimiterIntegration) parseLimiterMeta(rawMeta []byte) {
 
 		// 更新限速器：speed_limit_mbps <= 0 时移除限速器（不限速）
 		li.speedLimiter.SetLimit(key, u.SpeedLimitMbps)
+		// 记录用户限速值（供 xray tc 整形等按用户带宽执行）
+		if u.SpeedLimitMbps > 0 {
+			li.userSpeedLimits.Store(key, u.SpeedLimitMbps)
+		} else {
+			li.userSpeedLimits.Delete(key)
+		}
 
 		// 更新设备数限制
 		if u.DeviceLimit > 0 {
@@ -151,6 +158,17 @@ func (li *LimiterIntegration) parseLimiterMeta(rawMeta []byte) {
 // 返回 0 表示不限制设备数。
 func (li *LimiterIntegration) GetDeviceLimit(key string) int {
 	if v, ok := li.userDeviceLimits.Load(key); ok {
+		if limit, ok := v.(int); ok {
+			return limit
+		}
+	}
+	return 0
+}
+
+// GetSpeedLimit 返回指定用户（uuid/email）的带宽限速（Mbps）。
+// 返回 0 表示不限速。
+func (li *LimiterIntegration) GetSpeedLimit(key string) int {
+	if v, ok := li.userSpeedLimits.Load(key); ok {
 		if limit, ok := v.(int); ok {
 			return limit
 		}
@@ -198,6 +216,7 @@ type DeviceLimiterProvider interface {
 	DeviceLimiter() *limiter.DeviceLimiter
 	SpeedLimiter() *limiter.SpeedLimiter
 	GetDeviceLimit(uuid string) int
+	GetSpeedLimit(uuid string) int
 }
 
 // IPLimiterProvider 提供对 IPLimiter 的访问。

@@ -327,6 +327,10 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 	var degradeEvents []CapabilityLostEvent
 	// P1-3: 收集所有节点渲染器生成的 policy levels（保留 up_mbps/down_mbps 限速字段）
 	collectedPolicyLevels := make(map[string]interface{})
+	// 收集所有节点渲染器生成的 _limiter 元数据，最终聚合进整机配置。
+	// 此前只收集 inbounds/policy，导致 _limiter 在聚合时被丢弃，
+	// agent 永远收不到限速/设备限制元数据（speed/device/IP limit 全部静默失效）。
+	collectedLimiterMeta := make([]interface{}, 0)
 
 	// P-Chain: 链式套娃出站收集（per-node，在节点循环内填充）
 	// 套娃 outbound = 节点入站流量经此代理出站；健康降级用 balancer(xray)/urltest(sing-box)
@@ -399,6 +403,10 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 				continue
 			}
 			return nil, fmt.Errorf("节点 %s 编译失败: %w", node.Code, err)
+		}
+		// 聚合限速器元数据（每节点一份 _limiter，含 per-user speed/device/IP limit）
+		if lm, ok := rendered["_limiter"]; ok {
+			collectedLimiterMeta = append(collectedLimiterMeta, lm)
 		}
 		// P1-3: 收集渲染器生成的 policy levels（包含 up_mbps/down_mbps 限速字段）
 		if kernelName == "xray" {
@@ -865,6 +873,11 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 			s.logger.Info("chain bridges injected",
 				"bridge_count", len(chainBridgeInbounds), "kernel", "xray")
 		}
+		// 聚合后的限速器元数据注入 xray 配置（agent 剥离后初始化 SpeedLimiter/DeviceLimiter）
+		if lm := mergeRenderedLimiterMeta(collectedLimiterMeta); lm != nil {
+			config["_limiter"] = lm
+			s.logger.Info("limiter metadata injected into xray config", "kernel", "xray")
+		}
 		return config, nil
 	}
 
@@ -899,12 +912,136 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 		sbOutbounds = append(sbOutbounds, ob)
 	}
 
-	return map[string]interface{}{
+	sbConfig := map[string]interface{}{
 		"log":       map[string]interface{}{"level": "warn"},
 		"inbounds":  inbounds,
 		"outbounds": sbOutbounds,
 		"route":     sbRoute,
-	}, nil
+	}
+	// 聚合后的限速器元数据注入 sing-box 配置（agent 剥离后初始化 SpeedLimiter/DeviceLimiter）
+	if lm := mergeRenderedLimiterMeta(collectedLimiterMeta); lm != nil {
+		sbConfig["_limiter"] = lm
+		s.logger.Info("limiter metadata injected into sing-box config", "kernel", "sing-box")
+	}
+	return sbConfig, nil
+}
+
+// mergeRenderedLimiterMeta 合并多节点渲染出的 _limiter 元数据。
+//
+// 同一 VPS 上多个节点共享同一份 agent 级限速器状态，因此需要合并：
+//   - node 级限制取所有节点最大值（任一节点限速时该用户在本机都应受限）
+//   - per-user 限制按 email/uuid 去重，取最大值
+//
+// 无任何限制时返回 nil（保持旧行为：不注入 _limiter）。
+func mergeRenderedLimiterMeta(metas []interface{}) interface{} {
+	type userMeta struct {
+		email, uuid string
+		speed, device, ip int
+	}
+	users := make(map[string]*userMeta)
+	nodeSpeed, nodeDevice, nodeIP := 0, 0, 0
+
+	for _, m := range metas {
+		mm, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if v := metaInt(mm["node_speed_limit_mbps"]); v > nodeSpeed {
+			nodeSpeed = v
+		}
+		if v := metaInt(mm["node_device_limit"]); v > nodeDevice {
+			nodeDevice = v
+		}
+		if v := metaInt(mm["node_ip_limit"]); v > nodeIP {
+			nodeIP = v
+		}
+		rawUsers, _ := mm["users"].([]interface{})
+		for _, ru := range rawUsers {
+			um, ok := ru.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			email, _ := um["email"].(string)
+			uuid, _ := um["uuid"].(string)
+			key := email
+			if key == "" {
+				key = uuid
+			}
+			if key == "" {
+				continue
+			}
+			entry, exists := users[key]
+			if !exists {
+				entry = &userMeta{email: email, uuid: uuid}
+				users[key] = entry
+			}
+			if v := metaInt(um["speed_limit_mbps"]); v > entry.speed {
+				entry.speed = v
+			}
+			if v := metaInt(um["device_limit"]); v > entry.device {
+				entry.device = v
+			}
+			if v := metaInt(um["ip_limit"]); v > entry.ip {
+				entry.ip = v
+			}
+		}
+	}
+
+	if len(users) == 0 && nodeSpeed <= 0 && nodeDevice <= 0 && nodeIP <= 0 {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	if nodeSpeed > 0 {
+		result["node_speed_limit_mbps"] = nodeSpeed
+	}
+	if nodeDevice > 0 {
+		result["node_device_limit"] = nodeDevice
+	}
+	if nodeIP > 0 {
+		result["node_ip_limit"] = nodeIP
+	}
+	out := make([]interface{}, 0, len(users))
+	for _, u := range users {
+		um := make(map[string]interface{})
+		if u.email != "" {
+			um["email"] = u.email
+		}
+		if u.uuid != "" {
+			um["uuid"] = u.uuid
+		}
+		if u.speed > 0 {
+			um["speed_limit_mbps"] = u.speed
+		}
+		if u.device > 0 {
+			um["device_limit"] = u.device
+		}
+		if u.ip > 0 {
+			um["ip_limit"] = u.ip
+		}
+		out = append(out, um)
+	}
+	if len(out) > 0 {
+		result["users"] = out
+	}
+	return result
+}
+
+// metaInt 兼容 JSON 数值的 int 提取（float64/int/int64/json.Number）。
+func metaInt(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i)
+		}
+	}
+	return 0
 }
 
 // allocChainBridgePort 基于节点 code 分配稳定的本地桥接端口（11100-11199）。

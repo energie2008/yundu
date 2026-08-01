@@ -51,10 +51,8 @@ func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus
 	// proto 的 ChannelHealth 没有 online_users 字段，而 NodeStatus.online_users 已存在，
 	// 因此用 nodes[0] 携带聚合值，服务端 gRPC handler 遍历 nodes 求和写入 channel_health_current。
 	// 这打通了 gRPC 主路径的在线人数上报（此前仅 HTTP fallback 路径能上报，导致走 gRPC 的节点恒为 0）。
-	var nodeStatuses []*pb.NodeStatus
-	if onlineUsers > 0 {
-		nodeStatuses = []*pb.NodeStatus{{OnlineUsers: int64(onlineUsers)}}
-	}
+	// 即使 onlineUsers=0 也始终携带 nodes，避免服务端沿用旧值（在线人数归零时也要刷新）。
+	nodeStatuses := []*pb.NodeStatus{{OnlineUsers: int64(onlineUsers)}}
 
 	hb := &pb.AgentMessage{
 		Seq:       a.nextSeq(),

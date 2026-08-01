@@ -293,20 +293,30 @@ func extractProbeTags(ib map[string]interface{}) map[string]string {
 
 // extractInboundTag 从 xray/sing-box 配置中提取第一个非 api inbound 的 tag。
 func extractInboundTag(configMap map[string]interface{}) string {
-	inbounds, ok := configMap["inbounds"].([]interface{})
-	if !ok {
+	tags := extractInboundTags(configMap)
+	if len(tags) == 0 {
 		return ""
 	}
+	return tags[0]
+}
+
+// extractInboundTags 从 xray/sing-box 配置中提取全部非 api inbound 的 tag。
+func extractInboundTags(configMap map[string]interface{}) []string {
+	inbounds, ok := configMap["inbounds"].([]interface{})
+	if !ok {
+		return nil
+	}
+	var tags []string
 	for _, ib := range inbounds {
 		if m, ok := ib.(map[string]interface{}); ok {
 			tag, _ := m["tag"].(string)
 			if tag == "" || tag == "api" {
 				continue
 			}
-			return tag
+			tags = append(tags, tag)
 		}
 	}
-	return ""
+	return tags
 }
 
 func writeAtomic(path string, data []byte, perm os.FileMode) error {

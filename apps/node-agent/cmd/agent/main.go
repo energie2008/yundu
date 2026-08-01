@@ -116,6 +116,8 @@ type Agent struct {
 	prober *prober.Prober
 	// P1-8: DeviceEnforcer 通过 xray gRPC 执行设备数限制
 	deviceEnforcer *executor.DeviceEnforcer
+	// P1-8: SpeedEnforcer 对 xray 直连节点执行每用户带宽整形（tc/iptables）
+	speedEnforcer *executor.SpeedEnforcer
 	// 子进程模式下通过独立 gRPC 客户端读取 xray 流量统计（native 模式用 runtimePlugin）
 	xrayStatsReader *agentruntime.XrayStatsReader
 	// P0: 流量统计容错基线——非破坏性读取时跟踪上次上报的累计值，
@@ -1127,6 +1129,11 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 				// P2 翻转：缓存 xray 配置，供 debounced restart 后重新启动 xray
 				a.lastXrayConfig = xrayConfig
 				a.saveXrayConfigCache(xrayConfig)
+				// P1-8: xray 直连节点启动 tc 带宽整形（下载=egress HTB，上传=IFB）
+				a.maybeStartSpeedEnforcer(ctx, xrayConfig)
+				// 双核模式下设备限制执行器依赖 xray 配置中的 inbound tag，
+				// 首次应用时 lastXrayConfig 尚为空，xray 就绪后再尝试启动
+				a.maybeStartDeviceEnforcer(ctx, xrayConfig)
 			}
 		}
 	}
@@ -1407,7 +1414,7 @@ func (a *Agent) syncLimiters(limiterMeta interface{}) {
 //
 // 仅在以下条件满足时启动（且仅启动一次）：
 //   - runtime executor 实现 DeviceLimiterProvider 接口（XrayExecutor/PluginAdapter 均实现）
-//   - 当前 runtime 类型为 xray（设备限制依赖 xray gRPC StatsService）
+//   - 当前 runtime 类型为 xray，或双核模式下 native xray 已启用（_xray_config）
 //   - 配置中存在 inbound（用于提取 inbound tag）
 //
 // 启动失败仅记录警告，不影响节点基本可用性。
@@ -1417,8 +1424,16 @@ func (a *Agent) maybeStartDeviceEnforcer(ctx context.Context, configMap map[stri
 		return // 已启动
 	}
 
-	// 仅 xray 支持设备限制执行（依赖 StatsService gRPC API）
-	if a.cfg.RuntimeType != "xray" {
+	// 设备限制执行依赖 xray gRPC StatsService：
+	//   - 传统 xray runtime（子进程或独立 agent）
+	//   - P2 翻转双核模式（sing-box 主 + native xray 辅，走 _xray_config）
+	xrayConfig := configMap
+	hasXray := a.cfg.RuntimeType == "xray"
+	if !hasXray && a.useNative && a.pluginAdapter != nil && len(a.lastXrayConfig) > 0 {
+		xrayConfig = a.lastXrayConfig
+		hasXray = true
+	}
+	if !hasXray {
 		return
 	}
 
@@ -1428,9 +1443,9 @@ func (a *Agent) maybeStartDeviceEnforcer(ctx context.Context, configMap map[stri
 		return
 	}
 
-	// 从配置中提取第一个非 api 的 inbound tag
-	inboundTag := extractInboundTag(configMap)
-	if inboundTag == "" {
+	// 从配置中提取全部非 api 的 inbound tag（多节点共享内核时逐个移除）
+	inboundTags := extractInboundTags(xrayConfig)
+	if len(inboundTags) == 0 {
 		a.logger.Warn("device enforcer: no inbound tag found in config, skip enforcer")
 		return
 	}
@@ -1442,18 +1457,114 @@ func (a *Agent) maybeStartDeviceEnforcer(ctx context.Context, configMap map[stri
 	}
 
 	enforcer := executor.NewDeviceEnforcer(provider, executor.DeviceEnforcerConfig{
-		APIEndpoint: a.cfg.XrayAPIEndpoint,
-		InboundTag:  inboundTag,
+		APIEndpoint: a.xrayAPIEndpoint(),
+		InboundTags: inboundTags,
 	}, reloadFn, a.logger)
 
 	if err := enforcer.Start(ctx); err != nil {
 		a.logger.Warn("failed to start device enforcer, device limit enforcement disabled",
-			"error", err, "inbound_tag", inboundTag)
+			"error", err, "inbound_tags", fmt.Sprint(inboundTags))
 		return
 	}
 	a.deviceEnforcer = enforcer
 	a.logger.Info("device enforcer started for device limit enforcement",
-		"inbound_tag", inboundTag)
+		"inbound_tags", fmt.Sprint(inboundTags))
+}
+
+// maybeStartSpeedEnforcer 对 xray 直连节点启动每用户带宽整形。
+//
+// xray-core 无 per-user 带宽字段，native 进程内也没有连接级拦截点；
+// 对直连（listen != 127.0.0.1）inbound 按用户来源 IP 用 tc/iptables 整形。
+// 可通过 YUNDU_DISABLE_TC_LIMIT=1 关闭（紧急逃生口）。
+func (a *Agent) maybeStartSpeedEnforcer(ctx context.Context, xrayConfig map[string]interface{}) {
+	if a.speedEnforcer != nil {
+		return
+	}
+	if os.Getenv("YUNDU_DISABLE_TC_LIMIT") == "1" {
+		a.logger.Info("tc speed limit disabled via YUNDU_DISABLE_TC_LIMIT=1")
+		return
+	}
+	if !a.useNative || a.pluginAdapter == nil || len(xrayConfig) == 0 {
+		return
+	}
+	provider, ok := a.runtimeExec.(executor.DeviceLimiterProvider)
+	if !ok {
+		a.logger.Debug("runtime executor does not support device limiter provider, skip speed enforcer")
+		return
+	}
+	ports := extractDirectInboundPorts(xrayConfig)
+	if len(ports) == 0 {
+		a.logger.Info("no direct xray inbound ports, tc speed limit skipped")
+		return
+	}
+	enforcer, err := executor.NewSpeedEnforcer(provider, executor.SpeedEnforcerConfig{
+		APIEndpoint:  a.xrayAPIEndpoint(),
+		InboundPorts: ports,
+		StateDir:     a.cfg.ConfigDir,
+	}, a.logger)
+	if err != nil {
+		a.logger.Warn("failed to create speed enforcer, tc speed limit disabled",
+			"error", err)
+		return
+	}
+	if err := enforcer.Start(ctx); err != nil {
+		a.logger.Warn("failed to start speed enforcer, tc speed limit disabled",
+			"error", err)
+		return
+	}
+	a.speedEnforcer = enforcer
+	a.logger.Info("speed enforcer started for xray direct inbounds",
+		"ports", fmt.Sprint(ports), "api_endpoint", a.xrayAPIEndpoint())
+}
+
+// xrayAPIEndpoint 返回 xray gRPC API 地址（配置优先，回退环境变量/默认值）。
+func (a *Agent) xrayAPIEndpoint() string {
+	if a.cfg.XrayAPIEndpoint != "" {
+		return a.cfg.XrayAPIEndpoint
+	}
+	if v := os.Getenv("YUNDU_XRAY_API_ENDPOINT"); v != "" {
+		return v
+	}
+	return "127.0.0.1:10085"
+}
+
+// extractDirectInboundPorts 提取 xray 配置中直连（listen != 127.0.0.1/::1）inbound 端口。
+// CDN/Tunnel 节点回源自 127.0.0.1，无法按用户 IP 区分，不参与 tc 整形。
+func extractDirectInboundPorts(xrayConfig map[string]interface{}) []int {
+	inbounds, ok := xrayConfig["inbounds"].([]interface{})
+	if !ok {
+		return nil
+	}
+	seen := make(map[int]bool)
+	var ports []int
+	for _, ib := range inbounds {
+		m, ok := ib.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tag, _ := m["tag"].(string)
+		if tag == "api" {
+			continue
+		}
+		listen, _ := m["listen"].(string)
+		if listen == "127.0.0.1" || listen == "::1" || listen == "localhost" {
+			continue
+		}
+		var port int
+		switch p := m["port"].(type) {
+		case float64:
+			port = int(p)
+		case int:
+			port = p
+		case int64:
+			port = int(p)
+		}
+		if port > 0 && !seen[port] {
+			seen[port] = true
+			ports = append(ports, port)
+		}
+	}
+	return ports
 }
 
 // startDeviceReportLoop 启动设备状态上报循环。
@@ -2131,7 +2242,12 @@ func (a *Agent) gracefulShutdown(ctx context.Context, httpSrv *http.Server, reas
 		a.deviceEnforcer.Stop()
 	}
 
-	// 5.1 关闭子进程模式流量统计读取器的 gRPC 连接
+	// 5.1 停止 SpeedEnforcer（清理 tc/iptables 整形规则）
+	if a.speedEnforcer != nil {
+		a.speedEnforcer.Stop()
+	}
+
+	// 5.2 关闭子进程模式流量统计读取器的 gRPC 连接
 	if a.xrayStatsReader != nil {
 		a.xrayStatsReader.Close()
 	}
