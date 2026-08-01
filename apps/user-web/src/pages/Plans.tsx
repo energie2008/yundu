@@ -142,7 +142,7 @@ export function Plans() {
                 {/* Plan name + traffic highlight */}
                 <h3 className="text-base font-semibold mb-1" style={{ color: 'var(--foreground)' }}>{plan.name}</h3>
                 <div className="text-base font-bold mb-3" style={{ color: 'var(--accent-foreground)' }}>
-                  {formatTraffic(plan.traffic_bytes)} <span style={{ color: 'var(--muted-foreground)' }}>每月重置</span>
+                  {formatTraffic(plan.traffic_bytes)} <span style={{ color: 'var(--muted-foreground)' }}>购买日起每 30 天重置</span>
                 </div>
 
                 {/* Features */}

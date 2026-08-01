@@ -249,6 +249,17 @@ func (r *TrafficRepo) ResetAllMonthlyTraffic(ctx context.Context) error {
 	return err
 }
 
+// SetSubscriptionResetAt 仅初始化/更新周期锚点，不清零流量。
+// 用于首次部署时避免把老用户当前周期已用流量误清零。
+func (r *TrafficRepo) SetSubscriptionResetAt(ctx context.Context, userID uuid.UUID, resetAt time.Time) error {
+	query := `
+		UPDATE user_plan_subscriptions
+		SET reset_at = $2, updated_at = now()
+		WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL`
+	_, err := r.pool.Exec(ctx, query, userID, resetAt)
+	return err
+}
+
 // CycleSubscription 用于按订阅周期重置流量的订阅信息。
 type CycleSubscription struct {
 	UserID    uuid.UUID
@@ -266,7 +277,8 @@ func (r *TrafficRepo) ListCycleSubscriptions(ctx context.Context) ([]CycleSubscr
 		JOIN plans p ON p.id = ups.plan_id
 		WHERE ups.status = 'active' AND ups.deleted_at IS NULL
 		  AND p.billing_type = 'periodic'
-		  AND ups.started_at IS NOT NULL AND ups.expires_at IS NOT NULL`
+		  AND ups.started_at IS NOT NULL AND ups.expires_at IS NOT NULL
+		  AND ups.expires_at > now()`
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err

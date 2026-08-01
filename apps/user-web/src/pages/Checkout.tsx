@@ -152,7 +152,7 @@ export function Checkout() {
               <span>📦</span> 套餐摘要
             </h3>
             <div className="text-base font-bold mb-2" style={{ color: '#cd5c4d' }}>
-              {formatTraffic(plan.traffic_bytes)} 每月重置
+              {formatTraffic(plan.traffic_bytes)} 购买日起每 30 天重置
             </div>
             <div className="space-y-1.5 mb-4">
               {(plan.features?.length ?? 0) > 0 ? plan.features!.map((feat, i) => {

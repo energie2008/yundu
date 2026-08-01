@@ -434,8 +434,9 @@ func (s *TrafficService) runCycleResetTicker(ctx context.Context) {
 }
 
 // runCycleResetIfNeeded 遍历周期订阅，对“本期已开始但尚未重置”的用户执行流量重置。
-// 锚点 = 订阅 started_at（购买之日）的月-日：每月该日 00:00 为一个新周期起点；
+// 锚点 = 订阅 started_at（购买之日）起每 30 天滚动；
 // 续费只延长 expires_at，不改变重置日。一次性/不限时套餐不参与周期重置。
+// reset_at 为空时只初始化锚点不清零，避免首次部署误清老用户流量。
 func (s *TrafficService) runCycleResetIfNeeded(ctx context.Context) {
 	subs, err := s.trafficRepo.ListCycleSubscriptions(ctx)
 	if err != nil {
@@ -448,6 +449,14 @@ func (s *TrafficService) runCycleResetIfNeeded(ctx context.Context) {
 		anchor := cycleResetAnchor(sub.StartedAt, now)
 		if anchor.IsZero() {
 			continue // 尚未到达第一个周期起点
+		}
+		if sub.ResetAt == nil {
+			// 首次部署/新订阅：只登记周期起点，不清零当前流量
+			if err := s.trafficRepo.SetSubscriptionResetAt(ctx, sub.UserID, anchor); err != nil {
+				s.logger.Warn("scheduled: init cycle reset anchor failed",
+					"user_id", sub.UserID, "anchor", anchor.Format("2006-01-02 15:04"), "error", err)
+			}
+			continue
 		}
 		if sub.ResetAt != nil && !sub.ResetAt.Before(anchor) {
 			continue // 本期已重置
@@ -467,31 +476,24 @@ func (s *TrafficService) runCycleResetIfNeeded(ctx context.Context) {
 }
 
 // cycleResetAnchor 计算 <= now 的最近一个周期起点。
-// 锚点基于 started_at 的月-日；当日未到则回退到上一月；未到首个锚点返回零值。
-// 处理月末溢出：如 31 日在 30 天月份取该月最后一天。
+// 锚点 = started_at + 30 天 * k（k 为非负整数），即购买日起每 30 天滚动；
+// now 早于 started_at 时返回零值。
 func cycleResetAnchor(startedAt, now time.Time) time.Time {
-	loc := now.Location()
-	day := startedAt.Day()
-
-	y, m := now.Year(), now.Month()
-	candidate := time.Date(y, m, day, 0, 0, 0, 0, loc)
-	// 31 日在短月份会进位到下月，判定为锚点不在本月时回退到本月最后一天
-	if candidate.Month() != m {
-		candidate = time.Date(y, m, 1, 0, 0, 0, 0, loc).AddDate(0, 1, -1)
-	}
-	if candidate.After(now) {
-		prev := candidate.AddDate(0, -1, 0)
-		if prev.Month() == candidate.Month() {
-			prev = time.Date(prev.Year(), prev.Month(), 1, 0, 0, 0, 0, loc).AddDate(0, 1, -1)
-		}
-		candidate = prev
-	}
-	firstAnchor := time.Date(startedAt.Year(), startedAt.Month(), day, 0, 0, 0, 0, loc)
-	if firstAnchor.Month() != startedAt.Month() {
-		firstAnchor = time.Date(startedAt.Year(), startedAt.Month(), 1, 0, 0, 0, 0, loc).AddDate(0, 1, -1)
-	}
-	if candidate.Before(firstAnchor) {
+	if now.Before(startedAt) {
 		return time.Time{}
 	}
-	return candidate
+	const cycleDays = 30
+	const approx = 30 * 24 * time.Hour
+	k := int(now.Sub(startedAt) / approx)
+	if k < 0 {
+		k = 0
+	}
+	// 用粗略商起步，再按日历天数精确校正（处理月末/DST 边界）
+	for startedAt.AddDate(0, 0, cycleDays*(k+1)).After(now) {
+		k--
+	}
+	for !startedAt.AddDate(0, 0, cycleDays*(k+1)).After(now) {
+		k++
+	}
+	return startedAt.AddDate(0, 0, cycleDays*k)
 }

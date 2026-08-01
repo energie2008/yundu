@@ -120,7 +120,7 @@ const faqs = [
   },
   {
     q: '流量如何计算？',
-    a: '上传与下载流量合并计算，套餐周期结束后自动重置流量配额。',
+    a: '上传与下载流量合并计算，订阅购买日起每 30 天自动重置流量配额。',
   },
   {
     q: '可以退款吗？',
@@ -154,7 +154,7 @@ function PlanCard({ plan }: { plan: PlanResponse }) {
 
       <h3 className="text-lg font-semibold text-[var(--foreground)] mb-1">{plan.name}</h3>
       <p className="text-sm font-medium mb-4" style={{ color: 'var(--secondary-foreground)' }}>
-        {formatTraffic(plan.traffic_bytes)} · 按订阅周期重置
+        {formatTraffic(plan.traffic_bytes)} · 购买日起每 30 天重置
       </p>
 
       <div className="mb-6">
