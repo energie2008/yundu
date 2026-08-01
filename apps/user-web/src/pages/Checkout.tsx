@@ -1,10 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { EP, adaptPlan, getPeriodLabel, bytesToGB } from '../lib/endpoints';
 import type { PlanResponse, PaymentMethod, PaymentMethodsResponse, OrderResponse, CouponValidateResponse } from '../lib/endpoints';
 import { UsdtLogo } from '../components/PaymentIcons';
+
+const EVM_NETWORK_LABELS: Record<string, string> = {
+  polygon: 'Polygon',
+  arbitrum: 'Arbitrum One',
+}
 
 function formatTraffic(bytes: number): string {
   if (bytes <= 0) return '不限流量';
@@ -20,6 +25,7 @@ function ConfirmPayCard({
   discount,
   totalPrice,
   method,
+  networkLabel,
   rate,
   submitting,
   onConfirm,
@@ -32,6 +38,7 @@ function ConfirmPayCard({
   discount: number
   totalPrice: number
   method?: PaymentMethod
+  networkLabel?: string
   rate: number
   submitting: boolean
   onConfirm: () => void
@@ -91,7 +98,11 @@ function ConfirmPayCard({
             <span className="font-semibold" style={{ color: 'var(--foreground)' }}>支付方式</span>
             <span className="font-medium flex items-center gap-2" style={{ color: 'var(--foreground)' }}>
               {isUsdt && <UsdtLogo size={20} />}
-              {totalPrice === 0 ? '优惠券全额抵扣' : method?.name || '-'}
+              {totalPrice === 0
+                ? '优惠券全额抵扣'
+                : networkLabel
+                  ? `${method?.name || 'USDT'} · ${networkLabel}`
+                  : method?.name || '-'}
             </span>
           </div>
           {totalPrice > 0 && isUsdt && usdtTotal > 0 && (
@@ -136,6 +147,7 @@ export function Checkout() {
   const [couponCode, setCouponCode] = useState('');
   const [couponResult, setCouponResult] = useState<CouponValidateResponse | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [selectedNetwork, setSelectedNetwork] = useState<string>('');
 
   const planQuery = useQuery<PlanResponse>({
     queryKey: ['plan', planId],
@@ -179,6 +191,7 @@ export function Checkout() {
         plan_id: planId,
         period_code: selectedPeriod,
         payment_method: totalPrice === 0 ? 'free' : selectedMethod,
+        network: selectedMethod === 'usdt_erc20' ? selectedNetwork : undefined,
         coupon_code: couponResult?.valid ? couponCode.trim() : undefined,
       });
     },
@@ -192,6 +205,13 @@ export function Checkout() {
 
   const plan = planQuery.data;
   const methods = methodsQuery.data?.methods || [];
+  const evmNetworks = methods.find(m => m.method === 'usdt_erc20')?.networks || [];
+
+  useEffect(() => {
+    if (selectedMethod === 'usdt_erc20') {
+      setSelectedNetwork(prev => evmNetworks.includes(prev) ? prev : (evmNetworks[0] || ''))
+    }
+  }, [selectedMethod, evmNetworks]);
 
   const getSelectedPrice = () => {
     if (!plan) return null;
@@ -351,6 +371,28 @@ export function Checkout() {
                     <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                       {m.currency}
                     </span>
+                    {isSelected && m.method === 'usdt_erc20' && evmNetworks.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2 pl-8 w-full">
+                        {evmNetworks.map(net => {
+                          const active = selectedNetwork === net
+                          return (
+                            <button
+                              key={net}
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); setSelectedNetwork(net) }}
+                              className="px-2.5 py-1 rounded-lg border text-xs font-medium transition-colors"
+                              style={{
+                                borderColor: active ? 'var(--primary)' : 'var(--border)',
+                                color: active ? 'var(--primary)' : 'var(--muted-foreground)',
+                                background: active ? 'rgba(217,119,87,0.08)' : 'transparent',
+                              }}
+                            >
+                              {EVM_NETWORK_LABELS[net] || net}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
                   </label>
                 );
               })}
@@ -415,7 +457,7 @@ export function Checkout() {
               </div>
               <button
                 onClick={() => setConfirmOpen(true)}
-                disabled={orderMut.isPending || (totalPrice > 0 && !selectedMethod)}
+                disabled={orderMut.isPending || (totalPrice > 0 && !selectedMethod) || (selectedMethod === 'usdt_erc20' && !selectedNetwork)}
                 className="w-full mt-4 py-2.5 rounded-lg text-sm font-medium text-white transition-colors shadow-sm disabled:opacity-50"
                 style={{ background: 'var(--primary)' }}
               >
@@ -434,6 +476,7 @@ export function Checkout() {
         discount={discount}
         totalPrice={totalPrice}
         method={methodObj}
+        networkLabel={selectedMethod === 'usdt_erc20' ? (EVM_NETWORK_LABELS[selectedNetwork] || selectedNetwork) : undefined}
         rate={exchangeRate}
         submitting={orderMut.isPending}
         onConfirm={() => orderMut.mutate()}

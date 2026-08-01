@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/airport-panel/config/server"
@@ -58,12 +59,13 @@ func (h *AdminPaymentHandler) ListPaymentMethods(c *gin.Context) {
 			},
 			{
 				"method":             "usdt_erc20",
-				"name":               "USDT-" + erc20.ChainLabel(),
+				"name":               "USDT",
 				"enabled":            erc20.Enabled,
 				"address":            erc20.Address,
 				"amount_tolerance":   erc20.AmountTolerance,
 				"confirmations":      erc20.MinConfirmations,
 				"network":            erc20.Network,
+				"networks":           erc20.EnabledNetworks(),
 				"auto_activate":      erc20.AutoActivate,
 				"api_key_configured": erc20.EtherscanAPIKey != "",
 				"currency":           "USDT",
@@ -102,13 +104,14 @@ func (h *AdminPaymentHandler) GetPaymentMethod(c *gin.Context) {
 
 // UpdatePaymentMethodRequest 更新支付方式请求
 type UpdatePaymentMethodRequest struct {
-	Enabled         *bool    `json:"enabled,omitempty"`
-	Address         *string  `json:"address,omitempty"`
-	AmountTolerance *float64 `json:"amount_tolerance,omitempty"`
-	Confirmations   *int     `json:"confirmations,omitempty"`
-	AutoActivate    *bool    `json:"auto_activate,omitempty"`
-	Network         *string  `json:"network,omitempty"`
-	APIKey          *string  `json:"api_key,omitempty"`
+	Enabled         *bool     `json:"enabled,omitempty"`
+	Address         *string   `json:"address,omitempty"`
+	AmountTolerance *float64  `json:"amount_tolerance,omitempty"`
+	Confirmations   *int      `json:"confirmations,omitempty"`
+	AutoActivate    *bool     `json:"auto_activate,omitempty"`
+	Network         *string   `json:"network,omitempty"`
+	APIKey          *string   `json:"api_key,omitempty"`
+	Networks        *[]string `json:"networks,omitempty"`
 }
 
 // UpdatePaymentMethod 更新支付方式配置
@@ -169,6 +172,19 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 	}
 	if req.APIKey != nil {
 		cfg["etherscan_api_key"] = *req.APIKey
+	}
+	if req.Networks != nil {
+		nets := make([]string, 0, len(*req.Networks))
+		for _, n := range *req.Networks {
+			n = strings.ToLower(strings.TrimSpace(n))
+			if n == "polygon" || n == "arbitrum" {
+				nets = append(nets, n)
+			}
+		}
+		cfg["networks"] = nets
+		if len(nets) > 0 {
+			cfg["network"] = nets[0]
+		}
 	}
 
 	adminID := getAdminIDFromContext(c)
@@ -247,12 +263,13 @@ func (h *AdminPaymentHandler) getMethodConfig(method string) map[string]interfac
 		cfg := h.paymentSvc.GetERC20Config()
 		return map[string]interface{}{
 			"method":             "usdt_erc20",
-			"name":               "USDT-" + cfg.ChainLabel(),
+			"name":               "USDT",
 			"enabled":            cfg.Enabled,
 			"address":            cfg.Address,
 			"amount_tolerance":   cfg.AmountTolerance,
 			"min_confirmations":  cfg.MinConfirmations,
 			"network":            cfg.Network,
+			"networks":           cfg.EnabledNetworks(),
 			"auto_activate":      cfg.AutoActivate,
 			"api_key_configured": cfg.EtherscanAPIKey != "",
 		}

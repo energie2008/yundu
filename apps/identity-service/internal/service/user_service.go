@@ -22,13 +22,13 @@ import (
 )
 
 var (
-	ErrInvalidVerifyToken   = errors.New("invalid or expired verify token")
-	ErrInvalidResetToken    = errors.New("invalid or expired reset token")
-	ErrUserBanned           = errors.New("user is banned")
-	ErrUserPending          = errors.New("please verify your email first")
-	ErrTokenNotFound        = errors.New("subscription token not found")
-	ErrPlanNotExist         = errors.New("plan does not exist")
-	ErrImpersonateDisabled  = errors.New("impersonation is disabled")
+	ErrInvalidVerifyToken  = errors.New("invalid or expired verify token")
+	ErrInvalidResetToken   = errors.New("invalid or expired reset token")
+	ErrUserBanned          = errors.New("user is banned")
+	ErrUserPending         = errors.New("please verify your email first")
+	ErrTokenNotFound       = errors.New("subscription token not found")
+	ErrPlanNotExist        = errors.New("plan does not exist")
+	ErrImpersonateDisabled = errors.New("impersonation is disabled")
 	// 邮箱验证码注册相关（参考 Xboard CommController::sendEmailVerify）
 	ErrEmailVerifyRequired = errors.New("email verification code is required")
 	ErrInvalidEmailCode    = errors.New("invalid or expired email code")
@@ -54,9 +54,9 @@ const (
 	subRawTokenTTL    = 30 * 24 * time.Hour
 
 	// 邮箱验证码注册相关（参考 Xboard CommController::sendEmailVerify）
-	emailCodePrefix    = "email_code:"     // 验证码值，key=email_code:<email>，TTL=emailCodeTTL
+	emailCodePrefix    = "email_code:" // 验证码值，key=email_code:<email>，TTL=emailCodeTTL
 	emailCodeTTL       = 5 * time.Minute
-	emailCodeCDPrefix  = "email_code_cd:"  // 发送冷却标记，TTL=emailCodeCD
+	emailCodeCDPrefix  = "email_code_cd:" // 发送冷却标记，TTL=emailCodeCD
 	emailCodeCD        = 60 * time.Second
 	emailCodeCntPrefix = "email_code_cnt:" // 每日发送计数，TTL 到当日结束
 	emailCodeDailyMax  = 5
@@ -1513,20 +1513,21 @@ func (s *UserService) ListBroadcastEmails(ctx context.Context, scope string, pla
 var ErrUserNotFound = fmt.Errorf("user not found")
 
 var (
-	ErrPlanNotFound     = fmt.Errorf("plan not found")
-	ErrPlanNotActive    = fmt.Errorf("plan is not active")
-	ErrInvalidPeriodCode = fmt.Errorf("invalid period code")
-	ErrOrderNotFound    = fmt.Errorf("order not found")
-	ErrOrderNotPending  = fmt.Errorf("order is not pending")
-	ErrTRC20Disabled    = fmt.Errorf("USDT-TRC20 payment not enabled")
-	ErrWechatDisabled   = fmt.Errorf("wechat payment not enabled")
-	ErrAlipayDisabled   = fmt.Errorf("alipay payment not enabled")
-	ErrCouponNotFound   = fmt.Errorf("coupon not found")
-	ErrCouponExpired    = fmt.Errorf("coupon has expired")
-	ErrCouponUsedUp     = fmt.Errorf("coupon has been used up")
-	ErrCouponMinAmount  = fmt.Errorf("order amount does not meet coupon minimum")
-	ErrCouponInvalid    = fmt.Errorf("coupon is invalid")
-	ErrCouponPlanLimit  = fmt.Errorf("coupon not valid for this plan")
-	ErrCouponNewUserOnly = fmt.Errorf("coupon is for new users only")
-	ErrCouponCodeExists = fmt.Errorf("coupon code already exists")
+	ErrPlanNotFound       = fmt.Errorf("plan not found")
+	ErrPlanNotActive      = fmt.Errorf("plan is not active")
+	ErrInvalidPeriodCode  = fmt.Errorf("invalid period code")
+	ErrUnsupportedNetwork = fmt.Errorf("unsupported payment network")
+	ErrOrderNotFound      = fmt.Errorf("order not found")
+	ErrOrderNotPending    = fmt.Errorf("order is not pending")
+	ErrTRC20Disabled      = fmt.Errorf("USDT-TRC20 payment not enabled")
+	ErrWechatDisabled     = fmt.Errorf("wechat payment not enabled")
+	ErrAlipayDisabled     = fmt.Errorf("alipay payment not enabled")
+	ErrCouponNotFound     = fmt.Errorf("coupon not found")
+	ErrCouponExpired      = fmt.Errorf("coupon has expired")
+	ErrCouponUsedUp       = fmt.Errorf("coupon has been used up")
+	ErrCouponMinAmount    = fmt.Errorf("order amount does not meet coupon minimum")
+	ErrCouponInvalid      = fmt.Errorf("coupon is invalid")
+	ErrCouponPlanLimit    = fmt.Errorf("coupon not valid for this plan")
+	ErrCouponNewUserOnly  = fmt.Errorf("coupon is for new users only")
+	ErrCouponCodeExists   = fmt.Errorf("coupon code already exists")
 )

@@ -380,6 +380,8 @@ func MapErrorToCode(err error) (config.ErrorCode, string) {
 		return config.CodeForbidden, err.Error()
 	case errors.Is(err, ErrInvalidPeriodCode):
 		return config.CodeBadRequest, err.Error()
+	case errors.Is(err, ErrUnsupportedNetwork):
+		return config.CodeBadRequest, err.Error()
 	case errors.Is(err, ErrOrderNotPending):
 		return config.CodeConflict, err.Error()
 	case errors.Is(err, ErrTRC20Disabled):

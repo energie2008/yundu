@@ -28,6 +28,11 @@ import {
 import { api } from '@/lib/api'
 import { EP } from '@/lib/endpoints'
 
+const EVM_NETWORK_OPTIONS = [
+  { key: 'polygon', label: 'Polygon' },
+  { key: 'arbitrum', label: 'Arbitrum One' },
+]
+
 interface PaymentMethod {
   method: string
   name: string
@@ -39,6 +44,7 @@ interface PaymentMethod {
   auto_activate: boolean
   api_key_configured?: boolean
   api_key?: string
+  networks?: string[]
 }
 
 interface PaymentMethodsResponse {
@@ -50,6 +56,7 @@ export default function Payments() {
   const [editMethod, setEditMethod] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<PaymentMethod>>({})
   const [rateInput, setRateInput] = useState('')
+  const [saveError, setSaveError] = useState('')
 
   const { data, isLoading, isFetching } = useQuery<PaymentMethodsResponse>({
     queryKey: ['payment-methods'],
@@ -87,6 +94,7 @@ export default function Payments() {
         auto_activate: config.auto_activate,
         network: config.network,
         api_key: config.api_key,
+        networks: config.networks,
       })
     },
     onSuccess: () => {
@@ -110,6 +118,7 @@ export default function Payments() {
 
   const handleEdit = (m: PaymentMethod) => {
     setEditMethod(m.method)
+    setSaveError('')
     setEditForm({
       address: m.address,
       amount_tolerance: m.amount_tolerance,
@@ -117,16 +126,29 @@ export default function Payments() {
       auto_activate: m.auto_activate,
       enabled: m.enabled,
       network: m.network,
+      networks: m.networks,
     })
   }
 
   const handleSave = () => {
     if (!editMethod) return
     const config: Partial<PaymentMethod> = { ...editForm }
+    if (editMethod === 'usdt_erc20' && !(config.networks || []).length) {
+      setSaveError('请至少选择一个收款网络')
+      return
+    }
     if (config.api_key === '') {
       delete config.api_key
     }
     updateMethod.mutate({ method: editMethod, config })
+  }
+
+  const toggleNetwork = (key: string) => {
+    const cur = editForm.networks || []
+    setEditForm({
+      ...editForm,
+      networks: cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key],
+    })
   }
 
   const methods = data?.methods ?? []
@@ -265,18 +287,29 @@ export default function Payments() {
                     {m.method === 'usdt_erc20' && (
                       <>
                         <div className="space-y-1">
-                          <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>收款网络</label>
-                          <select
-                            value={editForm.network || 'ethereum'}
-                            onChange={(e) => setEditForm({ ...editForm, network: e.target.value })}
-                            className="w-full px-3 py-2 rounded-lg border text-sm"
-                            style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                          >
-                            <option value="ethereum">Ethereum (ERC20)</option>
-                            <option value="polygon">Polygon (USDT-Polygon)</option>
-                          </select>
+                          <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>收款网络（可多选，共用同一收款地址）</label>
+                          <div className="flex flex-wrap gap-2">
+                            {EVM_NETWORK_OPTIONS.map(opt => {
+                              const active = (editForm.networks || []).includes(opt.key)
+                              return (
+                                <button
+                                  key={opt.key}
+                                  type="button"
+                                  onClick={() => toggleNetwork(opt.key)}
+                                  className="px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors"
+                                  style={{
+                                    borderColor: active ? '#26a17b' : ADMIN_INPUT_BORDER,
+                                    color: active ? '#26a17b' : ADMIN_TEXT_SECONDARY,
+                                    background: active ? 'rgba(38,161,123,0.12)' : ADMIN_INPUT_BG,
+                                  }}
+                                >
+                                  {active ? '✓ ' : ''}{opt.label}
+                                </button>
+                              )
+                            })}
+                          </div>
                           <p className="text-xs mt-1" style={{ color: ADMIN_TEXT_MUTED }}>
-                            切换后系统自动使用对应网络的 USDT 合约与区块浏览器
+                            三个网络共用同一地址，订单按所选网络独立查链匹配
                           </p>
                         </div>
                         <div className="space-y-1">
@@ -287,14 +320,17 @@ export default function Payments() {
                             type="password"
                             value={editForm.api_key || ''}
                             onChange={(e) => setEditForm({ ...editForm, api_key: e.target.value })}
-                            placeholder="留空保持不变，用于 ETH/Polygon 链上转账查询"
+                            placeholder="留空保持不变，用于 EVM 链上转账查询"
                             style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
                           />
                           <p className="text-xs mt-1" style={{ color: ADMIN_TEXT_MUTED }}>
-                            免费注册于 etherscan.io/apidashboard，EVM 网络自动转账需此 Key
+                            免费注册于 etherscan.io/apidashboard，Polygon/Arbitrum/BSC 自动到账需此 Key
                           </p>
                         </div>
                       </>
+                    )}
+                    {saveError && (
+                      <p className="text-xs" style={{ color: '#f87171' }}>{saveError}</p>
                     )}
                     <label className="flex items-center gap-2 text-sm" style={{ color: ADMIN_TEXT_SECONDARY }}>
                       <input
@@ -360,7 +396,7 @@ export default function Payments() {
         <CardContent className="p-5">
           <h3 className="text-sm font-semibold mb-2" style={{ color: ADMIN_TEXT }}>支付说明</h3>
           <ul className="space-y-1 text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
-            <li>• 系统支持 USDT TRC20（波场网络）和 USDT EVM（以太坊/Polygon）支付方式</li>
+            <li>• 系统支持 USDT TRC20（波场网络）和 USDT EVM（Polygon / Arbitrum One）支付方式</li>
             <li>• 配置收款地址后，用户购买套餐将生成对应网络的支付订单</li>
             <li>• 金额容差：允许用户支付的金额与应付金额的差值（用于处理精度问题）</li>
             <li>• 最小确认数：区块确认数达到此值后订单自动标记为已支付</li>

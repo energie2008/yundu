@@ -179,9 +179,8 @@ export default function OrderDetail() {
   }
 
   const payCurrency = order.pay_currency || 'USDT-TRC20'
-  const isPolygon = payCurrency.toUpperCase().includes('POLYGON')
   const isTRC20 = payCurrency.toUpperCase().includes('TRC20')
-  const networkLabel = isPolygon ? 'Polygon' : isTRC20 ? 'TRC20' : 'ERC20'
+  const evmLabel = isTRC20 ? 'TRC20' : (payCurrency.replace(/^USDT-\s*/i, '') || 'EVM')
   const displayAmount = Math.max(0, order.final_amount ?? order.amount_usdt)
 
   return (
@@ -278,7 +277,7 @@ export default function OrderDetail() {
             <div className="flex items-center justify-between mb-3 gap-3">
               <span className="text-sm flex items-center gap-2" style={{ color: 'var(--muted-foreground)' }}>
                 <UsdtLogo size={22} />
-                USDT-{networkLabel} 收款地址
+                USDT-{evmLabel} 收款地址
               </span>
               <CopyButton text={order.pay_address} />
             </div>
@@ -288,7 +287,7 @@ export default function OrderDetail() {
           <div className="rounded-lg p-4 mb-5" style={{ background: 'rgba(232,163,61,0.08)', border: '1px solid rgba(232,163,61,0.2)' }}>
             <p className="text-sm" style={{ color: '#e8a33d' }}>
               <Clock className="w-4 h-4 inline mr-1" />
-              请在有效期内支付 <strong style={{ color: 'var(--primary)' }}>{formatUSDT(displayAmount)} USDT</strong>（{networkLabel}网络）到上述地址，支付完成后系统将自动确认并激活您的订阅。
+              请在有效期内支付 <strong style={{ color: 'var(--primary)' }}>{formatUSDT(displayAmount)} USDT</strong>（{evmLabel}网络）到上述地址，支付完成后系统将自动确认并激活您的订阅。
             </p>
           </div>
 

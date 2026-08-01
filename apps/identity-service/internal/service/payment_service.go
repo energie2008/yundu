@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,26 +36,74 @@ type TRC20Config struct {
 }
 
 type ERC20Config struct {
-	Enabled          bool    `json:"enabled"`
-	Address          string  `json:"address"`
-	USDTContract     string  `json:"usdt_contract"`
-	EtherscanAPI     string  `json:"etherscan_api"`
-	EtherscanAPIKey  string  `json:"etherscan_api_key"`
-	ChainID          int     `json:"chain_id"`
-	MinConfirmations int     `json:"min_confirmations"`
-	OrderExpiryHours int     `json:"order_expiry_hours"`
-	AmountTolerance  float64 `json:"amount_tolerance"`
-	AutoActivate     bool    `json:"auto_activate"`
-	PollInterval     int     `json:"poll_interval_seconds"`
-	Network          string  `json:"network"`
+	Enabled          bool     `json:"enabled"`
+	Address          string   `json:"address"`
+	USDTContract     string   `json:"usdt_contract"`
+	EtherscanAPI     string   `json:"etherscan_api"`
+	EtherscanAPIKey  string   `json:"etherscan_api_key"`
+	ChainID          int      `json:"chain_id"`
+	MinConfirmations int      `json:"min_confirmations"`
+	OrderExpiryHours int      `json:"order_expiry_hours"`
+	AmountTolerance  float64  `json:"amount_tolerance"`
+	AutoActivate     bool     `json:"auto_activate"`
+	PollInterval     int      `json:"poll_interval_seconds"`
+	Network          string   `json:"network"`
+	Networks         []string `json:"networks"`
 }
 
-// ChainLabel 返回 EVM 链的展示名，用于订单币种与支付页展示。
-func (c ERC20Config) ChainLabel() string {
-	if strings.Contains(strings.ToLower(c.Network), "polygon") {
-		return "Polygon"
+type evmNetworkMeta struct {
+	Key          string
+	Label        string
+	ChainID      int
+	USDTContract string
+}
+
+// evmNetworks 支持的低手续费 EVM 网络（Ethereum 主网手续费过高，已下线）
+var evmNetworks = map[string]evmNetworkMeta{
+	"polygon": {
+		Key:          "polygon",
+		Label:        "Polygon",
+		ChainID:      137,
+		USDTContract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+	},
+	"arbitrum": {
+		Key:          "arbitrum",
+		Label:        "Arbitrum One",
+		ChainID:      42161,
+		USDTContract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+	},
+}
+
+// EnabledNetworks 返回当前启用的 EVM 网络列表，兼容旧的单 network 配置。
+func (c ERC20Config) EnabledNetworks() []string {
+	if len(c.Networks) > 0 {
+		var out []string
+		for _, n := range c.Networks {
+			n = strings.ToLower(strings.TrimSpace(n))
+			if _, ok := evmNetworks[n]; ok {
+				out = append(out, n)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
 	}
-	return "Ethereum"
+	n := strings.ToLower(strings.TrimSpace(c.Network))
+	if _, ok := evmNetworks[n]; ok {
+		return []string{n}
+	}
+	// Ethereum 已下线，未显式配置时默认 Polygon
+	return []string{"polygon"}
+}
+
+func evmNetworkKeyFromPayCurrency(payCurrency string) string {
+	label := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(payCurrency, "USDT-")))
+	for key, meta := range evmNetworks {
+		if strings.ToLower(meta.Label) == label {
+			return key
+		}
+	}
+	return "polygon"
 }
 
 // WechatConfig 微信支付配置（框架预留，暂不对接真实接口）
@@ -285,24 +334,8 @@ func (s *PaymentService) loadERC20Config() ERC20Config {
 		return cfg
 	}
 	_ = json.Unmarshal(data, &cfg)
-	if strings.Contains(strings.ToLower(cfg.Network), "polygon") {
-		// Polygon 网络默认使用 Etherscan V2（chainid=137）与 Polygon 版 USDT 合约
-		if cfg.EtherscanAPI == "" || strings.Contains(cfg.EtherscanAPI, "api.polygonscan.com") {
-			cfg.EtherscanAPI = "https://api.etherscan.io/v2/api"
-		}
-		if cfg.ChainID == 0 || cfg.ChainID == 1 {
-			cfg.ChainID = 137
-		}
-		if cfg.USDTContract == "" || strings.EqualFold(cfg.USDTContract, "0xdAC17F958D2ee523a2206206994597C13D831ec7") {
-			cfg.USDTContract = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"
-		}
-	} else {
-		if cfg.EtherscanAPI == "" || strings.Contains(cfg.EtherscanAPI, "api.polygonscan.com") {
-			cfg.EtherscanAPI = "https://api.etherscan.io/v2/api"
-		}
-		if cfg.ChainID == 0 {
-			cfg.ChainID = 1
-		}
+	if cfg.EtherscanAPI == "" || strings.Contains(cfg.EtherscanAPI, "api.polygonscan.com") {
+		cfg.EtherscanAPI = "https://api.etherscan.io/v2/api"
 	}
 	return cfg
 }
@@ -532,16 +565,25 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 		case model.PaymentMethodUSDTERC20:
 			cfg := s.GetERC20Config()
 			if !cfg.Enabled {
-				return nil, fmt.Errorf("USDT-ERC20 payment not enabled")
+				return nil, fmt.Errorf("USDT EVM payment not enabled")
+			}
+			nets := cfg.EnabledNetworks()
+			netKey := strings.ToLower(strings.TrimSpace(req.Network))
+			if netKey == "" {
+				netKey = nets[0]
+			}
+			meta, ok := evmNetworks[netKey]
+			if !ok || !slices.Contains(nets, netKey) {
+				return nil, fmt.Errorf("%w: %s", ErrUnsupportedNetwork, netKey)
 			}
 			payAddress = cfg.Address
-			payCurrency = "USDT-" + cfg.ChainLabel()
+			payCurrency = "USDT-" + meta.Label
 			expiryHours = cfg.OrderExpiryHours
 			if expiryHours <= 0 {
 				expiryHours = 6
 			}
 			if payAddress == "" {
-				return nil, fmt.Errorf("USDT-ERC20 receiving address not configured by admin")
+				return nil, fmt.Errorf("USDT EVM receiving address not configured by admin")
 			}
 			finalAmount = math.Round(finalCNY/rate*100) / 100
 			discountAmount = math.Round(discountCNY/rate*100) / 100
@@ -618,12 +660,11 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 func (s *PaymentService) GetPaymentURI(order *model.PaymentOrder) string {
 	switch order.PaymentMethod {
 	case model.PaymentMethodUSDTERC20:
-		cfg := s.GetERC20Config()
-		scheme := "ethereum"
-		if strings.Contains(strings.ToLower(cfg.Network), "polygon") {
-			scheme = "polygon"
+		meta, ok := evmNetworks[evmNetworkKeyFromPayCurrency(order.PayCurrency)]
+		if !ok {
+			meta = evmNetworks["polygon"]
 		}
-		return fmt.Sprintf("%s:%s?value=%.2f&contract=%s", scheme, order.PayAddress, order.FinalAmount, cfg.USDTContract)
+		return fmt.Sprintf("%s:%s?value=%.2f&contract=%s", meta.Key, order.PayAddress, order.FinalAmount, meta.USDTContract)
 	case model.PaymentMethodUSDTTRC20:
 		cfg := s.GetTRC20Config()
 		amount := strconv.FormatFloat(order.FinalAmount*1000000, 'f', 0, 64)
@@ -774,14 +815,18 @@ func (s *PaymentService) fetchTronTxInfo(cfg TRC20Config, txid string) (*tronTxI
 	return &info, nil
 }
 
-func (s *PaymentService) fetchERC20Transfers(cfg ERC20Config) ([]ethTransaction, error) {
+func (s *PaymentService) fetchERC20Transfers(cfg ERC20Config, netKey string) ([]ethTransaction, error) {
+	meta, ok := evmNetworks[netKey]
+	if !ok {
+		return nil, fmt.Errorf("unsupported EVM network: %s", netKey)
+	}
 	if cfg.Address == "" {
 		return nil, nil
 	}
 	params := url.Values{}
 	params.Set("module", "account")
 	params.Set("action", "tokentx")
-	params.Set("contractaddress", cfg.USDTContract)
+	params.Set("contractaddress", meta.USDTContract)
 	params.Set("address", cfg.Address)
 	params.Set("page", "1")
 	params.Set("offset", "50")
@@ -792,11 +837,7 @@ func (s *PaymentService) fetchERC20Transfers(cfg ERC20Config) ([]ethTransaction,
 	apiBase := strings.TrimRight(cfg.EtherscanAPI, "/")
 	if strings.Contains(apiBase, "/v2/") || strings.HasSuffix(apiBase, "/v2/api") {
 		// Etherscan V2 通过 chainid 指定链，不再使用 explorer 专属域名
-		chainID := cfg.ChainID
-		if chainID == 0 {
-			chainID = 1
-		}
-		params.Set("chainid", strconv.Itoa(chainID))
+		params.Set("chainid", strconv.Itoa(meta.ChainID))
 	}
 	apiURL := fmt.Sprintf("%s?%s", apiBase, params.Encode())
 	resp, err := s.httpClient.Get(apiURL)
@@ -868,8 +909,38 @@ func (s *PaymentService) pollPendingOrders() {
 	ercCfg := s.erc20Cfg
 	s.cfgMu.RUnlock()
 
+	const pageSize = 100
+	orders := []*model.PaymentOrder{}
+	page := 1
+	for {
+		batch, total, err := s.paymentOrderRepo.ListPending(ctx, page, pageSize)
+		if err != nil {
+			s.log.Error("list pending orders", "error", err, "page", page)
+			return
+		}
+		orders = append(orders, batch...)
+		if page*pageSize >= total {
+			break
+		}
+		page++
+	}
+	if len(orders) == 0 {
+		return
+	}
+
+	needTRC := false
+	needEVM := map[string]bool{}
+	for _, o := range orders {
+		switch o.PaymentMethod {
+		case model.PaymentMethodUSDTTRC20:
+			needTRC = true
+		case model.PaymentMethodUSDTERC20:
+			needEVM[evmNetworkKeyFromPayCurrency(o.PayCurrency)] = true
+		}
+	}
+
 	trcTransfers := map[string]*tronTransfer{}
-	if trcCfg.Enabled && trcCfg.Address != "" {
+	if needTRC && trcCfg.Enabled && trcCfg.Address != "" {
 		if t, err := s.fetchTRC20Transfers(trcCfg); err == nil {
 			for i := range t {
 				trcTransfers[t[i].TransactionID] = &t[i]
@@ -879,37 +950,34 @@ func (s *PaymentService) pollPendingOrders() {
 		}
 	}
 
-	ercTransfers := map[string]*ethTransaction{}
+	ercByNetwork := map[string]map[string]*ethTransaction{}
 	if ercCfg.Enabled && ercCfg.Address != "" {
-		if et, err := s.fetchERC20Transfers(ercCfg); err == nil {
-			for i := range et {
-				ercTransfers[strings.ToLower(et[i].Hash)] = &et[i]
+		for _, netKey := range ercCfg.EnabledNetworks() {
+			if !needEVM[netKey] {
+				continue
 			}
-		} else {
-			s.log.Warn("fetch ERC20 transfers error", "error", err)
+			var et []ethTransaction
+			var err error
+			et, err = s.fetchERC20Transfers(ercCfg, netKey)
+			if err != nil {
+				s.log.Warn("fetch EVM transfers error", "network", netKey, "error", err)
+				continue
+			}
+			m := map[string]*ethTransaction{}
+			for i := range et {
+				m[strings.ToLower(et[i].Hash)] = &et[i]
+			}
+			ercByNetwork[netKey] = m
 		}
 	}
 
-	const pageSize = 100
-	page := 1
-	for {
-		orders, total, err := s.paymentOrderRepo.ListPending(ctx, page, pageSize)
-		if err != nil {
-			s.log.Error("list pending orders", "error", err, "page", page)
-			return
+	for _, o := range orders {
+		switch o.PaymentMethod {
+		case model.PaymentMethodUSDTTRC20:
+			s.matchTRC20(ctx, o, trcTransfers, trcCfg)
+		case model.PaymentMethodUSDTERC20:
+			s.matchERC20(ctx, o, ercByNetwork, ercCfg)
 		}
-		for _, o := range orders {
-			switch o.PaymentMethod {
-			case model.PaymentMethodUSDTTRC20:
-				s.matchTRC20(ctx, o, trcTransfers, trcCfg)
-			case model.PaymentMethodUSDTERC20:
-				s.matchERC20(ctx, o, ercTransfers, ercCfg)
-			}
-		}
-		if page*pageSize >= total {
-			break
-		}
-		page++
 	}
 }
 
@@ -959,7 +1027,12 @@ func (s *PaymentService) matchTRC20(ctx context.Context, o *model.PaymentOrder, 
 	}
 }
 
-func (s *PaymentService) matchERC20(ctx context.Context, o *model.PaymentOrder, transfers map[string]*ethTransaction, cfg ERC20Config) {
+func (s *PaymentService) matchERC20(ctx context.Context, o *model.PaymentOrder, byNetwork map[string]map[string]*ethTransaction, cfg ERC20Config) {
+	netKey := evmNetworkKeyFromPayCurrency(o.PayCurrency)
+	transfers := byNetwork[netKey]
+	if len(transfers) == 0 {
+		return
+	}
 	for _, t := range transfers {
 		if !strings.EqualFold(t.To, cfg.Address) {
 			continue
@@ -978,8 +1051,8 @@ func (s *PaymentService) matchERC20(ctx context.Context, o *model.PaymentOrder, 
 		}
 		paid := amount
 		hash := t.Hash
-		// 一笔链上交易只能认领一个订单，防止同金额订单被重复激活
-		if existing, err := s.paymentOrderRepo.GetByTxHash(ctx, hash); err == nil && existing != nil && existing.ID != o.ID {
+		// 一笔链上交易只能认领同网络订单；不同网络交易哈希互不占用
+		if existing, err := s.paymentOrderRepo.GetByTxHash(ctx, hash); err == nil && existing != nil && existing.ID != o.ID && existing.PayCurrency == o.PayCurrency {
 			continue
 		}
 		paidAt := time.Now()
@@ -998,7 +1071,7 @@ func (s *PaymentService) matchERC20(ctx context.Context, o *model.PaymentOrder, 
 		if blockNum != nil {
 			_ = s.paymentOrderRepo.UpdateBlockNumber(ctx, o.ID, blockNum)
 		}
-		s.log.Info("ERC20 order paid", "order_no", o.OrderNo, "tx", hash, "amount", paid)
+		s.log.Info("EVM order paid", "network", netKey, "order_no", o.OrderNo, "tx", hash, "amount", paid)
 		if cfg.AutoActivate {
 			s.activateOrder(ctx, o, paid)
 		}

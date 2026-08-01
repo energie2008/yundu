@@ -35,6 +35,7 @@ type CreateOrderRequest struct {
 	PeriodCode    string    `json:"period_code" binding:"required,oneof=month quarter half_year year onetime"`
 	CouponCode    string    `json:"coupon_code,omitempty"`
 	PaymentMethod string    `json:"payment_method,omitempty"`
+	Network       string    `json:"network,omitempty"`
 }
 
 type OrderListQuery struct {
@@ -68,39 +69,39 @@ type OrderResponse struct {
 }
 
 type PaymentAddressResponse struct {
-	PayAddress  string    `json:"pay_address"`
-	AmountUSDT  float64   `json:"amount_usdt"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	TRC20URI    string    `json:"trc20_uri"`
-	Currency    string    `json:"currency"`
-	OrderNo     string    `json:"order_no"`
+	PayAddress string    `json:"pay_address"`
+	AmountUSDT float64   `json:"amount_usdt"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	TRC20URI   string    `json:"trc20_uri"`
+	Currency   string    `json:"currency"`
+	OrderNo    string    `json:"order_no"`
 }
 
 type Coupon struct {
-	ID              uuid.UUID   `json:"id" db:"id"`
-	Code            string      `json:"code" db:"code"`
-	Name            string      `json:"name" db:"name"`
-	DiscountType    string      `json:"discount_type" db:"discount_type"`
-	DiscountValue   float64     `json:"discount_value" db:"discount_value"`
-	MaxUses         int         `json:"max_uses" db:"max_uses"`
-	UsedCount       int         `json:"used_count" db:"used_count"`
-	MinOrderAmount  float64     `json:"min_order_amount" db:"min_order_amount"`
-	PlanID          *uuid.UUID  `json:"plan_id,omitempty" db:"plan_id"`
-	LimitUseByUser  int         `json:"limit_use_by_user" db:"limit_use_by_user"`
-	LimitPlanIDs    []uuid.UUID `json:"limit_plan_ids,omitempty" db:"limit_plan_ids"`
-	NewUserOnly     bool        `json:"new_user_only" db:"new_user_only"`
+	ID             uuid.UUID   `json:"id" db:"id"`
+	Code           string      `json:"code" db:"code"`
+	Name           string      `json:"name" db:"name"`
+	DiscountType   string      `json:"discount_type" db:"discount_type"`
+	DiscountValue  float64     `json:"discount_value" db:"discount_value"`
+	MaxUses        int         `json:"max_uses" db:"max_uses"`
+	UsedCount      int         `json:"used_count" db:"used_count"`
+	MinOrderAmount float64     `json:"min_order_amount" db:"min_order_amount"`
+	PlanID         *uuid.UUID  `json:"plan_id,omitempty" db:"plan_id"`
+	LimitUseByUser int         `json:"limit_use_by_user" db:"limit_use_by_user"`
+	LimitPlanIDs   []uuid.UUID `json:"limit_plan_ids,omitempty" db:"limit_plan_ids"`
+	NewUserOnly    bool        `json:"new_user_only" db:"new_user_only"`
 	// LimitPeriod 限制可用周期（month/quarter/year 等），空=不限制
-	LimitPeriod     []string    `json:"limit_period,omitempty" db:"limit_period"`
+	LimitPeriod []string `json:"limit_period,omitempty" db:"limit_period"`
 	// MaxDiscount 最大折扣金额上限（0=不限制）
-	MaxDiscount     float64     `json:"max_discount" db:"max_discount"`
+	MaxDiscount float64 `json:"max_discount" db:"max_discount"`
 	// IsRepeatable 是否可重复使用（false=一次性券，全局仅可用一次）
-	IsRepeatable    bool        `json:"is_repeatable" db:"is_repeatable"`
-	StartsAt        *time.Time  `json:"starts_at,omitempty" db:"starts_at"`
-	ExpiresAt       *time.Time  `json:"expires_at,omitempty" db:"expires_at"`
-	IsActive        bool        `json:"is_active" db:"is_active"`
-	CreatedAt       time.Time   `json:"created_at" db:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at" db:"updated_at"`
-	Discount        float64     `json:"-" db:"-"`
+	IsRepeatable bool       `json:"is_repeatable" db:"is_repeatable"`
+	StartsAt     *time.Time `json:"starts_at,omitempty" db:"starts_at"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty" db:"expires_at"`
+	IsActive     bool       `json:"is_active" db:"is_active"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
+	Discount     float64    `json:"-" db:"-"`
 }
 
 type CouponUsage struct {
@@ -126,32 +127,32 @@ const (
 
 // CreateCouponRequest 创建优惠券请求
 type CreateCouponRequest struct {
-	Code           string     `json:"code" binding:"required,min=2,max=32"`
-	Name           string     `json:"name" binding:"required,min=1,max=128"`
-	DiscountType   string     `json:"discount_type" binding:"required,oneof=percentage fixed"`
-	DiscountValue  float64    `json:"discount_value" binding:"required,min=0"`
-	MaxUses        int        `json:"max_uses" binding:"min=0"`
-	MinOrderAmount float64    `json:"min_order_amount" binding:"min=0"`
+	Code           string  `json:"code" binding:"required,min=2,max=32"`
+	Name           string  `json:"name" binding:"required,min=1,max=128"`
+	DiscountType   string  `json:"discount_type" binding:"required,oneof=percentage fixed"`
+	DiscountValue  float64 `json:"discount_value" binding:"required,min=0"`
+	MaxUses        int     `json:"max_uses" binding:"min=0"`
+	MinOrderAmount float64 `json:"min_order_amount" binding:"min=0"`
 	// PlanID 限定特定套餐可用，nil 表示不限制
-	PlanID         *uuid.UUID `json:"plan_id"`
+	PlanID *uuid.UUID `json:"plan_id"`
 	// LimitUseByUser 每用户可用次数，0=不限
-	LimitUseByUser int        `json:"limit_use_by_user" binding:"min=0"`
+	LimitUseByUser int `json:"limit_use_by_user" binding:"min=0"`
 	// LimitPlanIDs 限定多个套餐可用，空表示不限制
-	LimitPlanIDs   []uuid.UUID `json:"limit_plan_ids"`
+	LimitPlanIDs []uuid.UUID `json:"limit_plan_ids"`
 	// LimitPeriod 限定可用周期（month/quarter/year 等），空表示不限制
-	LimitPeriod    []string    `json:"limit_period"`
+	LimitPeriod []string `json:"limit_period"`
 	// MaxDiscount 最大折扣金额上限（0=不限制）
-	MaxDiscount    float64     `json:"max_discount"`
+	MaxDiscount float64 `json:"max_discount"`
 	// IsRepeatable 是否可重复使用（false=一次性券），默认 true
-	IsRepeatable   bool        `json:"is_repeatable"`
+	IsRepeatable bool `json:"is_repeatable"`
 	// NewUserOnly 仅限新用户使用
-	NewUserOnly    bool       `json:"new_user_only"`
+	NewUserOnly bool `json:"new_user_only"`
 	// StartsAt 生效时间，nil 表示立即生效
-	StartsAt       *time.Time `json:"starts_at"`
+	StartsAt *time.Time `json:"starts_at"`
 	// ExpiresAt 过期时间，nil 表示永不过期
-	ExpiresAt      *time.Time `json:"expires_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
 	// IsActive 是否启用
-	IsActive       bool       `json:"is_active"`
+	IsActive bool `json:"is_active"`
 }
 
 // UpdateCouponRequest 更新优惠券请求
@@ -166,15 +167,15 @@ type UpdateCouponRequest struct {
 	LimitUseByUser *int        `json:"limit_use_by_user"`
 	LimitPlanIDs   []uuid.UUID `json:"limit_plan_ids"`
 	// LimitPeriod 限定可用周期，nil 表示不修改，非 nil 则覆盖
-	LimitPeriod    []string    `json:"limit_period"`
+	LimitPeriod []string `json:"limit_period"`
 	// MaxDiscount 最大折扣金额上限，nil 表示不修改
-	MaxDiscount    *float64    `json:"max_discount"`
+	MaxDiscount *float64 `json:"max_discount"`
 	// IsRepeatable 是否可重复使用，nil 表示不修改
-	IsRepeatable   *bool       `json:"is_repeatable"`
-	NewUserOnly    *bool       `json:"new_user_only"`
-	StartsAt       *time.Time  `json:"starts_at"`
-	ExpiresAt      *time.Time  `json:"expires_at"`
-	IsActive       *bool       `json:"is_active"`
+	IsRepeatable *bool      `json:"is_repeatable"`
+	NewUserOnly  *bool      `json:"new_user_only"`
+	StartsAt     *time.Time `json:"starts_at"`
+	ExpiresAt    *time.Time `json:"expires_at"`
+	IsActive     *bool      `json:"is_active"`
 }
 
 // CouponResponse 优惠券响应
