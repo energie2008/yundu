@@ -65,6 +65,14 @@ upgrade_one() {
 run_migrate() {
     if [ -x "${INSTALL_DIR}/migrate" ]; then
         echo "[INFO] 执行数据库迁移"
+        # 加载面板数据库环境（POSTGRES_DSN 指向 5433 等），并指定迁移目录
+        if [ -f "/opt/yundu/config/.env" ]; then
+            set -a
+            # shellcheck disable=SC1091
+            . "/opt/yundu/config/.env"
+            set +a
+        fi
+        export MIGRATIONS_DIR="${MIGRATIONS_DIR:-/opt/yundu/migrations}"
         "${INSTALL_DIR}/migrate" up
     else
         echo "[WARN] 未找到 ${INSTALL_DIR}/migrate，跳过迁移"
