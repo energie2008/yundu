@@ -1892,6 +1892,11 @@ func (a *Agent) runAgent(ctx context.Context) error {
 		case <-a.authDone:
 			a.logger.Info("D3: auth succeeded, force-refreshing config from panel")
 			a.applyConfig(ctx, "force", &a.currentVersion)
+		case <-time.After(10 * time.Second):
+			// 认证超时/失败时 authDone 不会关闭（vps206 实测），
+			// 此时也必须 force 拉取一次，确保 xray 辅内核从配置恢复并写入缓存。
+			a.logger.Info("D3: auth not confirmed within 10s, force-refreshing config anyway")
+			a.applyConfig(ctx, "force", &a.currentVersion)
 		case <-ctx.Done():
 		}
 	}()
