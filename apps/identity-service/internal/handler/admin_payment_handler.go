@@ -14,8 +14,8 @@ import (
 // AdminPaymentHandler 管理员支付配置 handler
 // 基于 system_settings 表管理 TRC20/ERC20 支付配置
 type AdminPaymentHandler struct {
-	settingRepo   *repo.SettingRepo
-	paymentSvc    *service.PaymentService
+	settingRepo *repo.SettingRepo
+	paymentSvc  *service.PaymentService
 }
 
 func NewAdminPaymentHandler(settingRepo *repo.SettingRepo, paymentSvc *service.PaymentService) *AdminPaymentHandler {
@@ -57,15 +57,16 @@ func (h *AdminPaymentHandler) ListPaymentMethods(c *gin.Context) {
 				"currency":         "USDT",
 			},
 			{
-				"method":           "usdt_erc20",
-				"name":             "USDT-ERC20",
-				"enabled":          erc20.Enabled,
-				"address":          erc20.Address,
-				"amount_tolerance": erc20.AmountTolerance,
-				"confirmations":    erc20.MinConfirmations,
-				"network":          "ethereum",
-				"auto_activate":    erc20.AutoActivate,
-				"currency":         "USDT",
+				"method":             "usdt_erc20",
+				"name":               "USDT-" + erc20.ChainLabel(),
+				"enabled":            erc20.Enabled,
+				"address":            erc20.Address,
+				"amount_tolerance":   erc20.AmountTolerance,
+				"confirmations":      erc20.MinConfirmations,
+				"network":            erc20.Network,
+				"auto_activate":      erc20.AutoActivate,
+				"api_key_configured": erc20.EtherscanAPIKey != "",
+				"currency":           "USDT",
 			},
 			{
 				"method":        "wechat",
@@ -106,6 +107,8 @@ type UpdatePaymentMethodRequest struct {
 	AmountTolerance *float64 `json:"amount_tolerance,omitempty"`
 	Confirmations   *int     `json:"confirmations,omitempty"`
 	AutoActivate    *bool    `json:"auto_activate,omitempty"`
+	Network         *string  `json:"network,omitempty"`
+	APIKey          *string  `json:"api_key,omitempty"`
 }
 
 // UpdatePaymentMethod 更新支付方式配置
@@ -152,6 +155,12 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 	}
 	if req.AutoActivate != nil {
 		cfg["auto_activate"] = *req.AutoActivate
+	}
+	if req.Network != nil {
+		cfg["network"] = *req.Network
+	}
+	if req.APIKey != nil {
+		cfg["etherscan_api_key"] = *req.APIKey
 	}
 
 	adminID := getAdminIDFromContext(c)
@@ -221,31 +230,32 @@ func (h *AdminPaymentHandler) getMethodConfig(method string) map[string]interfac
 	case "usdt_erc20", "erc20":
 		cfg := h.paymentSvc.GetERC20Config()
 		return map[string]interface{}{
-			"method":            "usdt_erc20",
-			"name":              "USDT-ERC20",
-			"enabled":           cfg.Enabled,
-			"address":           cfg.Address,
-			"amount_tolerance":  cfg.AmountTolerance,
-			"min_confirmations": cfg.MinConfirmations,
-			"network":           "ethereum",
-			"auto_activate":     cfg.AutoActivate,
+			"method":             "usdt_erc20",
+			"name":               "USDT-" + cfg.ChainLabel(),
+			"enabled":            cfg.Enabled,
+			"address":            cfg.Address,
+			"amount_tolerance":   cfg.AmountTolerance,
+			"min_confirmations":  cfg.MinConfirmations,
+			"network":            cfg.Network,
+			"auto_activate":      cfg.AutoActivate,
+			"api_key_configured": cfg.EtherscanAPIKey != "",
 		}
 	case "wechat":
 		cfg := h.paymentSvc.GetWechatConfig()
 		return map[string]interface{}{
-			"method":           "wechat",
-			"name":             "微信支付",
-			"enabled":          cfg.Enabled,
-			"auto_activate":    cfg.AutoActivate,
+			"method":             "wechat",
+			"name":               "微信支付",
+			"enabled":            cfg.Enabled,
+			"auto_activate":      cfg.AutoActivate,
 			"order_expiry_hours": cfg.OrderExpiryHours,
 		}
 	case "alipay":
 		cfg := h.paymentSvc.GetAlipayConfig()
 		return map[string]interface{}{
-			"method":           "alipay",
-			"name":             "支付宝",
-			"enabled":          cfg.Enabled,
-			"auto_activate":    cfg.AutoActivate,
+			"method":             "alipay",
+			"name":               "支付宝",
+			"enabled":            cfg.Enabled,
+			"auto_activate":      cfg.AutoActivate,
 			"order_expiry_hours": cfg.OrderExpiryHours,
 		}
 	default:

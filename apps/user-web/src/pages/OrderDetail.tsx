@@ -22,6 +22,7 @@ import {
   adaptOrder,
 } from '@/lib/endpoints'
 import { QRCode } from '@/components/QRCode'
+import { UsdtLogo } from '@/components/PaymentIcons'
 
 const POLL_INTERVAL = 10000
 
@@ -177,6 +178,12 @@ export default function OrderDetail() {
     )
   }
 
+  const payCurrency = order.pay_currency || 'USDT-TRC20'
+  const isPolygon = payCurrency.toUpperCase().includes('POLYGON')
+  const isTRC20 = payCurrency.toUpperCase().includes('TRC20')
+  const networkLabel = isPolygon ? 'Polygon' : isTRC20 ? 'TRC20' : 'ERC20'
+  const displayAmount = Math.max(0, order.final_amount ?? order.amount_usdt)
+
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
@@ -268,8 +275,11 @@ export default function OrderDetail() {
           </div>
 
           <div className="rounded-lg p-4 mb-5" style={{ background: 'var(--muted)' }}>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>USDT-TRC20 收款地址</span>
+            <div className="flex items-center justify-between mb-3 gap-3">
+              <span className="text-sm flex items-center gap-2" style={{ color: 'var(--muted-foreground)' }}>
+                <UsdtLogo size={22} />
+                USDT-{networkLabel} 收款地址
+              </span>
               <CopyButton text={order.pay_address} />
             </div>
             <p className="text-xs font-mono break-all" style={{ color: 'var(--foreground)' }}>{order.pay_address}</p>
@@ -278,8 +288,37 @@ export default function OrderDetail() {
           <div className="rounded-lg p-4 mb-5" style={{ background: 'rgba(232,163,61,0.08)', border: '1px solid rgba(232,163,61,0.2)' }}>
             <p className="text-sm" style={{ color: '#e8a33d' }}>
               <Clock className="w-4 h-4 inline mr-1" />
-              请在有效期内支付 <strong style={{ color: 'var(--primary)' }}>{formatUSDT(order.amount_usdt)} USDT</strong>（TRC20网络）到上述地址，支付完成后系统将自动确认并激活您的订阅。
+              请在有效期内支付 <strong style={{ color: 'var(--primary)' }}>{formatUSDT(displayAmount)} USDT</strong>（{networkLabel}网络）到上述地址，支付完成后系统将自动确认并激活您的订阅。
             </p>
+          </div>
+
+          <div className="rounded-lg p-4 mb-5" style={{ background: 'rgba(205,92,77,0.06)', border: '1px solid rgba(205,92,77,0.22)' }}>
+            <p className="text-xs leading-relaxed" style={{ color: 'var(--destructive)' }}>
+              请勿使用其它网络或其它币种转账，否则可能无法自动到账。
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-5">
+            <a
+              href="https://www.okx.com/en-us/buy-crypto#sourceBase=USDT"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-bold text-white transition-opacity hover:opacity-85"
+              style={{ background: '#1b1e26' }}
+            >
+              <span className="flex items-center justify-center rounded font-black" style={{ width: 20, height: 20, background: '#f8f8f8', color: '#1b1e26', fontSize: 9 }}>OKX</span>
+              OKX 购买 USDT
+            </a>
+            <a
+              href="https://p2p.binance.com/express/buy/USDT"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-bold text-black transition-opacity hover:opacity-85"
+              style={{ background: '#f3ba2f' }}
+            >
+              <span className="flex items-center justify-center rounded-full font-black" style={{ width: 20, height: 20, background: '#1b1e26', color: '#f3ba2f', fontSize: 9 }}>B</span>
+              Binance 购买 USDT
+            </a>
           </div>
 
           <div className="rounded-lg p-4 mb-5" style={{ background: 'var(--muted)' }}>
@@ -291,7 +330,7 @@ export default function OrderDetail() {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>应付金额</span>
-              <span className="text-lg font-bold" style={{ color: 'var(--primary)' }}>{formatUSDT(order.amount_usdt)} USDT</span>
+              <span className="text-lg font-bold" style={{ color: 'var(--primary)' }}>{formatUSDT(displayAmount)} USDT</span>
             </div>
           </div>
 
@@ -316,7 +355,7 @@ export default function OrderDetail() {
         <DetailRow label="商品金额" value={`${formatUSDT(order.amount_usdt)} USDT`} />
         <DetailRow
           label="实付金额"
-          value={`${formatUSDT(order.amount_usdt)} USDT`}
+          value={`${formatUSDT(displayAmount)} USDT`}
           highlight
         />
         <DetailRow label="创建时间" value={formatDateTime(order.created_at)} />

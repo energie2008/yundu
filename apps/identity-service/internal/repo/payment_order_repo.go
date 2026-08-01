@@ -212,7 +212,7 @@ func (r *PaymentOrderRepo) AdminList(ctx context.Context, page, pageSize int, st
 	return orders, total, rows.Err()
 }
 
-func (r *PaymentOrderRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string, txHash *string, paidAmount *float64, paidAt *time.Time) error {
+func (r *PaymentOrderRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string, txHash *string, paidAmount *float64, paidAt *time.Time) (bool, error) {
 	query := `UPDATE payment_orders SET status = $2, updated_at = now()`
 	args := []interface{}{id, status}
 	if txHash != nil {
@@ -228,8 +228,22 @@ func (r *PaymentOrderRepo) UpdateStatus(ctx context.Context, id uuid.UUID, statu
 		query += `, paid_at = $` + itoa(len(args))
 	}
 	query += ` WHERE id = $1`
-	_, err := r.pool.Exec(ctx, query, args...)
-	return err
+	ct, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	return ct.RowsAffected() > 0, nil
+}
+
+// MarkPaidIfPending 仅当订单仍为 pending 时标记为已支付。
+// 用于链上轮询匹配，避免同一笔交易或并发轮询对已处理订单重复激活。
+func (r *PaymentOrderRepo) MarkPaidIfPending(ctx context.Context, id uuid.UUID, txHash string, paidAmount float64, paidAt time.Time) (bool, error) {
+	query := `UPDATE payment_orders SET status = 'paid', tx_hash = $2, paid_amount = $3, paid_at = $4, updated_at = now() WHERE id = $1 AND status = 'pending'`
+	ct, err := r.pool.Exec(ctx, query, id, txHash, paidAmount, paidAt)
+	if err != nil {
+		return false, err
+	}
+	return ct.RowsAffected() > 0, nil
 }
 
 func (r *PaymentOrderRepo) UpdateBlockNumber(ctx context.Context, id uuid.UUID, blockNumber *int64) error {

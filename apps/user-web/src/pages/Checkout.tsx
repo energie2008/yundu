@@ -4,11 +4,125 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { EP, adaptPlan, getPeriodLabel, bytesToGB } from '../lib/endpoints';
 import type { PlanResponse, PaymentMethod, PaymentMethodsResponse, OrderResponse, CouponValidateResponse } from '../lib/endpoints';
+import { UsdtLogo } from '../components/PaymentIcons';
 
 function formatTraffic(bytes: number): string {
   if (bytes <= 0) return '不限流量';
   const gb = bytesToGB(bytes);
   return gb >= 1024 ? `${(gb / 1024).toFixed(0)} TB` : `${gb.toFixed(0)} GB`;
+}
+
+function ConfirmPayCard({
+  open,
+  planName,
+  periodLabel,
+  basePrice,
+  discount,
+  totalPrice,
+  method,
+  rate,
+  submitting,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean
+  planName: string
+  periodLabel: string
+  basePrice: number
+  discount: number
+  totalPrice: number
+  method?: PaymentMethod
+  rate: number
+  submitting: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  if (!open) return null
+  const isUsdt = !!method && (method.method === 'usdt_trc20' || method.method === 'usdt_erc20')
+  const usdtTotal = totalPrice > 0 && rate > 0 ? totalPrice / rate : 0
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={onCancel}
+    >
+      <div
+        className="xboard-card w-full max-w-md p-5 sm:p-6"
+        style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>确认支付</h2>
+          <button
+            onClick={onCancel}
+            className="text-2xl leading-none px-2"
+            style={{ color: 'var(--muted-foreground)' }}
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="rounded-lg p-4 mb-4" style={{ background: 'var(--muted)' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-base font-semibold" style={{ color: 'var(--foreground)' }}>{planName}</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>{periodLabel}</p>
+            </div>
+            <span className="text-lg font-bold whitespace-nowrap" style={{ color: 'var(--primary)' }}>
+              ¥{totalPrice.toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-2.5 text-sm mb-4">
+          <div className="flex justify-between">
+            <span style={{ color: 'var(--muted-foreground)' }}>原价</span>
+            <span style={{ color: 'var(--foreground)' }}>¥{basePrice.toFixed(2)}</span>
+          </div>
+          {discount > 0 && (
+            <div className="flex justify-between">
+              <span style={{ color: 'var(--success)' }}>优惠</span>
+              <span style={{ color: 'var(--success)' }}>-¥{discount.toFixed(2)}</span>
+            </div>
+          )}
+          <div className="flex justify-between pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+            <span className="font-semibold" style={{ color: 'var(--foreground)' }}>支付方式</span>
+            <span className="font-medium flex items-center gap-2" style={{ color: 'var(--foreground)' }}>
+              {isUsdt && <UsdtLogo size={20} />}
+              {totalPrice === 0 ? '优惠券全额抵扣' : method?.name || '-'}
+            </span>
+          </div>
+          {totalPrice > 0 && isUsdt && usdtTotal > 0 && (
+            <div className="flex justify-between">
+              <span style={{ color: 'var(--muted-foreground)' }}>应付等值</span>
+              <span className="font-bold" style={{ color: 'var(--primary)' }}>≈ {usdtTotal.toFixed(2)} USDT</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            disabled={submitting}
+            className="flex-1 h-10 rounded-lg text-sm font-medium border transition-colors disabled:opacity-50"
+            style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}
+          >
+            返回修改
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={submitting}
+            className="flex-[2] h-10 rounded-lg text-sm font-medium text-white transition-colors shadow-sm disabled:opacity-50"
+            style={{ background: 'var(--primary)' }}
+          >
+            {submitting ? '处理中...' : totalPrice === 0 ? '确认获取' : '确认并支付'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function Checkout() {
@@ -21,6 +135,7 @@ export function Checkout() {
   const [selectedMethod, setSelectedMethod] = useState<string>('');
   const [couponCode, setCouponCode] = useState('');
   const [couponResult, setCouponResult] = useState<CouponValidateResponse | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const planQuery = useQuery<PlanResponse>({
     queryKey: ['plan', planId],
@@ -68,8 +183,9 @@ export function Checkout() {
       });
     },
     onSuccess: (order) => {
+      setConfirmOpen(false);
       if (order?.id) {
-        navigate(`/dashboard/orders?highlight=${order.id}`);
+        navigate(`/dashboard/orders/${order.id}`);
       }
     },
   });
@@ -87,6 +203,7 @@ export function Checkout() {
   const methodObj = methods.find(m => m.method === selectedMethod);
   const discount = couponResult?.valid ? (couponResult.discount_amount || 0) : 0;
   const totalPrice = Math.max(0, basePrice - discount);
+  const exchangeRate = methodsQuery.data?.exchange_rate || 7.2;
 
   const periods = useMemo(() => {
     if (!plan?.prices) return [];
@@ -297,7 +414,7 @@ export function Checkout() {
                 </div>
               </div>
               <button
-                onClick={() => orderMut.mutate()}
+                onClick={() => setConfirmOpen(true)}
                 disabled={orderMut.isPending || (totalPrice > 0 && !selectedMethod)}
                 className="w-full mt-4 py-2.5 rounded-lg text-sm font-medium text-white transition-colors shadow-sm disabled:opacity-50"
                 style={{ background: 'var(--primary)' }}
@@ -308,6 +425,20 @@ export function Checkout() {
           </div>
         </div>
       </div>
+
+      <ConfirmPayCard
+        open={confirmOpen}
+        planName={plan.name}
+        periodLabel={getPeriodLabel(selectedPeriod)}
+        basePrice={basePrice}
+        discount={discount}
+        totalPrice={totalPrice}
+        method={methodObj}
+        rate={exchangeRate}
+        submitting={orderMut.isPending}
+        onConfirm={() => orderMut.mutate()}
+        onCancel={() => setConfirmOpen(false)}
+      />
 
       {/* Footer links */}
       <div className="text-center mt-6 text-xs" style={{ color: 'var(--muted-foreground)' }}>

@@ -40,6 +40,7 @@ type ERC20Config struct {
 	USDTContract     string  `json:"usdt_contract"`
 	EtherscanAPI     string  `json:"etherscan_api"`
 	EtherscanAPIKey  string  `json:"etherscan_api_key"`
+	ChainID          int     `json:"chain_id"`
 	MinConfirmations int     `json:"min_confirmations"`
 	OrderExpiryHours int     `json:"order_expiry_hours"`
 	AmountTolerance  float64 `json:"amount_tolerance"`
@@ -48,54 +49,62 @@ type ERC20Config struct {
 	Network          string  `json:"network"`
 }
 
+// ChainLabel 返回 EVM 链的展示名，用于订单币种与支付页展示。
+func (c ERC20Config) ChainLabel() string {
+	if strings.Contains(strings.ToLower(c.Network), "polygon") {
+		return "Polygon"
+	}
+	return "Ethereum"
+}
+
 // WechatConfig 微信支付配置（框架预留，暂不对接真实接口）
 type WechatConfig struct {
-	Enabled          bool   `json:"enabled"`
-	OrderExpiryHours int    `json:"order_expiry_hours"`
-	AutoActivate     bool   `json:"auto_activate"`
+	Enabled          bool `json:"enabled"`
+	OrderExpiryHours int  `json:"order_expiry_hours"`
+	AutoActivate     bool `json:"auto_activate"`
 	// 以下字段为后续对接真实接口预留，当前框架模式不使用
-	MchID            string `json:"mch_id,omitempty"`
-	APIKey           string `json:"api_key,omitempty"`
-	AppID            string `json:"app_id,omitempty"`
-	NotifyURL        string `json:"notify_url,omitempty"`
+	MchID     string `json:"mch_id,omitempty"`
+	APIKey    string `json:"api_key,omitempty"`
+	AppID     string `json:"app_id,omitempty"`
+	NotifyURL string `json:"notify_url,omitempty"`
 }
 
 // AlipayConfig 支付宝支付配置（框架预留，暂不对接真实接口）
 type AlipayConfig struct {
-	Enabled          bool   `json:"enabled"`
-	OrderExpiryHours int    `json:"order_expiry_hours"`
-	AutoActivate     bool   `json:"auto_activate"`
+	Enabled          bool `json:"enabled"`
+	OrderExpiryHours int  `json:"order_expiry_hours"`
+	AutoActivate     bool `json:"auto_activate"`
 	// 以下字段为后续对接真实接口预留，当前框架模式不使用
-	AppID            string `json:"app_id,omitempty"`
-	PrivateKey       string `json:"private_key,omitempty"`
-	NotifyURL        string `json:"notify_url,omitempty"`
+	AppID      string `json:"app_id,omitempty"`
+	PrivateKey string `json:"private_key,omitempty"`
+	NotifyURL  string `json:"notify_url,omitempty"`
 }
 
 type PaymentService struct {
-	paymentOrderRepo    *repo.PaymentOrderRepo
-	planRepo            *repo.PlanRepo
-	userRepo            *repo.UserRepo
-	subRepo             *repo.SubscriptionRepo
-	subTokenRepo        *repo.SubscriptionTokenRepo
-	settingRepo         *repo.SettingRepo
-	couponRepo          *repo.CouponRepo
-	commissionLogRepo   *repo.CommissionLogRepo
-	mailSvc             *MailService
-	auditSvc            *AuditService
-	notifySvc           *NotificationService
-	commissionSvc       *CommissionService
-	log                 *slog.Logger
-	httpClient          *http.Client
-	stopPoll            chan struct{}
-	pollWg              sync.WaitGroup
-	trc20Cfg            TRC20Config
-	erc20Cfg            ERC20Config
-	wechatCfg           WechatConfig
-	alipayCfg           AlipayConfig
-	cfgMu               sync.RWMutex
-	lastCommissionRun   time.Time
-	exchangeRate        float64
-	onEvent             func(ctx context.Context, topic string, payload interface{})
+	paymentOrderRepo  *repo.PaymentOrderRepo
+	planRepo          *repo.PlanRepo
+	userRepo          *repo.UserRepo
+	subRepo           *repo.SubscriptionRepo
+	subTokenRepo      *repo.SubscriptionTokenRepo
+	settingRepo       *repo.SettingRepo
+	couponRepo        *repo.CouponRepo
+	commissionLogRepo *repo.CommissionLogRepo
+	mailSvc           *MailService
+	auditSvc          *AuditService
+	notifySvc         *NotificationService
+	commissionSvc     *CommissionService
+	log               *slog.Logger
+	httpClient        *http.Client
+	stopPoll          chan struct{}
+	pollWg            sync.WaitGroup
+	trc20Cfg          TRC20Config
+	erc20Cfg          ERC20Config
+	wechatCfg         WechatConfig
+	alipayCfg         AlipayConfig
+	cfgMu             sync.RWMutex
+	lastCommissionRun time.Time
+	exchangeRate      float64
+	onEvent           func(ctx context.Context, topic string, payload interface{})
 }
 
 func (s *PaymentService) SetEventPublisher(fn func(ctx context.Context, topic string, payload interface{})) {
@@ -261,7 +270,8 @@ func (s *PaymentService) loadERC20Config() ERC20Config {
 	cfg := ERC20Config{
 		Enabled:          false,
 		USDTContract:     "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-		EtherscanAPI:     "https://api.etherscan.io/api",
+		EtherscanAPI:     "https://api.etherscan.io/v2/api",
+		ChainID:          1,
 		MinConfirmations: 3,
 		OrderExpiryHours: 6,
 		AmountTolerance:  0.01,
@@ -275,6 +285,25 @@ func (s *PaymentService) loadERC20Config() ERC20Config {
 		return cfg
 	}
 	_ = json.Unmarshal(data, &cfg)
+	if strings.Contains(strings.ToLower(cfg.Network), "polygon") {
+		// Polygon 网络默认使用 Etherscan V2（chainid=137）与 Polygon 版 USDT 合约
+		if cfg.EtherscanAPI == "" || strings.Contains(cfg.EtherscanAPI, "api.polygonscan.com") {
+			cfg.EtherscanAPI = "https://api.etherscan.io/v2/api"
+		}
+		if cfg.ChainID == 0 || cfg.ChainID == 1 {
+			cfg.ChainID = 137
+		}
+		if cfg.USDTContract == "" || strings.EqualFold(cfg.USDTContract, "0xdAC17F958D2ee523a2206206994597C13D831ec7") {
+			cfg.USDTContract = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"
+		}
+	} else {
+		if cfg.EtherscanAPI == "" || strings.Contains(cfg.EtherscanAPI, "api.polygonscan.com") {
+			cfg.EtherscanAPI = "https://api.etherscan.io/v2/api"
+		}
+		if cfg.ChainID == 0 {
+			cfg.ChainID = 1
+		}
+	}
 	return cfg
 }
 
@@ -506,7 +535,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 				return nil, fmt.Errorf("USDT-ERC20 payment not enabled")
 			}
 			payAddress = cfg.Address
-			payCurrency = "USDT-ERC20"
+			payCurrency = "USDT-" + cfg.ChainLabel()
 			expiryHours = cfg.OrderExpiryHours
 			if expiryHours <= 0 {
 				expiryHours = 6
@@ -568,11 +597,11 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 	s.log.Info("Order created", "order_no", orderNo, "user", userID, "amount", finalAmount, "method", paymentMethod)
 
 	// 0元订单（全额优惠券）自动标记 paid 并激活订阅，跳过链上支付流程
-	if finalAmount == 0 {
+	if finalAmount <= 0 {
 		now := time.Now()
 		zeroPaid := 0.0
-		zeroTxHash := "ZERO_YUAN_COUPON"
-		if err := s.paymentOrderRepo.UpdateStatus(ctx, order.ID, model.PaymentStatusPaid, &zeroTxHash, &zeroPaid, &now); err != nil {
+		zeroTxHash := "ZERO:" + order.OrderNo
+		if updated, err := s.paymentOrderRepo.UpdateStatus(ctx, order.ID, model.PaymentStatusPaid, &zeroTxHash, &zeroPaid, &now); err != nil || !updated {
 			s.log.Error("auto-mark 0-yuan order paid failed", "order", orderNo, "error", err)
 		} else {
 			order.Status = model.PaymentStatusPaid
@@ -589,7 +618,12 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 func (s *PaymentService) GetPaymentURI(order *model.PaymentOrder) string {
 	switch order.PaymentMethod {
 	case model.PaymentMethodUSDTERC20:
-		return fmt.Sprintf("ethereum:%s?value=%.2f&contract=%s", order.PayAddress, order.FinalAmount, s.GetERC20Config().USDTContract)
+		cfg := s.GetERC20Config()
+		scheme := "ethereum"
+		if strings.Contains(strings.ToLower(cfg.Network), "polygon") {
+			scheme = "polygon"
+		}
+		return fmt.Sprintf("%s:%s?value=%.2f&contract=%s", scheme, order.PayAddress, order.FinalAmount, cfg.USDTContract)
 	case model.PaymentMethodUSDTTRC20:
 		cfg := s.GetTRC20Config()
 		amount := strconv.FormatFloat(order.FinalAmount*1000000, 'f', 0, 64)
@@ -755,22 +789,44 @@ func (s *PaymentService) fetchERC20Transfers(cfg ERC20Config) ([]ethTransaction,
 	if cfg.EtherscanAPIKey != "" {
 		params.Set("apikey", cfg.EtherscanAPIKey)
 	}
-	apiURL := fmt.Sprintf("%s?%s", strings.TrimRight(cfg.EtherscanAPI, "/"), params.Encode())
+	apiBase := strings.TrimRight(cfg.EtherscanAPI, "/")
+	if strings.Contains(apiBase, "/v2/") || strings.HasSuffix(apiBase, "/v2/api") {
+		// Etherscan V2 通过 chainid 指定链，不再使用 explorer 专属域名
+		chainID := cfg.ChainID
+		if chainID == 0 {
+			chainID = 1
+		}
+		params.Set("chainid", strconv.Itoa(chainID))
+	}
+	apiURL := fmt.Sprintf("%s?%s", apiBase, params.Encode())
 	resp, err := s.httpClient.Get(apiURL)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	var result struct {
-		Status  string           `json:"status"`
-		Message string           `json:"message"`
-		Result  []ethTransaction `json:"result"`
+		Status  string          `json:"status"`
+		Message string          `json:"message"`
+		Result  json.RawMessage `json:"result"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
+	if len(result.Result) == 0 || string(result.Result) == "null" {
+		return nil, nil
+	}
+	if result.Result[0] == '"' {
+		// Etherscan/Polygonscan 无 key 或限流时 result 是字符串告警
+		var apiErr string
+		_ = json.Unmarshal(result.Result, &apiErr)
+		return nil, fmt.Errorf("explorer api error: %s", apiErr)
+	}
 	var transfers []ethTransaction
-	for _, tx := range result.Result {
+	var txs []ethTransaction
+	if err := json.Unmarshal(result.Result, &txs); err != nil {
+		return nil, err
+	}
+	for _, tx := range txs {
 		if strings.EqualFold(tx.To, cfg.Address) {
 			transfers = append(transfers, tx)
 		}
@@ -878,13 +934,21 @@ func (s *PaymentService) matchTRC20(ctx context.Context, o *model.PaymentOrder, 
 		}
 		paid := t.Value
 		hash := t.TransactionID
+		// 一笔链上交易只能认领一个订单，防止同金额订单被重复激活
+		if existing, err := s.paymentOrderRepo.GetByTxHash(ctx, hash); err == nil && existing != nil && existing.ID != o.ID {
+			continue
+		}
 		paidAt := time.Now()
 		var blockNum *int64
 		if t.BlockNumber > 0 {
 			blockNum = &t.BlockNumber
 		}
-		if err := s.paymentOrderRepo.UpdateStatus(ctx, o.ID, model.PaymentStatusPaid, &hash, &paid, &paidAt); err != nil {
-			s.log.Error("update order paid", "error", err)
+		updated, err := s.paymentOrderRepo.MarkPaidIfPending(ctx, o.ID, hash, paid, paidAt)
+		if err != nil {
+			s.log.Error("mark order paid", "error", err)
+			continue
+		}
+		if !updated {
 			continue
 		}
 		_ = s.paymentOrderRepo.UpdateBlockNumber(ctx, o.ID, blockNum)
@@ -914,13 +978,21 @@ func (s *PaymentService) matchERC20(ctx context.Context, o *model.PaymentOrder, 
 		}
 		paid := amount
 		hash := t.Hash
+		// 一笔链上交易只能认领一个订单，防止同金额订单被重复激活
+		if existing, err := s.paymentOrderRepo.GetByTxHash(ctx, hash); err == nil && existing != nil && existing.ID != o.ID {
+			continue
+		}
 		paidAt := time.Now()
 		var blockNum *int64
 		if bn, err := strconv.ParseInt(strings.TrimPrefix(t.BlockNumber, "0x"), 16, 64); err == nil {
 			blockNum = &bn
 		}
-		if err := s.paymentOrderRepo.UpdateStatus(ctx, o.ID, model.PaymentStatusPaid, &hash, &paid, &paidAt); err != nil {
-			s.log.Error("update order paid", "error", err)
+		updated, err := s.paymentOrderRepo.MarkPaidIfPending(ctx, o.ID, hash, paid, paidAt)
+		if err != nil {
+			s.log.Error("mark order paid", "error", err)
+			continue
+		}
+		if !updated {
 			continue
 		}
 		if blockNum != nil {
@@ -993,11 +1065,11 @@ func (s *PaymentService) activateOrder(ctx context.Context, o *model.PaymentOrde
 	// 支付成功站内信通知（异步，不阻塞主流程）
 	if s.notifySvc != nil {
 		s.notifySvc.NotifyUserAsync(o.UserID, "payment_success", map[string]interface{}{
-			"order_id":   o.ID.String(),
-			"order_no":   o.OrderNo,
-			"plan_name":  o.PlanName,
-			"amount":     paidAmount,
-			"user_id":    o.UserID.String(),
+			"order_id":  o.ID.String(),
+			"order_no":  o.OrderNo,
+			"plan_name": o.PlanName,
+			"amount":    paidAmount,
+			"user_id":   o.UserID.String(),
 		})
 	}
 
@@ -1071,7 +1143,13 @@ func (s *PaymentService) CheckOrderAndActivate(ctx context.Context, userID uuid.
 		}
 		paid := order.FinalAmount
 		now := time.Now()
-		_ = s.paymentOrderRepo.UpdateStatus(ctx, order.ID, model.PaymentStatusPaid, &txHash, &paid, &now)
+		updated, err := s.paymentOrderRepo.UpdateStatus(ctx, order.ID, model.PaymentStatusPaid, &txHash, &paid, &now)
+		if err != nil {
+			return nil, fmt.Errorf("mark order paid: %w", err)
+		}
+		if !updated {
+			return nil, fmt.Errorf("order is not pending and cannot be marked paid")
+		}
 		order.Status = model.PaymentStatusPaid
 		order.TxHash = &txHash
 		order.PaidAmount = &paid

@@ -39,7 +39,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 	}
 
 	resp := gin.H{
-		"user_id":              result.User.ID,
+		"user_id":               result.User.ID,
 		"requires_verification": result.User.Status == model.UserStatusPending,
 	}
 	if result.SubscriptionToken != "" {
@@ -434,17 +434,18 @@ func (h *UserHandler) ListPaymentMethods(c *gin.Context) {
 	rate := h.paymentSvc.GetExchangeRate()
 
 	type paymentMethod struct {
-		Method   string  `json:"method"`
-		Name     string  `json:"name"`
-		Currency string  `json:"currency"`
-		Enabled  bool    `json:"enabled"`
-		Fiat     bool    `json:"fiat"`
+		Method   string `json:"method"`
+		Name     string `json:"name"`
+		Currency string `json:"currency"`
+		Enabled  bool   `json:"enabled"`
+		Fiat     bool   `json:"fiat"`
+		Network  string `json:"network,omitempty"`
 	}
 	methods := []paymentMethod{
 		{Method: model.PaymentMethodAlipay, Name: "支付宝", Currency: "CNY", Enabled: alipay.Enabled, Fiat: true},
 		{Method: model.PaymentMethodWechat, Name: "微信支付", Currency: "CNY", Enabled: wechat.Enabled, Fiat: true},
-		{Method: model.PaymentMethodUSDTTRC20, Name: "USDT-TRC20", Currency: "USDT", Enabled: trc20.Enabled && trc20.Address != "", Fiat: false},
-		{Method: model.PaymentMethodUSDTERC20, Name: "USDT-ERC20", Currency: "USDT", Enabled: erc20.Enabled && erc20.Address != "", Fiat: false},
+		{Method: model.PaymentMethodUSDTTRC20, Name: "USDT-TRC20", Currency: "USDT", Enabled: trc20.Enabled && trc20.Address != "", Fiat: false, Network: "tron"},
+		{Method: model.PaymentMethodUSDTERC20, Name: "USDT-" + erc20.ChainLabel(), Currency: "USDT", Enabled: erc20.Enabled && erc20.Address != "", Fiat: false, Network: erc20.Network},
 	}
 
 	// 只返回启用的支付方式

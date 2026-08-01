@@ -134,7 +134,7 @@ func (h *AdminOrderHandler) AdminCancelOrder(c *gin.Context) {
 		return
 	}
 
-	if err := h.orderRepo.UpdateStatus(c.Request.Context(), id, model.PaymentStatusCanceled, nil, nil, nil); err != nil {
+	if _, err := h.orderRepo.UpdateStatus(c.Request.Context(), id, model.PaymentStatusCanceled, nil, nil, nil); err != nil {
 		server.InternalError(c, "failed to cancel order")
 		return
 	}
@@ -167,7 +167,7 @@ func (h *AdminOrderHandler) AdminMarkPaid(c *gin.Context) {
 	}
 
 	// 手动补单：标记为已支付，通过 userSvc 激活订阅
-	if err := h.orderRepo.UpdateStatus(c.Request.Context(), id, model.PaymentStatusPaid, nil, &order.AmountUSDT, nil); err != nil {
+	if _, err := h.orderRepo.UpdateStatus(c.Request.Context(), id, model.PaymentStatusPaid, nil, &order.AmountUSDT, nil); err != nil {
 		server.InternalError(c, "failed to mark order as paid")
 		return
 	}
