@@ -67,7 +67,7 @@ func (r *OutboundPolicyRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *OutboundPolicyRepo) ListByNode(ctx context.Context, nodeID uuid.UUID) ([]*OutboundPolicy, error) {
-	query := fmt.Sprintf(`SELECT %s FROM outbound_policies WHERE node_id = $1 ORDER BY priority ASC, created_at ASC`, policyColumns)
+	query := fmt.Sprintf(`SELECT %s FROM outbound_policies WHERE node_id = $1 ORDER BY priority ASC, created_at ASC, id ASC`, policyColumns)
 	rows, err := r.pool.Query(ctx, query, nodeID)
 	if err != nil {
 		return nil, err

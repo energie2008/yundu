@@ -56,7 +56,7 @@ func (r *UserNodeCredentialRepo) GetByNodeID(ctx context.Context, nodeID uuid.UU
 		WHERE u.deleted_at IS NULL
 		  AND u.status = 'active'
 		  AND u.uuid IS NOT NULL AND u.uuid != ''
-		ORDER BY u.created_at ASC`
+		ORDER BY u.created_at ASC, u.id ASC`
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err

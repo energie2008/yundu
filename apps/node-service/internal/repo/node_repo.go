@@ -196,7 +196,7 @@ func (r *NodeRepo) List(ctx context.Context, page, pageSize int, protocolType, r
 	query := fmt.Sprintf(`
 		SELECT %s
 		FROM nodes WHERE %s
-		ORDER BY priority ASC, created_at DESC
+		ORDER BY priority ASC, created_at DESC, id DESC
 		LIMIT $%d OFFSET $%d`, nodeSelectColumns, whereClause, argIdx, argIdx+1)
 	args = append(args, pageSize, (page-1)*pageSize)
 
@@ -499,7 +499,7 @@ func (r *NodeRepo) ListByServerID(ctx context.Context, serverID uuid.UUID) ([]*m
 		FROM nodes n
 		JOIN runtimes r ON n.runtime_id = r.id
 		WHERE r.server_id = $1 AND n.deleted_at IS NULL AND n.is_enabled = true
-		ORDER BY n.priority ASC`
+		ORDER BY n.priority ASC, n.id ASC`
 	rows, err := r.pool.Query(ctx, query, serverID)
 	if err != nil {
 		return nil, err
@@ -537,7 +537,7 @@ func (r *NodeRepo) ListAllByServerID(ctx context.Context, serverID uuid.UUID) ([
 		FROM nodes n
 		JOIN runtimes r ON n.runtime_id = r.id
 		WHERE r.server_id = $1 AND n.deleted_at IS NULL
-		ORDER BY n.is_enabled DESC, n.priority ASC`
+		ORDER BY n.is_enabled DESC, n.priority ASC, n.id ASC`
 	rows, err := r.pool.Query(ctx, query, serverID)
 	if err != nil {
 		return nil, err

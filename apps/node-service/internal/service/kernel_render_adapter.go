@@ -330,10 +330,13 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 	creds exposure.NodeCredentials,
 ) (map[string]interface{}, error) {
 	// 排序确保 inbounds 渲染顺序稳定（修复版本号死循环，根因 #6 根治）。
-	// 双保险：① DB 层 ListByRuntimeID 已 ORDER BY priority, id（node_repo.go，id 作稳定 tiebreaker）
-	// ② 此处渲染入口 sort.Slice 按 ID 排序，覆盖所有走 buildConfigViaKernelRender 的路径（xray + sing-box）。
+	// 双保险：① DB 层已统一 ORDER BY priority, id（node_repo.go 等，id 作稳定 tiebreaker）
+	// ② 此处渲染入口按与 DB 相同键排序（priority, id），覆盖所有走 buildConfigViaKernelRender 的路径。
 	// 排序稳定后 hash 不再漂移，无需 panic 断言或 debounce 防抖。
 	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Priority != nodes[j].Priority {
+			return nodes[i].Priority < nodes[j].Priority
+		}
 		return nodes[i].ID.String() < nodes[j].ID.String()
 	})
 

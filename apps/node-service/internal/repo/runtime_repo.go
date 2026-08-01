@@ -90,7 +90,7 @@ func (r *RuntimeRepo) ListByServer(ctx context.Context, serverID uuid.UUID) ([]*
 		SELECT id, server_id, runtime_type, runtime_version, provider_type, provider_ref,
 			listen_host, api_port, status, capabilities, config_schema_version, metadata,
 			last_heartbeat_at, created_at, updated_at
-		FROM runtimes WHERE server_id = $1 ORDER BY created_at DESC`
+		FROM runtimes WHERE server_id = $1 ORDER BY created_at DESC, id DESC`
 	rows, err := r.pool.Query(ctx, query, serverID)
 	if err != nil {
 		return nil, err

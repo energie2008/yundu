@@ -17,6 +17,7 @@ import (
 	"github.com/airport-panel/config"
 	"github.com/airport-panel/node-service/internal/crypto"
 	"github.com/airport-panel/node-service/internal/exposure"
+	"github.com/airport-panel/node-service/internal/metrics"
 	"github.com/airport-panel/node-service/internal/model"
 	"github.com/airport-panel/node-service/internal/outbound"
 	"github.com/airport-panel/node-service/internal/pkg"
@@ -1177,6 +1178,8 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 	}
 
 	if cv.ContentHash != freshHash {
+		// 渲染 hash 漂移指标：真实配置变更也会触发，但连续高频 +1 即代表排序契约破坏
+		metrics.ConfigRenderHashChurnTotal.WithLabelValues(runtimeID.String()).Inc()
 		versionNo, err := s.deploymentRepo.GetNextVersionNo(ctx, model.ScopeTypeRuntime, runtimeID)
 		if err != nil {
 			versionNo = cv.VersionNo + 1
@@ -1620,11 +1623,12 @@ func (s *DeploymentService) PushUserBanToAllServers(ctx context.Context, userIDs
 }
 
 func (s *DeploymentService) buildRuntimeConfig(ctx context.Context, runtimeType string, nodes []*model.Node, listenHost string) (map[string]interface{}, error) {
-	// P0 修复：按 Node ID 排序确保配置渲染顺序稳定。
-	// 数据库查询 ListByRuntimeID 未使用 ORDER BY，每次返回行顺序可能不同，
-	// 导致 inbounds 数组顺序变化 → JSON 序列化不同 → hash 不同 → 版本循环递增。
+	// P0 修复：按 priority, id 排序确保配置渲染顺序稳定（与 DB ORDER BY 契约一致）。
 	// 排序后所有下游处理（凭证预取、链路构建、内核渲染）都使用一致的节点顺序。
 	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Priority != nodes[j].Priority {
+			return nodes[i].Priority < nodes[j].Priority
+		}
 		return nodes[i].ID.String() < nodes[j].ID.String()
 	})
 

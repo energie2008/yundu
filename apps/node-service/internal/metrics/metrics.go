@@ -62,6 +62,13 @@ var (
 		Name: "nodeservice_exposure_applies_total",
 		Help: "Total exposure config applies, by final status (applied/failed).",
 	}, []string{"status"})
+
+	// ConfigRenderHashChurnTotal 渲染 hash 漂移计数：相同输入渲染产生不同 hash 时 +1。
+	// 用于版本号死循环复发检测（排序契约破坏时触发告警）。
+	ConfigRenderHashChurnTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "nodeservice_config_render_hash_churn_total",
+		Help: "Total config render hash churn events (input unchanged but hash changed).",
+	}, []string{"runtime_id"})
 )
 
 // ChannelStateValue 将通道状态字符串映射为数值，用于 Gauge 指标

@@ -237,6 +237,7 @@ cmd_agent() {
     local endpoint=""
     local runtime="xray"
     local version="latest"
+    local disable_grpc="0"
 
     for arg in "$@"; do
         case "$arg" in
@@ -244,6 +245,7 @@ cmd_agent() {
             --endpoint=*)  endpoint="${arg#*=}" ;;
             --runtime=*)   runtime="${arg#*=}" ;;
             --version=*)   version="${arg#*=}" ;;
+            --disable-grpc) disable_grpc="1" ;;
             *) warn "未知参数: $arg" ;;
         esac
     done
@@ -292,8 +294,13 @@ cmd_agent() {
     # 优先用 ufw（Debian/Ubuntu 默认），未安装则跳过（VPS 安全组通常已处理）
     setup_direct_node_firewall
 
+    local exec_cmd="${INSTALL_DIR}/node-agent --endpoint=${endpoint} --token=${token} --runtime=${runtime} --config-dir=${CONFIG_DIR}"
+    if [ "$disable_grpc" = "1" ]; then
+        # 域名走 Cloudflare 代理时，非 443 的 gRPC 端口无法穿透，禁用避免无效重连
+        exec_cmd="/usr/bin/env CHANNEL_DISABLE_GRPC=1 ${exec_cmd}"
+    fi
     install_systemd "yundu-node-agent" \
-        "${INSTALL_DIR}/node-agent --endpoint=${endpoint} --token=${token} --runtime=${runtime} --config-dir=${CONFIG_DIR}" \
+        "$exec_cmd" \
         "YunDu Node Agent - 节点代理服务"
 
     systemctl enable yundu-node-agent

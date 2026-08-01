@@ -2,7 +2,7 @@
 
 > 双内核（Xray + Sing-box）一等公民架构 · 零 SSH 运维 · 证书自动化 · 配置零断流热更
 >
-> 代码基线：`0cc50c5` ｜ 健康度评级 B+ ｜ 生产版本 v0.7.14
+> 代码基线：`main`（v0.7.16+）｜ 健康度评级 B+ ｜ 生产版本 v0.7.16
 
 云渡是一套面向机场（代理服务）运营的全栈管理平台，采用**三平面架构**：管理后台（admin-web）+ 用户端（user-web）+ 节点代理（node-agent），中间由 6 个 Go 微服务承接。核心亮点是 **Xray 与 Sing-box 双内核真正并行运行**（MultiRuntimePlugin）、统一渲染 IR（kernelrender）与 gRPC 双向长连接（AgentChannel）。
 
@@ -89,6 +89,8 @@ go run ./cmd/migrate up
 | 80 / 443 | Caddy/CF Ingress | — | — |
 
 > 节点端（Agent VPS）：10000（控制面）、443（nginx stream SNI）、8445（HTTPS 回源）、10085（Xray API）、30000–30200（直连 TCP/REALITY）、40020–40200（Hysteria2 UDP）、40210–40299（TUIC UDP）、20530–20699（Tunnel 回源）。
+>
+> Agent 域名走 Cloudflare 代理时建议 `install.sh agent ... --disable-grpc`（禁用无法穿透的 gRPC 通道）。
 
 ---
 
@@ -134,4 +136,4 @@ docs/                   架构与运维文档
 
 ## ⚠️ 项目状态
 
-目前开发中。已知待办（详见下一阶段执行计划）：清理 zombie 代码、移除硬编码密钥 fallback、完善 `ACTION_DRAIN` 优雅排空、10000 端口纳入防火墙、端口常量收敛。
+目前开发中。已完成 801 简化版根治、三通道自愈统一、Agent 自升级闭环、面板化体检与升级版本库 API；已知待办：清理 zombie 代码、移除硬编码密钥 fallback、完善 `ACTION_DRAIN` 优雅排空、10000 端口纳入防火墙、端口常量收敛。

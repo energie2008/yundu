@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/airport-panel/config"
@@ -43,10 +44,10 @@ func (s *RuntimeService) RegisterRuntime(ctx context.Context, serverCode string,
 		}
 	}
 	if agentVersion != "" && compareVersion(agentVersion, MinAgentVersionForP2) < 0 {
-		slog.Warn("register: agent version below minimum (observe mode, not blocking)",
-			"server_code", serverCode,
-			"agent_version", agentVersion,
-			"min_version", MinAgentVersionForP2)
+		// 注册门禁转强制：低于最低版本的 Agent 无法处理 _xray_config，
+		// 注册即拒绝（旧 Agent 必须先升级再接入），不再等到推送阶段才发现。
+		return nil, fmt.Errorf("agent version %s below minimum %s, registration rejected",
+			agentVersion, MinAgentVersionForP2)
 	}
 
 	primaryRT, err := s.registerRuntimeInternal(ctx, server, req)

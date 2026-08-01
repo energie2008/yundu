@@ -182,7 +182,7 @@ func (r *ChainRepo) ReplaceNodeChainBindings(ctx context.Context, nodeID uuid.UU
 func (r *ChainRepo) ListNodeBindings(ctx context.Context, chainID uuid.UUID) ([]*model.NodeChainBinding, error) {
 	query := `
 		SELECT node_id, chain_id, bind_mode, priority, created_at
-		FROM node_chain_bindings WHERE chain_id = $1 ORDER BY priority ASC`
+		FROM node_chain_bindings WHERE chain_id = $1 ORDER BY priority ASC, node_id ASC`
 	rows, err := r.pool.Query(ctx, query, chainID)
 	if err != nil {
 		return nil, err
