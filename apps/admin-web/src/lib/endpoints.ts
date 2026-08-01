@@ -103,6 +103,12 @@ export const EP = {
   // ===== Runtimes =====
   RUNTIMES: '/admin/runtimes',
 
+  // ===== Agent 升级版本库 (node-service) =====
+  AGENT_UPGRADE_MANIFEST: '/admin/agent-upgrade/manifest',
+
+  // ===== 健康体检 (node-service) =====
+  HEALTH_CHECKS_SUMMARY: '/admin/health-checks/summary',
+
   // ===== 配置模板 (node-service) =====
   // 后端使用 PUT /admin/config-templates/:code 做 upsert，没有 POST 创建接口
   CONFIG_TEMPLATES: '/admin/config-templates',

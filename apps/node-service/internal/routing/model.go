@@ -240,7 +240,7 @@ type AddRuleRequest struct {
 	RuleSetID      string   `json:"rule_set_id"`
 	InlineType     string   `json:"inline_type"`
 	InlineValues   []string `json:"inline_values"`
-	OutboundAction string   `json:"outbound_action" binding:"required,oneof=proxy direct blackhole warp tag balancer"`
+	OutboundAction string   `json:"outbound_action" binding:"required,oneof=proxy direct blackhole block warp tag balancer"`
 	OutboundTag    string   `json:"outbound_tag"`
 	Notes          string   `json:"notes"`
 }

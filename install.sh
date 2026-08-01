@@ -445,6 +445,70 @@ cmd_download() {
     success "下载完成: ${dest}/${bin}-${ARCH}"
 }
 
+# ===== 下载 Release 任意资产（前端 dist 等）=====
+
+download_release_file() {
+    local name="$1"
+    local version="$2"
+    local dest="$3"
+    local url="${GITHUB_RELEASES}/download/${version}/${name}"
+    info "下载 ${name} (${version})"
+    if ! curl -fSL --connect-timeout 30 --max-time 600 -o "$dest" "$url"; then
+        error "下载失败: ${url}"
+        rm -f "$dest"
+        return 1
+    fi
+    [ -s "$dest" ] || { error "下载内容为空: ${url}"; rm -f "$dest"; return 1; }
+    return 0
+}
+
+# ===== 前端自动部署（admin-web / user-web dist）=====
+
+deploy_frontend() {
+    local version="$1"
+    local admin_root="${YUNDU_ADMIN_WEB_ROOT:-}"
+    local user_root="${YUNDU_USER_WEB_ROOT:-}"
+
+    if [ -z "$admin_root" ]; then
+        admin_root=$(nginx -T 2>/dev/null | awk '/server_name[[:space:]]+6\./{found=1} found && /root[[:space:]]/{print $2; exit}' | tr -d ';')
+    fi
+    if [ -z "$user_root" ]; then
+        user_root=$(nginx -T 2>/dev/null | awk '/server_name[[:space:]]+7\./{found=1} found && /root[[:space:]]/{print $2; exit}' | tr -d ';')
+    fi
+
+    if [ -n "$admin_root" ]; then
+        local tmp="/tmp/yundu-admin-web-dist.tar.gz"
+        if download_release_file "admin-web-dist.tar.gz" "$version" "$tmp"; then
+            if [ -d "$admin_root" ]; then
+                cp -a "$admin_root" "${admin_root}.bak.$(date +%Y%m%d%H%M)"
+            fi
+            mkdir -p "$admin_root"
+            rm -rf "$admin_root/assets" "$admin_root/index.html" 2>/dev/null || true
+            tar -xzf "$tmp" -C "$admin_root"
+            chown -R www:www "$admin_root" 2>/dev/null || true
+            success "admin-web 前端已部署到 ${admin_root}"
+        fi
+    else
+        warn "未探测到 admin-web 站点根目录，设置 YUNDU_ADMIN_WEB_ROOT 后重试"
+    fi
+
+    if [ -n "$user_root" ]; then
+        local tmp2="/tmp/yundu-user-web-dist.tar.gz"
+        if download_release_file "user-web-dist.tar.gz" "$version" "$tmp2"; then
+            if [ -d "$user_root" ]; then
+                cp -a "$user_root" "${user_root}.bak.$(date +%Y%m%d%H%M)"
+            fi
+            mkdir -p "$user_root"
+            rm -rf "$user_root/assets" "$user_root/index.html" 2>/dev/null || true
+            tar -xzf "$tmp2" -C "$user_root"
+            chown -R www:www "$user_root" 2>/dev/null || true
+            success "user-web 前端已部署到 ${user_root}"
+        fi
+    else
+        warn "未探测到 user-web 站点根目录，设置 YUNDU_USER_WEB_ROOT 后重试"
+    fi
+}
+
 # ===== 子命令: upgrade =====
 
 cmd_upgrade() {
@@ -483,6 +547,8 @@ cmd_upgrade() {
                 systemctl restart "yundu-${b}" 2>/dev/null || true
             done
             success "面板升级完成，所有服务已重启"
+            # 前端随 Release 自动部署（admin-web-dist.tar.gz / user-web-dist.tar.gz）
+            deploy_frontend "$version"
             ;;
         all)
             cmd_upgrade agent "$@"

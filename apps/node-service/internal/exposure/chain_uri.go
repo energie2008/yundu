@@ -9,6 +9,18 @@ import (
 	"github.com/airport-panel/subscription/nodespec"
 )
 
+// normalizeChainProtocol 将 URI 中的协议别名归一化为内核中立协议名。
+func normalizeChainProtocol(p string) string {
+	switch p {
+	case "socks5", "socks5h":
+		return "socks"
+	case "shadowsocks":
+		return "ss"
+	default:
+		return p
+	}
+}
+
 // ParseChainURI 把套娃出站 URI 解析为 NodeSpec，供 chain 渲染器消费。
 // 支持 socks5://、http(s)://、trojan://、vless://、vmess://、ss://、hysteria2://、tuic://
 // 返回 (nil, nil) 表示空 URI（不启用套娃）。

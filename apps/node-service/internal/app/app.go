@@ -378,6 +378,9 @@ func Run() {
 	cfg := svccfg.Load()
 	logger := config.NewLogger(svccfg.ServiceName, cfg.LogLevel)
 
+	// MIGRATE_ON_START=true 时启动即执行数据库迁移（面板零 SSH 收尾）
+	runMigrationsOnStart(logger)
+
 	ctx := context.Background()
 
 	pool, err := db.NewPool(ctx, cfg.Database)

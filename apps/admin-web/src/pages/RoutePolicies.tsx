@@ -43,7 +43,7 @@ import { EP } from '@/lib/endpoints'
 // ===== 类型定义 =====
 
 type PolicyStatus = 'active' | 'inactive'
-type OutboundAction = 'proxy' | 'direct' | 'block'
+type OutboundAction = 'proxy' | 'direct' | 'block' | 'warp' | 'tag'
 type RuleSource = 'rule_set' | 'inline'
 
 interface RoutePolicyRule {
@@ -135,12 +135,16 @@ const OUTBOUND_ACTION_LABEL: Record<OutboundAction, string> = {
   proxy: '代理',
   direct: '直连',
   block: '阻断',
+  warp: 'WARP池',
+  tag: '自定义标签',
 }
 
 const OUTBOUND_ACTION_BADGE: Record<OutboundAction, string> = {
   proxy: 'bg-indigo-900/50 text-indigo-300 border-indigo-800/50',
   direct: 'bg-emerald-900/50 text-emerald-300 border-emerald-800/50',
   block: 'bg-red-900/50 text-red-300 border-red-800/50',
+  warp: 'bg-cyan-900/50 text-cyan-300 border-cyan-800/50',
+  tag: 'bg-purple-900/50 text-purple-300 border-purple-800/50',
 }
 
 const RULE_SOURCE_LABEL: Record<RuleSource, string> = {
@@ -266,6 +270,7 @@ export default function RoutePolicies() {
 
   const watchPolicyStatus = watchPolicy('status')
   const watchRuleSource = watchRule('rule_source')
+  const watchRuleAction = watchRule('outbound_action')
 
   // ===== 数据加载 =====
 
@@ -513,6 +518,10 @@ export default function RoutePolicies() {
     if (!rulePolicyId) return
 
     // 校验
+    if (data.outbound_action === 'tag' && !data.outbound_tag.trim()) {
+      toast({ title: '校验失败', description: '自定义标签动作必须填写出站标签', variant: 'destructive' })
+      return
+    }
     if (data.rule_source === 'rule_set' && !data.rule_set_id) {
       toast({ title: '校验失败', description: '请选择规则集', variant: 'destructive' })
       return
@@ -1220,21 +1229,32 @@ export default function RoutePolicies() {
                 <option value="proxy">代理（走代理出站）</option>
                 <option value="direct">直连（不走代理）</option>
                 <option value="block">阻断（拒绝连接）</option>
+                <option value="warp">WARP池（走 WARP 出口池）</option>
+                <option value="tag">自定义标签（指定出站 tag）</option>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="outbound-tag" className="text-zinc-300">
-                出站标签
-              </Label>
-              <Input
-                id="outbound-tag"
-                placeholder="如：proxy-hk-01（仅代理动作需要）"
-                className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 font-mono"
-                {...registerRule('outbound_tag')}
-              />
-              <p className="text-xs text-zinc-500">指定使用的出站节点标签</p>
-            </div>
+            {(watchRuleAction === 'tag' || watchRuleAction === 'proxy') && (
+              <div className="space-y-2">
+                <Label htmlFor="outbound-tag" className="text-zinc-300">
+                  出站标签{' '}
+                  {watchRuleAction === 'tag' && <span className="text-red-400">*</span>}
+                </Label>
+                <Input
+                  id="outbound-tag"
+                  placeholder={
+                    watchRuleAction === 'tag'
+                      ? '如：warp-pool、my-outbound（必填）'
+                      : '如：proxy-hk-01（可选）'
+                  }
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 font-mono"
+                  {...registerRule('outbound_tag')}
+                />
+                <p className="text-xs text-zinc-500">
+                  {watchRuleAction === 'tag' ? '指定使用的出站节点标签' : '可指定出站节点标签，留空走默认代理'}
+                </p>
+              </div>
+            )}
 
             <DialogFooter>
               <Button

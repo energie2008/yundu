@@ -1331,43 +1331,6 @@ func (s *DeploymentService) dispatchAndPush(ctx context.Context, runtimeID uuid.
 	}
 }
 
-// SelfHealFailedDispatch D-自愈：清理长时间停留在 failed 的节点下发状态。
-// 复用心跳周期（10s）作为巡检触发点，无需独立 goroutine。
-// 仅处理 failed 超 5 分钟的节点：重置为 pushed，下次 agent re-fetch 时自然收敛。
-// 根因 #4 根治：避免 agent 重启后 version=0 触发 re-fetch 时旧 failed 状态永远不清除。
-func (s *DeploymentService) SelfHealFailedDispatch(ctx context.Context, runtimeID uuid.UUID, latestVersion int64) {
-	nodes, err := s.nodeRepo.ListByRuntimeID(ctx, runtimeID)
-	if err != nil {
-		return
-	}
-	var stale []*model.Node
-	cutoff := time.Now().Add(-5 * time.Minute)
-	for _, n := range nodes {
-		if n == nil || n.Metadata == nil {
-			continue
-		}
-		if status, _ := n.Metadata["_dispatch_status"].(string); status == "failed" {
-			// 以 _dispatch_time 为陈旧判定基准（UpdateDispatchStatus 每次写状态都会刷新），
-			// 避免节点其他字段更新刷新 updated_at 导致 failed 永远不被自愈。
-			// 旧数据无 _dispatch_time 时回退到 updated_at 兼容。
-			ts := n.UpdatedAt
-			if raw, ok := n.Metadata["_dispatch_time"].(string); ok {
-				if t, perr := time.Parse(time.RFC3339Nano, raw); perr == nil {
-					ts = t
-				}
-			}
-			if ts.Before(cutoff) {
-				stale = append(stale, n)
-			}
-		}
-	}
-	if len(stale) > 0 {
-		s.logger.Warn("self-heal: resetting stale failed dispatch status",
-			"runtime_id", runtimeID, "count", len(stale), "latest_version", latestVersion)
-		s.markNodesDispatchStatus(ctx, stale, "pushed", latestVersion, "")
-	}
-}
-
 // SelfHealDispatchStatus 三通道统一自愈入口（HTTP/WS/gRPC 心跳均调用）：
 //   - 版本一致（lpv==latestVersion）且内核运行中 → failed 刷 applied（可信收敛，不重拉）；
 //   - 其余 failed 且超过 5 分钟（以 _dispatch_time 判定）→ 刷 pushed（触发 agent 重拉自愈）。
@@ -3536,33 +3499,6 @@ func (s *DeploymentService) nodesForRuntimeAndServer(ctx context.Context, runtim
 		out = append(out, ns...)
 	}
 	return out, nil
-}
-
-// ReconcileDispatchStatusOnHeartbeat 心跳自愈：当 agent 上报版本 == 面板最新版本 且 runtime 运行中时，
-// 清除该 runtime 下节点的陈旧 "failed" 下发状态。
-//
-// 场景：agent 修复 bug 后重启，sing-box 用 LKG 配置正常启动，版本与面板一致。
-// 此时心跳返回 NONE（不触发 reload），agent 不会重新部署，不上报新的 ConfigResult，
-// 导致 nodes.metadata._dispatch_status 永远停留在上次失败的 "failed"。
-// 此方法在心跳路径自动将匹配版本的 "failed" 刷为 "applied"，使面板状态与实际一致。
-//
-// 仅当 agentVersion > 0 时执行；无陈旧状态时返回 affected=0，调用方可据此决定是否记日志。
-// 设计为幂等：重复调用无副作用，已 "applied" 的节点不会被触碰。
-func (s *DeploymentService) ReconcileDispatchStatusOnHeartbeat(ctx context.Context, runtimeID uuid.UUID, agentVersion int64) (affected int64, err error) {
-	if agentVersion <= 0 {
-		return 0, nil
-	}
-	affected, err = s.nodeRepo.ClearStaleFailedDispatchStatus(ctx, runtimeID, agentVersion)
-	if err != nil {
-		s.logger.Warn("ReconcileDispatchStatusOnHeartbeat: clear stale failed status failed",
-			"runtime_id", runtimeID, "version", agentVersion, "error", err)
-		return 0, err
-	}
-	if affected > 0 {
-		s.logger.Info("ReconcileDispatchStatusOnHeartbeat: cleared stale failed dispatch status",
-			"runtime_id", runtimeID, "version", agentVersion, "affected_nodes", affected)
-	}
-	return affected, nil
 }
 
 // PrecheckDeployment 部署预检：在 Publish/Deploy 前自动运行，提前拦截错误配置。

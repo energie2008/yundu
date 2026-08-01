@@ -136,8 +136,8 @@ func TestRenderRouting_StandardTemplate(t *testing.T) {
 	if !outboundTags["direct"] {
 		t.Errorf("expected outboundTag 'direct' in xray rules")
 	}
-	if !outboundTags["blackhole"] {
-		t.Errorf("expected outboundTag 'blackhole' in xray rules")
+	if !outboundTags["block"] {
+		t.Errorf("expected outboundTag 'block' in xray rules")
 	}
 	if !outboundTags["proxy"] {
 		t.Errorf("expected outboundTag 'proxy' (main outbound tag) in xray rules")
@@ -153,10 +153,10 @@ func TestRenderRouting_StandardTemplate(t *testing.T) {
 		t.Errorf("rule0 ip = %v, want [geoip:private]", ips)
 	}
 
-	// 断言规则2（ads-block → blackhole）包含 geosite:category-ads-all
+	// 断言规则2（ads-block → block）包含 geosite:category-ads-all
 	rule1 := result.Xray.Rules[1]
-	if tag, _ := rule1["outboundTag"].(string); tag != "blackhole" {
-		t.Errorf("rule1 outboundTag = %q, want blackhole", tag)
+	if tag, _ := rule1["outboundTag"].(string); tag != "block" {
+		t.Errorf("rule1 outboundTag = %q, want block", tag)
 	}
 	domains, _ := rule1["domain"].([]interface{})
 	if len(domains) != 1 || domains[0] != "geosite:category-ads-all" {
@@ -263,27 +263,27 @@ func TestRenderRouting_StreamingTemplate(t *testing.T) {
 			outboundTags[tag] = true
 		}
 	}
-	expectedTags := []string{"direct", "blackhole", "warp-out", "streaming-out", "proxy"}
+	expectedTags := []string{"direct", "block", "warp-pool", "streaming-out", "proxy"}
 	for _, expected := range expectedTags {
 		if !outboundTags[expected] {
 			t.Errorf("expected outboundTag %q in xray rules, got %v", expected, outboundTags)
 		}
 	}
 
-	// 断言 warp-out 出站 tag 存在（OpenAI → warp）
+	// 断言 warp-pool 出站 tag 存在（OpenAI → warp）
 	warpFound := false
 	for _, rule := range result.Xray.Rules {
-		if tag, _ := rule["outboundTag"].(string); tag == "warp-out" {
+		if tag, _ := rule["outboundTag"].(string); tag == "warp-pool" {
 			warpFound = true
-			// warp-out 规则应包含 OpenAI 域名
+			// warp-pool 规则应包含 OpenAI 域名
 			domains, _ := rule["domain"].([]interface{})
 			if len(domains) != 3 {
-				t.Errorf("warp-out rule domain count = %d, want 3", len(domains))
+				t.Errorf("warp-pool rule domain count = %d, want 3", len(domains))
 			}
 		}
 	}
 	if !warpFound {
-		t.Errorf("warp-out outboundTag not found in xray rules")
+		t.Errorf("warp-pool outboundTag not found in xray rules")
 	}
 
 	// 断言 streaming-out tag 存在（流媒体 → tag: streaming-out）
@@ -320,20 +320,21 @@ func TestRenderRouting_StreamingTemplate(t *testing.T) {
 		t.Errorf("sing-box rules count = %d, want 6", len(result.SingBox.Rules))
 	}
 
-	// 断言 sing-box rule_set 声明（引用的规则集）
-	if len(result.SingBox.RuleSets) == 0 {
-		t.Errorf("sing-box rule_set should not be empty")
+	// 断言 sing-box rule_set 声明：仅 remote_url 规则集生成声明（9c47780 行为），
+	// 本测试全部为 inline/geoip/geosite，因此声明应为空（规则已内联展开）。
+	if len(result.SingBox.RuleSets) != 0 {
+		t.Errorf("sing-box rule_set should be empty for non-remote_url rulesets, got %d", len(result.SingBox.RuleSets))
 	}
 
-	// 断言 sing-box 规则也包含 warp-out 和 streaming-out
+	// 断言 sing-box 规则也包含 warp-pool 和 streaming-out
 	sbOutboundTags := make(map[string]bool)
 	for _, rule := range result.SingBox.Rules {
 		if tag, ok := rule["outbound"].(string); ok {
 			sbOutboundTags[tag] = true
 		}
 	}
-	if !sbOutboundTags["warp-out"] {
-		t.Errorf("sing-box rules missing warp-out outbound")
+	if !sbOutboundTags["warp-pool"] {
+		t.Errorf("sing-box rules missing warp-pool outbound")
 	}
 	if !sbOutboundTags["streaming-out"] {
 		t.Errorf("sing-box rules missing streaming-out outbound")

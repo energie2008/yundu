@@ -1,0 +1,40 @@
+# YunDu 领域告警规则
+# 覆盖 801 维护指南的核心巡检项：版本死循环、通道健康、doctor 失败、暴露下发失败。
+groups:
+  - name: yundu-node-service
+    rules:
+      - alert: YunduConfigRenderHashChurn
+        expr: increase(nodeservice_config_render_hash_churn_total[10m]) > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "配置渲染 hash 漂移（疑似版本号死循环）"
+          description: "10 分钟内新增 config_versions 超过 5 条，渲染排序契约可能被破坏。"
+
+      - alert: YunduAgentChannelUnhealthy
+        expr: nodeservice_channel_health_state == -1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent 通道不健康"
+          description: "server {{ $labels.server_id }} 的 {{ $labels.active_channel }} 通道进入 unhealthy 状态。"
+
+      - alert: YunduDoctorCheckFailing
+        expr: increase(nodeservice_doctor_checks_total{result="fail"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "节点体检持续失败"
+          description: "最近 10 分钟 doctor 检查出现失败，请查看健康仪表盘。"
+
+      - alert: YunduExposureApplyFailed
+        expr: increase(nodeservice_exposure_applies_total{status="failed"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "边缘暴露配置下发失败"
+          description: "最近 10 分钟 exposure apply 出现失败。"

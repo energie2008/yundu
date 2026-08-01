@@ -66,6 +66,8 @@ export const sidebarGroups: NavGroup[] = [
       { label: '插件管理', path: '/system/plugin', icon: Plug },
       { label: '邮件模板', path: '/mail-templates', icon: Mail },
       { label: '审计日志', path: '/system/audit', icon: FileText },
+      { label: '健康体检', path: '/health-checks', icon: Activity },
+      { label: 'Agent 升级版本库', path: '/agent-upgrade', icon: Rocket },
     ],
   },
   {

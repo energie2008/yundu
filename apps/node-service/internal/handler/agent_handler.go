@@ -223,17 +223,6 @@ func (h *AgentHandler) Heartbeat(c *gin.Context) {
 				// 消除 nginx reconciler 30s 轮询延迟，实现"保存即下发"。
 				// agent 收到 sync_external_resources 会立即调用 NginxReconciler.TriggerSync
 				resp.ExtraActions = []string{"sync_external_resources"}
-			} else if req.RuntimeStatus == "running" {
-				// 心跳自愈：版本一致（!needsReload）且 runtime 运行中时，
-				// 清除该 runtime 下陈旧 "failed" 下发状态。
-				// 与 gRPC/WS handler 对齐，HTTP fallback 通道也需要自愈。
-				if affected, err := h.deploymentService.ReconcileDispatchStatusOnHeartbeat(c.Request.Context(), rt.ID, targetVersion.VersionNo); err != nil {
-					h.logger.Warn("heartbeat: reconcile dispatch status failed",
-						"server_code", serverCode, "runtime_id", rt.ID, "error", err)
-				} else if affected > 0 {
-					h.logger.Info("heartbeat: reconciled stale failed dispatch status",
-						"server_code", serverCode, "runtime_id", rt.ID, "affected_nodes", affected)
-				}
 			}
 		}
 	}

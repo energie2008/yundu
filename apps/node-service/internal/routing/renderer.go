@@ -247,7 +247,7 @@ func (r *RoutingRenderer) renderRule(ctx context.Context, rule *RoutePolicyRule)
 }
 
 // mapOutboundAction 将 outbound_action 映射到 outboundTag
-// proxy→主出站tag, direct→"direct", blackhole→"blackhole", warp→"warp-out",
+// proxy→主出站tag, direct→"direct", blackhole/block→"block", warp→"warp-pool",
 // tag→outbound_tag 字段值, balancer→outbound_tag 字段值
 func mapOutboundAction(action string, outboundTag *string) string {
 	switch action {
@@ -255,10 +255,12 @@ func mapOutboundAction(action string, outboundTag *string) string {
 		return MainOutboundTag
 	case "direct":
 		return "direct"
-	case "blackhole":
-		return "blackhole"
+	case "blackhole", "block":
+		// 实际阻断出站 tag 是 "block"（outbound/renderer.go），blackhole 为历史兼容别名
+		return "block"
 	case "warp":
-		return "warp-out"
+		// 实际 WARP 池出站 tag 是 "warp-pool"（outbound/handler.go），"warp-out" 不存在
+		return "warp-pool"
 	case "tag", "balancer":
 		if outboundTag != nil && *outboundTag != "" {
 			return *outboundTag

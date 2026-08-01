@@ -436,39 +436,6 @@ func (r *NodeRepo) UpdateDispatchStatus(ctx context.Context, nodeIDs []uuid.UUID
 	return nil
 }
 
-// ClearStaleFailedDispatchStatus 清除指定 runtime 下、dispatch_version == version 且
-// dispatch_status == "failed" 的节点的陈旧失败状态，将其刷为 "applied"。
-//
-// 用途：心跳自愈。agent 修复 bug 重启后 sing-box 用 LKG 配置正常启动，版本与面板一致，
-// 心跳返回 NONE 不触发 reload，agent 不重新部署不上报 ConfigResult，
-// 导致 _dispatch_status 永远停留 "failed"。此方法单条 SQL 批量修正，避免逐节点更新。
-//
-// 返回受影响行数；0 表示无陈旧状态需清理（调用方可据此决定是否记日志）。
-func (r *NodeRepo) ClearStaleFailedDispatchStatus(ctx context.Context, runtimeID uuid.UUID, version int64) (int64, error) {
-	query := `
-		UPDATE nodes SET
-			metadata = jsonb_set(
-				jsonb_set(
-					jsonb_set(
-						COALESCE(metadata, '{}'::jsonb),
-						'{_dispatch_status}', '"applied"'::jsonb
-					),
-					'{_dispatch_error}', '""'::jsonb
-				),
-				'{_dispatch_time}', to_jsonb(now())
-			),
-			updated_at = now()
-		WHERE runtime_id = $1
-			AND deleted_at IS NULL
-			AND metadata->>'_dispatch_status' = 'failed'
-			AND COALESCE((metadata->>'_dispatch_version')::bigint, -1) = $2`
-	ct, err := r.pool.Exec(ctx, query, runtimeID, version)
-	if err != nil {
-		return 0, fmt.Errorf("clear stale failed dispatch status: %w", err)
-	}
-	return ct.RowsAffected(), nil
-}
-
 func (r *NodeRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `UPDATE nodes SET deleted_at = now(), is_enabled = false, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`
 	ct, err := r.pool.Exec(ctx, query, id)

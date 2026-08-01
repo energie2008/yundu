@@ -38,6 +38,8 @@ import ConfigImporter from '@/pages/ConfigImporter'
 import ClientCompat from '@/pages/ClientCompat'
 import Servers from '@/pages/Servers'
 import HealthDashboard from '@/pages/HealthDashboard'
+import HealthChecks from '@/pages/HealthChecks'
+import AgentUpgrade from '@/pages/AgentUpgrade'
 import RouteRuleSets from '@/pages/RouteRuleSets'
 import ProxyChains from '@/pages/ProxyChains'
 import RoutePolicies from '@/pages/RoutePolicies'
@@ -85,6 +87,8 @@ function AppRoutes() {
         <Route path="machines" element={<Machines />} />
         <Route path="servers" element={<Servers />} />
         <Route path="health-dashboard" element={<HealthDashboard />} />
+        <Route path="health-checks" element={<HealthChecks />} />
+        <Route path="agent-upgrade" element={<AgentUpgrade />} />
         <Route path="rule-sets" element={<RouteRuleSets />} />
         <Route path="proxy-chains" element={<ProxyChains />} />
         <Route path="route-policies" element={<RoutePolicies />} />

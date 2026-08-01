@@ -13,6 +13,7 @@ import (
 	"github.com/airport-panel/node-service/internal/exposure"
 	"github.com/airport-panel/node-service/internal/model"
 	"github.com/airport-panel/node-service/internal/repo"
+	"github.com/airport-panel/subscription/chain"
 	"github.com/airport-panel/subscription/kernelrender"
 	"github.com/airport-panel/subscription/nodespec"
 	"github.com/google/uuid"
@@ -504,7 +505,7 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 					// 零 SSH 方案：面板填入原始 URI（含 insecure=1）→ 自动生成桥接 → 无需手动部署。
 					needsBridge := chainSpec.TLS != nil && chainSpec.TLS.AllowInsecure
 					if needsBridge {
-						sbOb, sbErr := exposure.BuildSingboxOutboundFromNodeSpec(chainSpec, chainTag, "")
+						sbOb, sbErr := chain.RenderOutboundFromNodeSpec(chain.KernelSingBox, chainSpec, chainTag, "")
 						if sbErr != nil {
 							s.logger.Warn("build singbox bridge outbound failed, falling back to xray",
 								"node_code", node.Code, "error", sbErr)
@@ -551,7 +552,7 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 						}
 					}
 					if !needsBridge {
-						ob, err := exposure.BuildXrayOutboundFromNodeSpec(chainSpec, chainTag, "")
+						ob, err := chain.RenderOutboundFromNodeSpec(chain.KernelXray, chainSpec, chainTag, "")
 						if err != nil {
 							s.logger.Warn("build xray chain outbound failed",
 								"node_code", node.Code, "error", err)
@@ -566,7 +567,7 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 					}
 					}
 				} else {
-					ob, err := exposure.BuildSingboxOutboundFromNodeSpec(chainSpec, chainTag, "")
+					ob, err := chain.RenderOutboundFromNodeSpec(chain.KernelSingBox, chainSpec, chainTag, "")
 					if err != nil {
 						s.logger.Warn("build singbox chain outbound failed",
 							"node_code", node.Code, "error", err)
@@ -624,7 +625,7 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 							inboundTag := fmt.Sprintf("in-%s", node.Code)
 
 							if kernelName == "xray" {
-								ob, oerr := exposure.BuildXrayOutboundFromNodeSpec(parentSpec, parentTag, "")
+								ob, oerr := chain.RenderOutboundFromNodeSpec(chain.KernelXray, parentSpec, parentTag, "")
 								if oerr != nil {
 									s.logger.Warn("build xray parent outbound failed",
 										"node_code", node.Code, "parent_code", parentNode.Code, "error", oerr)
@@ -641,7 +642,7 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 										"parent_tag", parentTag, "inbound_tag", inboundTag)
 								}
 							} else {
-								ob, oerr := exposure.BuildSingboxOutboundFromNodeSpec(parentSpec, parentTag, "")
+								ob, oerr := chain.RenderOutboundFromNodeSpec(chain.KernelSingBox, parentSpec, parentTag, "")
 								if oerr != nil {
 									s.logger.Warn("build singbox parent outbound failed",
 										"node_code", node.Code, "parent_code", parentNode.Code, "error", oerr)
