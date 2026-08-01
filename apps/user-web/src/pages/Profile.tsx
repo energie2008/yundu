@@ -11,8 +11,8 @@ import { useAuthStore } from '@/lib/auth'
 
 const passwordSchema = z
   .object({
-    old_password: z.string().min(6, '原密码至少6位'),
-    new_password: z.string().min(6, '新密码至少6位'),
+    old_password: z.string().min(8, '原密码至少8位'),
+    new_password: z.string().min(8, '新密码至少8位'),
     confirm_password: z.string(),
   })
   .refine((data) => data.new_password === data.confirm_password, {
@@ -484,7 +484,7 @@ export default function Profile() {
                   <div className="relative">
                     <Input
                       type={showNewPassword ? 'text' : 'password'}
-                      placeholder="请输入新密码（至少6位）"
+                      placeholder="请输入新密码（至少8位）"
                       className="h-10"
                       style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
                       {...register('new_password', { required: '请输入新密码' })}

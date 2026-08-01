@@ -116,11 +116,14 @@ func Run() {
 		public.POST("/admin/auth/login", identityProxy)
 
 		public.POST("/user/auth/register", identityProxy)
+		public.POST("/user/auth/send-email-code", identityProxy)
 		public.POST("/user/auth/login", identityProxy)
 		public.POST("/user/auth/refresh", identityProxy)
 		public.GET("/user/auth/verify-email", identityProxy)
 		public.POST("/user/auth/forgot-password", identityProxy)
 		public.POST("/user/auth/reset-password", identityProxy)
+		// 兼容旧路径别名：identity-service 同时注册了 /auth/send-email-code
+		public.POST("/auth/send-email-code", identityProxy)
 
 		public.GET("/plans", identityProxy)
 		public.GET("/plans/:id", identityProxy)

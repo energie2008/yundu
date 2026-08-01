@@ -561,7 +561,7 @@ type AdminUserListQuery struct {
 
 type AdminCreateUserRequest struct {
 	Email            string     `json:"email" binding:"required,email"`
-	Password         string     `json:"password" binding:"required,min=6,max=128"`
+	Password         string     `json:"password" binding:"required,min=8,max=128"`
 	PlanID           *uuid.UUID `json:"plan_id,omitempty"`
 	TransferEnableGB *int       `json:"transfer_enable_gb,omitempty"`
 	DurationDays     *int       `json:"duration_days,omitempty"`
@@ -570,7 +570,7 @@ type AdminCreateUserRequest struct {
 
 type AdminUpdateUserRequest struct {
 	Email               *string     `json:"email,omitempty" binding:"omitempty,email"`
-	Password            *string     `json:"password,omitempty" binding:"omitempty,min=6,max=128"`
+	Password            *string     `json:"password,omitempty" binding:"omitempty,min=8,max=128"`
 	PlanID              *uuid.UUID  `json:"plan_id,omitempty"`
 	TransferEnableBytes *int64      `json:"transfer_enable_bytes,omitempty"`
 	ExpiresAt           *time.Time  `json:"expires_at,omitempty"`
@@ -754,4 +754,3 @@ func NewSubscriptionTokenResponse(t *SubscriptionToken) SubscriptionTokenRespons
 		CreatedAt:    t.CreatedAt,
 	}
 }
-

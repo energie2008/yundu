@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, Navigate } from 'react-router-dom'
+import { Link, useNavigate, Navigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { Mail, Lock, Eye, EyeOff, Ticket } from 'lucide-react'
@@ -11,8 +11,8 @@ const registerSchema = z
   .object({
     email: z.string().regex(emailRegex, '请输入有效的邮箱地址'),
     emailCode: z.string().min(6, '请输入邮箱验证码').max(6, '验证码为6位数字'),
-    password: z.string().min(6, '密码至少 6 个字符'),
-    confirmPassword: z.string().min(6, '请确认密码'),
+    password: z.string().min(8, '密码至少 8 个字符'),
+    confirmPassword: z.string().min(8, '请确认密码'),
     inviteCode: z.string().optional(),
     agreeTerms: z.boolean().refine((val) => val === true, {
       message: '请同意服务条款和隐私政策',
@@ -67,12 +67,15 @@ function Button({
 
 export function Register() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { toast } = useToast()
   const { register: registerUser, sendEmailCode, isAuthenticated, isLoading, init } = useAuthStore()
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [countdown, setCountdown] = useState(0)
   const [sendingCode, setSendingCode] = useState(false)
+  // 邀请链接自动填入：/register?invite=CODE（兼容 invite_code 参数）
+  const inviteFromURL = searchParams.get('invite') || searchParams.get('invite_code') || ''
 
   useEffect(() => {
     init()
@@ -94,7 +97,7 @@ export function Register() {
     getValues,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormData>({
-    defaultValues: { email: '', emailCode: '', password: '', confirmPassword: '', inviteCode: '', agreeTerms: false },
+    defaultValues: { email: '', emailCode: '', password: '', confirmPassword: '', inviteCode: inviteFromURL, agreeTerms: false },
   })
 
   // 发送注册验证码：先校验邮箱格式，再调用后端 send-email-code 接口
@@ -244,7 +247,7 @@ export function Register() {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: 'var(--muted-foreground)' }} />
                 <input
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="至少 6 位密码"
+                  placeholder="至少 8 位密码"
                   className="w-full h-11 pl-10 pr-10 rounded-lg text-sm outline-none transition-colors"
                   style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
                   {...register('password', { required: '请输入密码' })}
