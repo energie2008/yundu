@@ -11,6 +11,11 @@ import (
 )
 
 // ThreeXUIProvider 是 3X-UI 面板的 provider skeleton。
+//
+// 【退役标注 v0.7.20】本项目采用 node-agent 原生双内核 + 面板自管架构，
+// 3X-UI 作为外部 provider 的接入路径当前没有任何调用方（仅 model.RuntimeProviderThreeXUI 常量引用）。
+// 本文件保留为 provider 抽象参考与未来多面板适配的骨架，不参与运行时流程；
+// 若后续确认不需要外部 3X-UI 托管，可直接删除本文件与相关常量。
 // 3X-UI 是一个基于 xray 的第三方面板，有自己的 HTTP API。
 // 本实现仅包含 HTTP client 骨架和能力发现，具体 API 调用需要根据 3X-UI 版本适配。
 type ThreeXUIProvider struct {

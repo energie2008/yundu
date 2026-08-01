@@ -356,3 +356,27 @@ func TestRenderRouting_NoBindings_ReturnsEmpty(t *testing.T) {
 		t.Errorf("xray balancers count = %d, want 0", len(result.Xray.Balancers))
 	}
 }
+
+// TestMapOutboundAction 校验出站动作到 outboundTag 的真实映射（WARP池/阻断修复）。
+func TestMapOutboundAction(t *testing.T) {
+	cases := []struct {
+		action      string
+		outboundTag *string
+		want        string
+	}{
+		{action: "proxy", want: MainOutboundTag},
+		{action: "direct", want: "direct"},
+		{action: "blackhole", want: "block"},
+		{action: "block", want: "block"},
+		{action: "warp", want: "warp-pool"},
+		{action: "tag", outboundTag: strPtr("my-out"), want: "my-out"},
+		{action: "balancer", outboundTag: strPtr("pool-a"), want: "pool-a"},
+		{action: "unknown", want: ""},
+	}
+	for _, c := range cases {
+		got := mapOutboundAction(c.action, c.outboundTag)
+		if got != c.want {
+			t.Errorf("mapOutboundAction(%q) = %q, want %q", c.action, got, c.want)
+		}
+	}
+}

@@ -37,35 +37,16 @@ import (
 // P0 阶段基于此常量做 tag 后缀判定是临时兜底逻辑，P1 验证通过（p06测速完美）后已退役。
 // 现在下行 inbound 的身份识别由 kernelrender 渲染器注入的显式元数据字段
 // `_inbound_role: "downstream"` 承担，tag后缀仅作展示命名，不参与安全逻辑判定。
-// isDownstreamInbound 函数保留为防御性 fallback（理论上不应被触发），
-// 若触发则记录警告日志，表明渲染器未正确注入 _inbound_role 字段。
 const DownstreamTagSuffix = kernelrender.DownstreamTagSuffix
 
-// isDownstreamInbound 判断 inbound tag 是否属于上下行分离节点的下行 inbound。
-//
-// 阶段3退役说明：
-// 本函数 P0 阶段用于直接在剥离逻辑中跳过下行 inbound，是临时兜底。
-// P1 正式方案中，kernelrender 已在下行 inbound 注入显式 `_inbound_role: "downstream"` 字段，
-// determineInboundExposureMode 优先读取该字段。本函数仅作为防御性 fallback 使用，
-// 若被调用说明渲染器版本不一致或存在配置异常，会记录警告。
-func isDownstreamInbound(tag string) bool {
-	return strings.HasSuffix(tag, DownstreamTagSuffix)
-}
-
 // isDownstreamInboundFromMap 从 inbound map 的显式元数据字段判断是否为下行 inbound。
-// P1 正式方案：优先使用 _inbound_role 字段（kernelrender 注入的显式标识），
-// 避免任何 tag 字符串模式匹配参与安全判定路径。
+// 仅信任 kernelrender 注入的 `_inbound_role: "downstream"` 显式标识，
+// 不再做任何 tag 字符串后缀匹配（已退役的防御性 fallback）。
 func isDownstreamInboundFromMap(inbMap map[string]interface{}) bool {
 	if inbMap == nil {
 		return false
 	}
 	if role, ok := inbMap["_inbound_role"].(string); ok && role == "downstream" {
-		return true
-	}
-	// 防御性 fallback：理论上不该走到这里，若走到说明渲染器未注入显式字段
-	if tag, ok := inbMap["tag"].(string); ok && isDownstreamInbound(tag) {
-		slog.Warn("downstream inbound detected via tag suffix fallback; renderer should inject _inbound_role",
-			"tag", tag)
 		return true
 	}
 	return false

@@ -410,28 +410,27 @@ func (r *NodeRepo) UpdateDispatchStatus(ctx context.Context, nodeIDs []uuid.UUID
 		return nil
 	}
 	now := time.Now().UTC()
-	for _, nid := range nodeIDs {
-		query := `
-			UPDATE nodes SET
-				metadata = jsonb_set(
+	// 批量单条 SQL（id = ANY($1)），消除逐节点循环半更新风险
+	query := `
+		UPDATE nodes SET
+			metadata = jsonb_set(
+				jsonb_set(
 					jsonb_set(
 						jsonb_set(
-							jsonb_set(
-								COALESCE(metadata, '{}'::jsonb),
-								'{_dispatch_status}', to_jsonb($2::text)
-							),
-							'{_dispatch_version}', to_jsonb($3::bigint)
+							COALESCE(metadata, '{}'::jsonb),
+							'{_dispatch_status}', to_jsonb($2::text)
 						),
-						'{_dispatch_time}', to_jsonb($4::timestamptz)
+						'{_dispatch_version}', to_jsonb($3::bigint)
 					),
-					'{_dispatch_error}', to_jsonb($5::text)
+					'{_dispatch_time}', to_jsonb($4::timestamptz)
 				),
-				updated_at = now()
-			WHERE id = $1`
-		_, err := r.pool.Exec(ctx, query, nid, status, version, now, errMsg)
-		if err != nil {
-			return fmt.Errorf("update dispatch status for node %s: %w", nid, err)
-		}
+				'{_dispatch_error}', to_jsonb($5::text)
+			),
+			updated_at = now()
+		WHERE id = ANY($1)`
+	_, err := r.pool.Exec(ctx, query, nodeIDs, status, version, now, errMsg)
+	if err != nil {
+		return fmt.Errorf("update dispatch status (batch): %w", err)
 	}
 	return nil
 }

@@ -84,7 +84,7 @@ type RegisterRequest struct {
 	PublicIP            string                 `json:"-"`
 	OS                  string                 `json:"-"`
 	Arch                string                 `json:"-"`
-	AgentVersion        string                 `json:"-"`
+	AgentVersion        string                 `json:"agent_version,omitempty"`
 }
 
 type RegisterResponse struct {

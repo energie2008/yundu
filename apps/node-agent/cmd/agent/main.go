@@ -567,6 +567,22 @@ func (a *Agent) handleDeltaSyncMessage(ctx context.Context, d *pb.DeltaSync) {
 	} else {
 		a.currentVersion = strconv.FormatInt(d.ConfigVersion, 10)
 	}
+	// 回送 DeltaAck，让面板把节点下发状态推进到 config_version（delta ack 状态机闭环）
+	deltaAckMsg := &pb.AgentMessage{
+		Seq:       a.nextSeq(),
+		Timestamp: time.Now().UnixMilli(),
+		Payload: &pb.AgentMessage_DeltaAck{
+			DeltaAck: &pb.DeltaAck{
+				ConfigVersion:   d.ConfigVersion,
+				Success:         ack.Success,
+				Error:           ack.Error,
+				ApplyDurationMs: ack.ApplyDurationMs,
+			},
+		},
+	}
+	if err := a.cm.Send(deltaAckMsg); err != nil {
+		a.logger.Warn("failed to send delta ack", "error", err)
+	}
 }
 
 func kernelTypeToString(kt pb.KernelType) string {

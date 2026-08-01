@@ -1081,6 +1081,33 @@ func Run() {
 				return nil, nil
 			}
 
+			// 处理 DeltaAck 消息：增量用户同步确认后，把节点下发状态推进到 config_version。
+			// Delta 只作用于主内核（sing-box），runtime 解析固定为 sing-box。
+			if da := msg.GetDeltaAck(); da != nil {
+				serverCode := machineID
+				versionStr := strconv.FormatInt(da.GetConfigVersion(), 10)
+				success := da.GetSuccess()
+				errMsg := da.GetError()
+				if deploymentService != nil && serverService != nil && runtimeService != nil {
+					serverSrv, err := serverService.GetServerByCode(ctx, serverCode)
+					if err == nil && serverSrv != nil {
+						providerType := model.RuntimeProviderNodeAgent
+						ref := "sing-box"
+						rt, err := runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, &ref)
+						if err == nil && rt != nil {
+							if rerr := deploymentService.ReportConfigResult(ctx, rt.ID, versionStr, success, errMsg); rerr != nil {
+								logger.Warn("gRPC onMessage: DeltaAck result failed",
+									"server_code", serverCode, "version", versionStr, "error", rerr)
+							} else {
+								logger.Info("gRPC onMessage: DeltaAck processed",
+									"server_code", serverCode, "version", versionStr, "success", success)
+							}
+						}
+					}
+				}
+				return nil, nil
+			}
+
 			return nil, nil
 		}
 		grpcHandler.Unlock()

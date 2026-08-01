@@ -3465,9 +3465,6 @@ func (s *DeploymentService) ReportConfigResult(ctx context.Context, runtimeID uu
 	if cv == nil {
 		return nil
 	}
-	if success {
-		_ = s.deploymentRepo.UpdateConfigVersionApplied(ctx, cv.ID)
-	}
 
 	// 收集同 server 全部 node-agent runtime 的节点：ack 来自主配置应用，
 	// xray 节点配置通过 _xray_config 内嵌在同一次下发中，节点级状态必须一并闭环。
@@ -3487,27 +3484,28 @@ func (s *DeploymentService) ReportConfigResult(ctx context.Context, runtimeID uu
 	// B-精确：只标记 lpv==versionNo 的节点为 applied/failed。
 	// 全部不匹配（延迟 ack/版本跳变/ack 挂错 runtime）时只记日志，不兜底标记全部，
 	// 否则会制造 lpv != _dispatch_version 的矛盾态。
-	var targetNodes []*model.Node
+	var targetNodeIDs []uuid.UUID
 	for _, n := range allNodes {
 		if n != nil && n.LastPublishedVersion == versionNo {
-			targetNodes = append(targetNodes, n)
+			targetNodeIDs = append(targetNodeIDs, n.ID)
 		}
 	}
-	if len(targetNodes) == 0 {
+	if len(targetNodeIDs) == 0 {
 		s.logger.Warn("ReportConfigResult: no nodes match ack version, skip node status update",
 			"runtime_id", runtimeID, "version", versionNo, "node_count", len(allNodes), "success", success)
-	} else {
-		s.markNodesDispatchStatus(ctx, targetNodes, status, versionNo, errMsg)
 	}
 
-	// 部署批次推进：agent 回执走的是 runtime 维度，
-	// 而 deployment_targets 以节点维度记录。若不在此反查并推进对应 target，
-	// 批次会因 target 永远停留在 pending/applying 而卡在 running（前端一直显示"部署中"）。
-	// 遍历同 server 全部节点，避免 ack 解析到错误 runtime 时推进错 target。
+	// 收集需要推进的 deployment_target（同 server 全部节点，避免 ack 挂错 runtime 推进错 target）
 	targetStatus := model.TargetStatusSuccess
 	if !success {
 		targetStatus = model.TargetStatusFailed
 	}
+	applyResult := map[string]interface{}{
+		"reported_via": "config_result",
+		"version_no":   versionNo,
+		"message":      message,
+	}
+	var targetUpdates []repo.DispatchTargetResult
 	for _, n := range allNodes {
 		if n == nil {
 			continue
@@ -3519,26 +3517,41 @@ func (s *DeploymentService) ReportConfigResult(ctx context.Context, runtimeID uu
 			continue
 		}
 		for _, t := range activeTargets {
-			updReq := &model.UpdateDeploymentResultRequest{
-				TargetID: t.ID,
-				Status:   targetStatus,
-				ApplyResult: map[string]interface{}{
-					"reported_via": "config_result",
-					"version_no":   versionNo,
-					"message":      message,
-				},
-			}
-			if !success {
-				m := message
-				updReq.ErrorMessage = &m
-			}
-			if uErr := s.UpdateDeploymentResult(ctx, t.ID, updReq); uErr != nil {
-				s.logger.Warn("ReportConfigResult: advance deployment target failed",
-					"target_id", t.ID, "batch_id", t.DeploymentBatchID, "error", uErr)
-			} else {
-				s.logger.Info("ReportConfigResult: deployment target advanced",
-					"target_id", t.ID, "batch_id", t.DeploymentBatchID, "status", targetStatus)
-			}
+			targetUpdates = append(targetUpdates, repo.DispatchTargetResult{
+				TargetID:    t.ID,
+				Status:      string(targetStatus),
+				ApplyResult: applyResult,
+			})
+		}
+	}
+
+	// 三写单事务：nodes 下发状态 + config_versions.applied_at + deployment_targets，
+	// 消除跨表不一致（节点 applied 但批次 pending）。
+	if txErr := s.deploymentRepo.ApplyDispatchAndTargetsTx(
+		ctx, targetNodeIDs, status, versionNo, errMsg, cv.ID, success, targetUpdates,
+	); txErr != nil {
+		s.logger.Error("ReportConfigResult: transactional apply failed",
+			"runtime_id", runtimeID, "version", versionNo, "error", txErr)
+		return txErr
+	}
+
+	// 事务提交后推进 phase（幂等；失败由 ReconcileRunningBatches 兜底收敛）
+	for _, tu := range targetUpdates {
+		updReq := &model.UpdateDeploymentResultRequest{
+			TargetID:    tu.TargetID,
+			Status:      model.TargetStatus(tu.Status),
+			ApplyResult: tu.ApplyResult,
+		}
+		if !success {
+			m := message
+			updReq.ErrorMessage = &m
+		}
+		if uErr := s.UpdateDeploymentResult(ctx, tu.TargetID, updReq); uErr != nil {
+			s.logger.Warn("ReportConfigResult: advance deployment target failed",
+				"target_id", tu.TargetID, "error", uErr)
+		} else {
+			s.logger.Info("ReportConfigResult: deployment target advanced",
+				"target_id", tu.TargetID, "status", targetStatus)
 		}
 	}
 	return nil

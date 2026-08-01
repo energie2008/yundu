@@ -162,6 +162,14 @@ func (h *WSHandler) HandleWebSocket(c *gin.Context) {
 			h.handleWSConfigResult(serverCode, versionStr, success, errMsg, cr.GetKernelType())
 			continue
 		}
+
+		// 处理 DeltaAck 消息：增量用户同步确认后，把节点下发状态推进到 config_version。
+		// Delta 只作用于主内核（sing-box），runtime 解析固定为 sing-box。
+		if da := msg.GetDeltaAck(); da != nil {
+			versionStr := strconv.FormatInt(da.GetConfigVersion(), 10)
+			h.handleWSConfigResult(serverCode, versionStr, da.GetSuccess(), da.GetError(), "sing-box")
+			continue
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/airport-panel/node-service/internal/model"
 	"github.com/google/uuid"
@@ -122,6 +123,71 @@ func (r *DeploymentRepo) CreateTargets(ctx context.Context, targets []*model.Dep
 		}
 	}
 	return nil
+}
+
+// DispatchTargetResult 供事务批量推进 deployment_targets。
+type DispatchTargetResult struct {
+	TargetID    uuid.UUID
+	Status      string
+	ApplyResult map[string]interface{}
+}
+
+// ApplyDispatchAndTargetsTx 单事务原子更新三个存储：
+// nodes.metadata 下发状态、config_versions.applied_at、deployment_targets 结果。
+// 消除 ReportConfigResult 三写非原子导致的跨表不一致（节点 applied 但批次 pending）。
+func (r *DeploymentRepo) ApplyDispatchAndTargetsTx(
+	ctx context.Context,
+	nodeIDs []uuid.UUID,
+	status string,
+	version int64,
+	errMsg string,
+	cvID uuid.UUID,
+	markApplied bool,
+	targets []DispatchTargetResult,
+) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	now := time.Now().UTC()
+	if len(nodeIDs) > 0 {
+		if _, err := tx.Exec(ctx, `
+			UPDATE nodes SET
+				metadata = jsonb_set(
+					jsonb_set(
+						jsonb_set(
+							jsonb_set(
+								COALESCE(metadata, '{}'::jsonb),
+								'{_dispatch_status}', to_jsonb($2::text)
+							),
+							'{_dispatch_version}', to_jsonb($3::bigint)
+						),
+						'{_dispatch_time}', to_jsonb($4::timestamptz)
+					),
+					'{_dispatch_error}', to_jsonb($5::text)
+				),
+				updated_at = now()
+			WHERE id = ANY($1)`, nodeIDs, status, version, now, errMsg); err != nil {
+			return fmt.Errorf("tx: update nodes dispatch status: %w", err)
+		}
+	}
+	if markApplied {
+		if _, err := tx.Exec(ctx, `UPDATE config_versions SET applied_at = now() WHERE id = $1`, cvID); err != nil {
+			return fmt.Errorf("tx: mark config version applied: %w", err)
+		}
+	}
+	for _, t := range targets {
+		if _, err := tx.Exec(ctx, `
+			UPDATE deployment_targets SET
+				status = $2, apply_result = $3,
+				finished_at = CASE WHEN $2 IN ('success', 'failed', 'rolled_back') THEN now() ELSE finished_at END
+			WHERE id = $1`, t.TargetID, t.Status, t.ApplyResult); err != nil {
+			return fmt.Errorf("tx: update deployment target %s: %w", t.TargetID, err)
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *DeploymentRepo) UpdateTargetResult(ctx context.Context, target *model.DeploymentTarget) error {
