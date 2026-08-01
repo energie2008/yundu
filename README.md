@@ -2,7 +2,7 @@
 
 > 双内核（Xray + Sing-box）一等公民架构 · 零 SSH 运维 · 证书自动化 · 配置零断流热更
 >
-> 代码基线：`2b38b68` ｜ 健康度评级 B+ ｜ 目前开发中
+> 代码基线：`0cc50c5` ｜ 健康度评级 B+ ｜ 生产版本 v0.7.14
 
 云渡是一套面向机场（代理服务）运营的全栈管理平台，采用**三平面架构**：管理后台（admin-web）+ 用户端（user-web）+ 节点代理（node-agent），中间由 6 个 Go 微服务承接。核心亮点是 **Xray 与 Sing-box 双内核真正并行运行**（MultiRuntimePlugin）、统一渲染 IR（kernelrender）与 gRPC 双向长连接（AgentChannel）。
 
@@ -82,13 +82,13 @@ go run ./cmd/migrate up
 |---|---|---|---|
 | 8080 | api-gateway | 5432 | PostgreSQL |
 | 8081 | identity-service | 6379 | Redis |
-| 8082 | node-service | 4222 | NATS |
+| 8082 / 9082 | node-service (HTTP/gRPC) | 4222 | NATS |
 | 8083 | subscription-service | 9000 | MinIO |
 | 8084 | traffic-service | 9090 / 3000 | Prometheus / Grafana |
-| 5173 | admin-web | 3100 / 4317 | Loki / OTel |
-| 5174 | user-web | 80 / 443 | Caddy Ingress |
+| 5173 / 5174 | admin-web / user-web | 3100 / 4317 | Loki / OTel |
+| 80 / 443 | Caddy/CF Ingress | — | — |
 
-> 节点端（Agent VPS）：10000（控制面）、443（stream SNI）、8445（HTTPS 回源）、10085–10584（Xray API）、20086–20585（Sing-box Clash API）。
+> 节点端（Agent VPS）：10000（控制面）、443（nginx stream SNI）、8445（HTTPS 回源）、10085（Xray API）、30000–30200（直连 TCP/REALITY）、40020–40200（Hysteria2 UDP）、40210–40299（TUIC UDP）、20530–20699（Tunnel 回源）。
 
 ---
 

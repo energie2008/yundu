@@ -1670,6 +1670,12 @@ func (a *Agent) runAgent(ctx context.Context) error {
 	grpcCh := transport.NewGRPCChannel(grpcAddr, token)
 	wsCh := transport.NewWSChannel(wsURL, a.cfg.ServerCode, token, a.cfg.HMACSecret)
 	httpCh := transport.NewHTTPChannel(a.cfg.PanelURL, token, a.cfg.HMACSecret)
+	// 域名走 Cloudflare 代理时，非 443 的 gRPC 端口无法穿透，会持续无效重连。
+	// 设置 CHANNEL_DISABLE_GRPC=1 可禁用 gRPC 通道，仅使用 WS + HTTP 兜底。
+	channels := []transport.Channel{wsCh, httpCh}
+	if os.Getenv("CHANNEL_DISABLE_GRPC") != "1" {
+		channels = append([]transport.Channel{grpcCh}, channels...)
+	}
 	a.httpClient = client.New(a.cfg.PanelURL, a.cfg.ServerCode, token, a.cfg.HMACSecret, a.logger)
 	// P2 翻转修复：设置 runtime reference，让面板识别 agent 所需 runtime 类型并下发对应配置。
 	// X-Runtime-Ref 头缺失会导致面板无法识别 agent 期望的内核，sing-box 配置无法生成。
@@ -1681,7 +1687,7 @@ func (a *Agent) runAgent(ctx context.Context) error {
 	a.healthChecker = pipeline.NewHealthChecker(a.logger)
 
 	cm := transport.NewChannelManager(transport.ManagerConfig{
-		Channels:       []transport.Channel{grpcCh, wsCh, httpCh},
+		Channels:       channels,
 		HealthInterval: 20 * time.Second,
 		FailThreshold:  3,
 		UpgradeEvery:   60 * time.Second,

@@ -43,6 +43,62 @@ func NewNodeRepo(pool *pgxpool.Pool) *NodeRepo {
 	return &NodeRepo{pool: pool}
 }
 
+// DispatchHealthSummary 面板化体检的只读汇总（对应 801 维护指南脚本 A/B/C）。
+type DispatchHealthSummary struct {
+	TotalNodes      int64    `json:"total_nodes"`
+	Pushed          int64    `json:"pushed"`
+	Applied         int64    `json:"applied"`
+	Failed          int64    `json:"failed"`
+	FailedNodes     []string `json:"failed_nodes"`
+	NullProviderRef int64    `json:"null_provider_ref"`
+	Cv10Min         int64    `json:"cv_10min"`
+	DuplicateRT     int64    `json:"duplicate_runtimes"`
+}
+
+// HealthCheckSummary 执行只读体检查询，供 admin 健康体检页使用。
+func (r *NodeRepo) HealthCheckSummary(ctx context.Context) (*DispatchHealthSummary, error) {
+	var s DispatchHealthSummary
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM nodes WHERE deleted_at IS NULL) AS total,
+			(SELECT COUNT(*) FROM nodes WHERE deleted_at IS NULL AND metadata->>'_dispatch_status' = 'pushed') AS pushed,
+			(SELECT COUNT(*) FROM nodes WHERE deleted_at IS NULL AND metadata->>'_dispatch_status' = 'applied') AS applied,
+			(SELECT COUNT(*) FROM nodes WHERE deleted_at IS NULL AND metadata->>'_dispatch_status' = 'failed') AS failed,
+			(SELECT COUNT(*) FROM runtimes WHERE provider_ref IS NULL) AS null_provider_ref,
+			(SELECT COUNT(*) FROM config_versions WHERE created_at > NOW() - INTERVAL '10 minutes') AS cv_10min`).Scan(
+		&s.TotalNodes, &s.Pushed, &s.Applied, &s.Failed, &s.NullProviderRef, &s.Cv10Min)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT code FROM nodes WHERE deleted_at IS NULL AND metadata->>'_dispatch_status' = 'failed' ORDER BY code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		s.FailedNodes = append(s.FailedNodes, code)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	err = r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT server_id, runtime_type, provider_ref
+			FROM runtimes
+			GROUP BY server_id, runtime_type, provider_ref
+			HAVING COUNT(*) > 1
+		) d`).Scan(&s.DuplicateRT)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 func (r *NodeRepo) Create(ctx context.Context, n *model.Node) error {
 	query := `
 		INSERT INTO nodes (id, code, name, runtime_id, region_id, group_id, node_type, protocol_type, transport_type,

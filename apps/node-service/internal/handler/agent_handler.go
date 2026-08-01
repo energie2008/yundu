@@ -205,9 +205,10 @@ func (h *AgentHandler) Heartbeat(c *gin.Context) {
 				"current_version", currentVersion,
 				"needs_reload", needsReload)
 
-			// D-自愈：心跳内联不变式检查，failed 超 5 分钟自动重置为 pushed。
+			// D-自愈：三通道统一不变式检查（版本一致+运行中→applied；其余超 5 分钟→pushed 重拉）。
 			// 复用心跳周期（10s）作巡检触发点，零额外 goroutine（根因 #4 根治）。
-			h.deploymentService.SelfHealFailedDispatch(c.Request.Context(), rt.ID, targetVersion.VersionNo)
+			kernelRunning := req.RuntimeStatus != "inactive"
+			h.deploymentService.SelfHealDispatchStatus(c.Request.Context(), rt.ID, targetVersion.VersionNo, kernelRunning)
 
 			if needsReload {
 				configURL := fmt.Sprintf("/api/v1/agent/config?version=%s", targetVersionStr)

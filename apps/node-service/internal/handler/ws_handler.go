@@ -333,24 +333,14 @@ func (h *WSHandler) handleWSHeartbeat(sess *wsSession, seq int64, hb *pb.Heartbe
 		}
 	}
 
-	// 心跳自愈：action==NONE（agent 版本 == 面板最新）且 runtime 运行中时，
-	// 任何 "failed" 下发状态都是陈旧的（修复重启后版本相等不触发 reload，状态不会被刷新）。
-	// 自动刷为 "applied"，使面板显示与实际一致，避免人工 SQL 介入。
-	// 与 gRPC handler (app.go) 对齐，两条心跳通道都需要自愈。
-	if action == pb.HeartbeatAction_HEARTBEAT_ACTION_NONE && reconcileRtID != uuid.Nil && h.deploymentService != nil {
+	// 心跳自愈（三通道统一）：版本一致+运行中 → failed 刷 applied；
+	// 其余 failed 超 5 分钟 → 刷 pushed 触发重拉。覆盖 sing-box + xray 全部节点。
+	if reconcileRtID != uuid.Nil && h.deploymentService != nil {
 		kernelRunning := true
 		if kernel := hb.GetKernel(); kernel != nil {
 			kernelRunning = kernel.GetRunning()
 		}
-		if kernelRunning {
-			if affected, err := h.deploymentService.ReconcileDispatchStatusOnHeartbeat(context.Background(), reconcileRtID, latestVersion); err != nil {
-				h.logger.Warn("ws heartbeat reconcile dispatch status failed",
-					"runtime_id", reconcileRtID, "version", latestVersion, "error", err)
-			} else if affected > 0 {
-				h.logger.Info("ws heartbeat reconciled stale failed dispatch status",
-					"runtime_id", reconcileRtID, "version", latestVersion, "affected_nodes", affected)
-			}
-		}
+		h.deploymentService.SelfHealDispatchStatus(context.Background(), reconcileRtID, latestVersion, kernelRunning)
 	}
 
 	ack := &pb.PanelMessage{

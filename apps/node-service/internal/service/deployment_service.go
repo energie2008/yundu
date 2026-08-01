@@ -1365,6 +1365,51 @@ func (s *DeploymentService) SelfHealFailedDispatch(ctx context.Context, runtimeI
 	}
 }
 
+// SelfHealDispatchStatus 三通道统一自愈入口（HTTP/WS/gRPC 心跳均调用）：
+//   - 版本一致（lpv==latestVersion）且内核运行中 → failed 刷 applied（可信收敛，不重拉）；
+//   - 其余 failed 且超过 5 分钟（以 _dispatch_time 判定）→ 刷 pushed（触发 agent 重拉自愈）。
+//
+// 覆盖同 server 的 sing-box + xray 全部节点，避免通道不同导致自愈语义分叉。
+func (s *DeploymentService) SelfHealDispatchStatus(ctx context.Context, runtimeID uuid.UUID, latestVersion int64, kernelRunning bool) {
+	allNodes, err := s.nodesForRuntimeAndServer(ctx, runtimeID)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-5 * time.Minute)
+	var appliedNodes, stale []*model.Node
+	for _, n := range allNodes {
+		if n == nil || n.Metadata == nil {
+			continue
+		}
+		if status, _ := n.Metadata["_dispatch_status"].(string); status != "failed" {
+			continue
+		}
+		ts := n.UpdatedAt
+		if raw, ok := n.Metadata["_dispatch_time"].(string); ok {
+			if t, perr := time.Parse(time.RFC3339Nano, raw); perr == nil {
+				ts = t
+			}
+		}
+		if kernelRunning && n.LastPublishedVersion == latestVersion {
+			appliedNodes = append(appliedNodes, n)
+			continue
+		}
+		if ts.Before(cutoff) {
+			stale = append(stale, n)
+		}
+	}
+	if len(appliedNodes) > 0 {
+		s.markNodesDispatchStatus(ctx, appliedNodes, "applied", latestVersion, "")
+		s.logger.Info("dispatch self-heal: stale failed -> applied",
+			"runtime_id", runtimeID, "version", latestVersion, "count", len(appliedNodes))
+	}
+	if len(stale) > 0 {
+		s.markNodesDispatchStatus(ctx, stale, "pushed", latestVersion, "")
+		s.logger.Warn("dispatch self-heal: stale failed -> pushed (retry)",
+			"runtime_id", runtimeID, "count", len(stale), "latest_version", latestVersion)
+	}
+}
+
 // PushUserDeltaToRuntime 向指定 runtime 关联的 agent 推送增量用户变更。
 // 当变更仅涉及用户增删（非结构化配置变更）时，使用 DeltaSync 替代全量 ConfigPush，
 // 实现 sub-second 级零断流热更。推送失败不阻断业务（agent 仍可通过心跳兜底全量同步）。

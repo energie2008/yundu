@@ -20,7 +20,27 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false
+
+      - name: Test packages/subscription
+        run: ( cd packages/subscription && go test ./... )
+
+      - name: Test node-agent core packages
+        run: ( cd apps/node-agent && go test ./internal/hotdiff/... ./internal/pipeline/... ./internal/validator/... ./internal/warp/... )
+
   build:
+    needs: test
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
     strategy:

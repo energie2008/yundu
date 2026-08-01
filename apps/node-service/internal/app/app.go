@@ -652,6 +652,8 @@ func Run() {
 	adminNodeHostHandler := handler.NewAdminNodeHostHandler(nodeHostRepo)
 	adminNodeGroupHandler := handler.NewAdminNodeGroupHandler(nodeGroupService)
 	adminChainHandler := handler.NewAdminChainHandler(chainService)
+	adminAgentUpgradeHandler := handler.NewAgentUpgradeHandler(logger)
+	adminHealthChecksHandler := handler.NewHealthChecksHandler(nodeRepo, logger)
 	adminDeploymentHandler := handler.NewAdminDeploymentHandler(deploymentService)
 	adminHealthHandler := handler.NewAdminHealthHandler(healthService)
 	adminCertHandler := cert.NewAdminCertHandler(certService)
@@ -758,6 +760,8 @@ func Run() {
 			adminNodeHostHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminNodeGroupHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminChainHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
+			adminAgentUpgradeHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
+			adminHealthChecksHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminDeploymentHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminHealthHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminCertHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
@@ -1017,18 +1021,14 @@ func Run() {
 					}
 				}
 
-				// 心跳自愈：action==NONE 意味着 agent 版本 == 面板最新版本；若 runtime 同时在运行，
-				// 说明 agent 已用当前配置成功启动。此时任何 "failed" 下发状态都是陈旧的
-				//（来自之前 bug 导致的失败上报，修复重启后版本相等不触发 reload，状态不会被刷新）。
-				// 自动将其刷为 "applied"，使面板显示与实际一致，避免人工 SQL 介入。
-				if action == pb.HeartbeatAction_HEARTBEAT_ACTION_NONE && reconcileRtID != uuid.Nil && deploymentService != nil {
-					if affected, err := deploymentService.ReconcileDispatchStatusOnHeartbeat(ctx, reconcileRtID, latestVersion); err != nil {
-						logger.Warn("heartbeat reconcile dispatch status failed",
-							"runtime_id", reconcileRtID, "version", latestVersion, "error", err)
-					} else if affected > 0 {
-						logger.Info("heartbeat reconciled stale failed dispatch status",
-							"runtime_id", reconcileRtID, "version", latestVersion, "affected_nodes", affected)
+				// 心跳自愈（三通道统一）：版本一致+运行中 → failed 刷 applied；
+				// 其余 failed 超 5 分钟 → 刷 pushed 触发重拉。覆盖 sing-box + xray 全部节点。
+				if reconcileRtID != uuid.Nil && deploymentService != nil {
+					kernelRunning := true
+					if kernel := hb.GetKernel(); kernel != nil {
+						kernelRunning = kernel.GetRunning()
 					}
+					deploymentService.SelfHealDispatchStatus(ctx, reconcileRtID, latestVersion, kernelRunning)
 				}
 
 				return &pb.PanelMessage{
