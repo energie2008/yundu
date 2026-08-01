@@ -17,6 +17,7 @@ import {
   EP,
   OrderResponse,
   formatUSDT,
+  formatCNY,
   formatDateTime,
   getPeriodLabel,
   adaptOrder,
@@ -336,6 +337,74 @@ export default function OrderDetail() {
           <button
             onClick={() => refetch()}
             className="w-full h-10 text-sm rounded-lg border transition-colors flex items-center justify-center gap-1.5"
+            style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--muted)'; e.currentTarget.style.color = 'var(--foreground)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted-foreground)'; }}
+          >
+            <RefreshCw className="w-4 h-4" />
+            我已支付，刷新状态
+          </button>
+        </div>
+      )}
+
+      {isPending && order.pay_currency === 'CNY' && (
+        <div className="xboard-card p-5 mb-5">
+          <h2 className="text-base font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--foreground)' }}>
+            <Wallet className="w-4 h-4" style={{ color: 'var(--primary)' }} />
+            支付信息
+          </h2>
+
+          <div className="text-center mb-5">
+            <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)' }}>剩余支付时间</p>
+            <Countdown expiresAt={order.expires_at} />
+          </div>
+
+          {order.pay_address && (
+            <div className="rounded-xl p-4 flex justify-center mb-5" style={{ background: 'var(--muted)' }}>
+              <QRCode value={order.pay_address} size={180} />
+            </div>
+          )}
+
+          <div className="rounded-lg p-4 mb-5" style={{ background: 'var(--muted)' }}>
+            <div className="flex justify-between items-center mb-3">
+              <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>支付方式</span>
+              <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                {order.payment_method === 'wechat' ? '微信支付' : '支付宝'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>套餐</span>
+              <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                {order.plan_name} · {getPeriodLabel(order.period_code)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center pt-3">
+              <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>应付金额</span>
+              <span className="text-lg font-bold" style={{ color: 'var(--primary)' }}>
+                {formatCNY(displayAmount)}
+              </span>
+            </div>
+          </div>
+
+          {order.payment_uri && (
+            <a
+              href={order.payment_uri}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full h-10 rounded-lg text-sm font-medium text-white flex items-center justify-center transition-opacity shadow-sm"
+              style={{ background: 'var(--primary)' }}
+            >
+              去支付
+            </a>
+          )}
+
+          <p className="text-xs mt-3 text-center" style={{ color: 'var(--muted-foreground)' }}>
+            请在弹出的支付页面完成付款，支付成功后系统将自动确认并激活您的订阅。
+          </p>
+
+          <button
+            onClick={() => refetch()}
+            className="w-full h-10 mt-4 text-sm rounded-lg border transition-colors flex items-center justify-center gap-1.5"
             style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--muted)'; e.currentTarget.style.color = 'var(--foreground)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted-foreground)'; }}

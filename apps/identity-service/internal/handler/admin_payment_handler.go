@@ -71,20 +71,22 @@ func (h *AdminPaymentHandler) ListPaymentMethods(c *gin.Context) {
 				"currency":           "USDT",
 			},
 			{
-				"method":        "wechat",
-				"name":          "微信支付",
-				"enabled":       wechat.Enabled,
-				"auto_activate": wechat.AutoActivate,
-				"currency":      "CNY",
-				"framework":     true, // 框架预留，暂未对接真实接口
+				"method":          "wechat",
+				"name":            "微信支付",
+				"enabled":         wechat.Enabled,
+				"auto_activate":   wechat.AutoActivate,
+				"currency":        "CNY",
+				"epay":            epayConfigMap(wechat.Epay),
+				"epay_configured": wechat.Epay.Configured(),
 			},
 			{
-				"method":        "alipay",
-				"name":          "支付宝",
-				"enabled":       alipay.Enabled,
-				"auto_activate": alipay.AutoActivate,
-				"currency":      "CNY",
-				"framework":     true,
+				"method":          "alipay",
+				"name":            "支付宝",
+				"enabled":         alipay.Enabled,
+				"auto_activate":   alipay.AutoActivate,
+				"currency":        "CNY",
+				"epay":            epayConfigMap(alipay.Epay),
+				"epay_configured": alipay.Epay.Configured(),
 			},
 		},
 	})
@@ -104,14 +106,24 @@ func (h *AdminPaymentHandler) GetPaymentMethod(c *gin.Context) {
 
 // UpdatePaymentMethodRequest 更新支付方式请求
 type UpdatePaymentMethodRequest struct {
-	Enabled         *bool     `json:"enabled,omitempty"`
-	Address         *string   `json:"address,omitempty"`
-	AmountTolerance *float64  `json:"amount_tolerance,omitempty"`
-	Confirmations   *int      `json:"confirmations,omitempty"`
-	AutoActivate    *bool     `json:"auto_activate,omitempty"`
-	Network         *string   `json:"network,omitempty"`
-	APIKey          *string   `json:"api_key,omitempty"`
-	Networks        *[]string `json:"networks,omitempty"`
+	Enabled         *bool              `json:"enabled,omitempty"`
+	Address         *string            `json:"address,omitempty"`
+	AmountTolerance *float64           `json:"amount_tolerance,omitempty"`
+	Confirmations   *int               `json:"confirmations,omitempty"`
+	AutoActivate    *bool              `json:"auto_activate,omitempty"`
+	Network         *string            `json:"network,omitempty"`
+	APIKey          *string            `json:"api_key,omitempty"`
+	Networks        *[]string          `json:"networks,omitempty"`
+	Epay            *EpayUpdateRequest `json:"epay,omitempty"`
+}
+
+type EpayUpdateRequest struct {
+	Pid        *string `json:"pid,omitempty"`
+	Key        *string `json:"key,omitempty"`
+	GatewayURL *string `json:"gateway_url,omitempty"`
+	PayType    *string `json:"pay_type,omitempty"`
+	NotifyURL  *string `json:"notify_url,omitempty"`
+	ReturnURL  *string `json:"return_url,omitempty"`
 }
 
 // UpdatePaymentMethod 更新支付方式配置
@@ -185,6 +197,47 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 		if len(nets) > 0 {
 			cfg["network"] = nets[0]
 		}
+	}
+	if req.Epay != nil && (method == "wechat" || method == "alipay") {
+		var cur service.EpayConfig
+		if method == "wechat" {
+			cur = h.paymentSvc.GetWechatConfig().Epay
+		} else {
+			cur = h.paymentSvc.GetAlipayConfig().Epay
+		}
+		epayMap := map[string]interface{}{
+			"pid":         cur.Pid,
+			"gateway_url": cur.GatewayURL,
+			"pay_type":    cur.PayType,
+			"notify_url":  cur.NotifyURL,
+			"return_url":  cur.ReturnURL,
+		}
+		if cur.Key != "" {
+			epayMap["key"] = cur.Key
+		}
+		if req.Epay.Pid != nil {
+			epayMap["pid"] = *req.Epay.Pid
+		}
+		if req.Epay.Key != nil {
+			if *req.Epay.Key != "" {
+				epayMap["key"] = *req.Epay.Key
+			} else {
+				delete(epayMap, "key")
+			}
+		}
+		if req.Epay.GatewayURL != nil {
+			epayMap["gateway_url"] = *req.Epay.GatewayURL
+		}
+		if req.Epay.PayType != nil {
+			epayMap["pay_type"] = *req.Epay.PayType
+		}
+		if req.Epay.NotifyURL != nil {
+			epayMap["notify_url"] = *req.Epay.NotifyURL
+		}
+		if req.Epay.ReturnURL != nil {
+			epayMap["return_url"] = *req.Epay.ReturnURL
+		}
+		cfg["epay"] = epayMap
 	}
 
 	adminID := getAdminIDFromContext(c)
@@ -281,6 +334,8 @@ func (h *AdminPaymentHandler) getMethodConfig(method string) map[string]interfac
 			"enabled":            cfg.Enabled,
 			"auto_activate":      cfg.AutoActivate,
 			"order_expiry_hours": cfg.OrderExpiryHours,
+			"epay":               epayConfigMap(cfg.Epay),
+			"epay_configured":    cfg.Epay.Configured(),
 		}
 	case "alipay":
 		cfg := h.paymentSvc.GetAlipayConfig()
@@ -290,9 +345,22 @@ func (h *AdminPaymentHandler) getMethodConfig(method string) map[string]interfac
 			"enabled":            cfg.Enabled,
 			"auto_activate":      cfg.AutoActivate,
 			"order_expiry_hours": cfg.OrderExpiryHours,
+			"epay":               epayConfigMap(cfg.Epay),
+			"epay_configured":    cfg.Epay.Configured(),
 		}
 	default:
 		return nil
+	}
+}
+
+func epayConfigMap(cfg service.EpayConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"pid":            cfg.Pid,
+		"gateway_url":    cfg.GatewayURL,
+		"pay_type":       cfg.PayType,
+		"notify_url":     cfg.NotifyURL,
+		"return_url":     cfg.ReturnURL,
+		"key_configured": cfg.Key != "",
 	}
 }
 

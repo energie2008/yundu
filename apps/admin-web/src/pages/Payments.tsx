@@ -33,6 +33,16 @@ const EVM_NETWORK_OPTIONS = [
   { key: 'arbitrum', label: 'Arbitrum One' },
 ]
 
+interface EpayConfig {
+  pid?: string
+  key?: string
+  gateway_url?: string
+  pay_type?: string
+  notify_url?: string
+  return_url?: string
+  key_configured?: boolean
+}
+
 interface PaymentMethod {
   method: string
   name: string
@@ -45,6 +55,8 @@ interface PaymentMethod {
   api_key_configured?: boolean
   api_key?: string
   networks?: string[]
+  epay?: EpayConfig
+  epay_configured?: boolean
 }
 
 interface PaymentMethodsResponse {
@@ -95,6 +107,7 @@ export default function Payments() {
         network: config.network,
         api_key: config.api_key,
         networks: config.networks,
+        epay: config.epay,
       })
     },
     onSuccess: () => {
@@ -127,6 +140,7 @@ export default function Payments() {
       enabled: m.enabled,
       network: m.network,
       networks: m.networks,
+      epay: m.epay,
     })
   }
 
@@ -140,6 +154,9 @@ export default function Payments() {
     if (config.api_key === '') {
       delete config.api_key
     }
+    if (config.epay?.key === '') {
+      delete config.epay.key
+    }
     updateMethod.mutate({ method: editMethod, config })
   }
 
@@ -148,6 +165,13 @@ export default function Payments() {
     setEditForm({
       ...editForm,
       networks: cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key],
+    })
+  }
+
+  const setEpayField = (field: keyof EpayConfig, value: string) => {
+    setEditForm({
+      ...editForm,
+      epay: { ...(editForm.epay || {}), [field]: value },
     })
   }
 
@@ -254,36 +278,40 @@ export default function Payments() {
 
                 {editMethod === m.method ? (
                   <div className="space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>收款钱包地址</label>
-                      <Input
-                        value={editForm.address || ''}
-                        onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-                        placeholder="输入 TRC20/ERC20 钱包地址"
-                        style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>金额容差</label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={editForm.amount_tolerance ?? 0}
-                          onChange={(e) => setEditForm({ ...editForm, amount_tolerance: parseFloat(e.target.value) || 0 })}
-                          style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>最小确认数</label>
-                        <Input
-                          type="number"
-                          value={editForm.confirmations ?? 1}
-                          onChange={(e) => setEditForm({ ...editForm, confirmations: parseInt(e.target.value) || 1 })}
-                          style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                        />
-                      </div>
-                    </div>
+                    {(m.method === 'usdt_trc20' || m.method === 'usdt_erc20') && (
+                      <>
+                        <div className="space-y-1">
+                          <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>收款钱包地址</label>
+                          <Input
+                            value={editForm.address || ''}
+                            onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
+                            placeholder="输入 TRC20/ERC20 钱包地址"
+                            style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>金额容差</label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={editForm.amount_tolerance ?? 0}
+                              onChange={(e) => setEditForm({ ...editForm, amount_tolerance: parseFloat(e.target.value) || 0 })}
+                              style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>最小确认数</label>
+                            <Input
+                              type="number"
+                              value={editForm.confirmations ?? 1}
+                              onChange={(e) => setEditForm({ ...editForm, confirmations: parseInt(e.target.value) || 1 })}
+                              style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
                     {m.method === 'usdt_erc20' && (
                       <>
                         <div className="space-y-1">
@@ -309,7 +337,7 @@ export default function Payments() {
                             })}
                           </div>
                           <p className="text-xs mt-1" style={{ color: ADMIN_TEXT_MUTED }}>
-                            三个网络共用同一地址，订单按所选网络独立查链匹配
+                            网络共用同一地址，订单按所选网络独立查链匹配
                           </p>
                         </div>
                         <div className="space-y-1">
@@ -324,8 +352,83 @@ export default function Payments() {
                             style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
                           />
                           <p className="text-xs mt-1" style={{ color: ADMIN_TEXT_MUTED }}>
-                            免费注册于 etherscan.io/apidashboard，Polygon/Arbitrum/BSC 自动到账需此 Key
+                            免费注册于 etherscan.io/apidashboard，Polygon/Arbitrum 自动到账需此 Key
                           </p>
+                        </div>
+                      </>
+                    )}
+                    {(m.method === 'wechat' || m.method === 'alipay') && (
+                      <>
+                        <div className="space-y-1">
+                          <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
+                            易支付商户状态：{m.epay_configured ? '已配置' : '未配置'}
+                          </label>
+                          <div className="rounded-lg p-3 space-y-3" style={{ background: ADMIN_INPUT_BG, border: `1px solid ${ADMIN_INPUT_BORDER}` }}>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>商户ID (pid)</label>
+                                <Input
+                                  value={editForm.epay?.pid || ''}
+                                  onChange={(e) => setEpayField('pid', e.target.value)}
+                                  placeholder="1001"
+                                  style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
+                                  商户密钥 (key) {editForm.epay?.key_configured ? '（已配置）' : ''}
+                                </label>
+                                <Input
+                                  type="password"
+                                  value={editForm.epay?.key || ''}
+                                  onChange={(e) => setEpayField('key', e.target.value)}
+                                  placeholder="留空保持不变"
+                                  style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>易支付网关地址</label>
+                              <Input
+                                value={editForm.epay?.gateway_url || ''}
+                                onChange={(e) => setEpayField('gateway_url', e.target.value)}
+                                placeholder="https://pay.example.com"
+                                style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>下单类型</label>
+                                <select
+                                  value={editForm.epay?.pay_type || (m.method === 'wechat' ? 'wxpay' : 'alipay')}
+                                  onChange={(e) => setEpayField('pay_type', e.target.value)}
+                                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                                  style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                                >
+                                  <option value="alipay">支付宝 alipay</option>
+                                  <option value="wxpay">微信 wxpay</option>
+                                </select>
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>通知地址 (notify_url)</label>
+                                <Input
+                                  value={editForm.epay?.notify_url || ''}
+                                  onChange={(e) => setEpayField('notify_url', e.target.value)}
+                                  placeholder="https://6.tiktokplay.na.am/api/v1/payment/notify/alipay"
+                                  style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>回跳地址 (return_url)</label>
+                              <Input
+                                value={editForm.epay?.return_url || ''}
+                                onChange={(e) => setEpayField('return_url', e.target.value)}
+                                placeholder="https://7.tiktokplay.na.am/dashboard/orders"
+                                style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                              />
+                            </div>
+                          </div>
                         </div>
                       </>
                     )}
@@ -349,20 +452,40 @@ export default function Payments() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span style={{ color: ADMIN_TEXT_MUTED }}>收款地址</span>
-                      <code className="text-xs font-mono" style={{ color: ADMIN_TEXT_SECONDARY }}>
-                        {m.address ? `${m.address.slice(0, 8)}...${m.address.slice(-6)}` : '未配置'}
-                      </code>
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span style={{ color: ADMIN_TEXT_MUTED }}>金额容差</span>
-                      <span style={{ color: ADMIN_TEXT_SECONDARY }}>{m.amount_tolerance ?? 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span style={{ color: ADMIN_TEXT_MUTED }}>最小确认数</span>
-                      <span style={{ color: ADMIN_TEXT_SECONDARY }}>{m.confirmations ?? 1}</span>
-                    </div>
+                    {(m.method === 'usdt_trc20' || m.method === 'usdt_erc20') && (
+                      <>
+                        <div className="flex items-center justify-between text-sm">
+                          <span style={{ color: ADMIN_TEXT_MUTED }}>收款地址</span>
+                          <code className="text-xs font-mono" style={{ color: ADMIN_TEXT_SECONDARY }}>
+                            {m.address ? `${m.address.slice(0, 8)}...${m.address.slice(-6)}` : '未配置'}
+                          </code>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span style={{ color: ADMIN_TEXT_MUTED }}>金额容差</span>
+                          <span style={{ color: ADMIN_TEXT_SECONDARY }}>{m.amount_tolerance ?? 0}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span style={{ color: ADMIN_TEXT_MUTED }}>最小确认数</span>
+                          <span style={{ color: ADMIN_TEXT_SECONDARY }}>{m.confirmations ?? 1}</span>
+                        </div>
+                      </>
+                    )}
+                    {(m.method === 'wechat' || m.method === 'alipay') && (
+                      <>
+                        <div className="flex items-center justify-between text-sm">
+                          <span style={{ color: ADMIN_TEXT_MUTED }}>易支付商户</span>
+                          <span style={{ color: m.epay_configured ? '#26a17b' : ADMIN_TEXT_SECONDARY }}>
+                            {m.epay_configured ? `已配置 (PID ${m.epay?.pid})` : '未配置'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span style={{ color: ADMIN_TEXT_MUTED }}>网关地址</span>
+                          <span className="text-xs font-mono" style={{ color: ADMIN_TEXT_SECONDARY }}>
+                            {m.epay?.gateway_url || '-'}
+                          </span>
+                        </div>
+                      </>
+                    )}
                     <div className="flex items-center justify-between text-sm">
                       <span style={{ color: ADMIN_TEXT_MUTED }}>自动激活</span>
                       {m.auto_activate ? (

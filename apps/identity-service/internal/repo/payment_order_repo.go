@@ -22,14 +22,16 @@ func NewPaymentOrderRepo(pool *pgxpool.Pool) *PaymentOrderRepo {
 const paymentOrderColumns = `id, order_no, user_id, plan_id, plan_name, period_code, amount_usdt::float8,
 	COALESCE(amount_cny,0)::float8, COALESCE(exchange_rate,7.2)::float8,
 	COALESCE(discount_amount,0)::float8, COALESCE(final_amount,amount_usdt)::float8, COALESCE(coupon_code,''),
-	pay_address, pay_currency, payment_method, status, tx_hash, paid_amount, paid_at,
+	pay_address, pay_currency, payment_method, COALESCE(gateway,''), COALESCE(gateway_trade_no,''),
+	COALESCE(payment_uri,''), status, tx_hash, paid_amount, paid_at,
 	block_number, expires_at, created_at, updated_at`
 
 func scanPaymentOrder(row pgx.Row, o *model.PaymentOrder) error {
 	return row.Scan(
 		&o.ID, &o.OrderNo, &o.UserID, &o.PlanID, &o.PlanName, &o.PeriodCode,
 		&o.AmountUSDT, &o.AmountCNY, &o.ExchangeRate, &o.DiscountAmount, &o.FinalAmount, &o.CouponCode,
-		&o.PayAddress, &o.PayCurrency, &o.PaymentMethod, &o.Status, &o.TxHash,
+		&o.PayAddress, &o.PayCurrency, &o.PaymentMethod, &o.Gateway, &o.GatewayTradeNo, &o.PaymentURI,
+		&o.Status, &o.TxHash,
 		&o.PaidAmount, &o.PaidAt, &o.BlockNumber, &o.ExpiresAt, &o.CreatedAt, &o.UpdatedAt,
 	)
 }
@@ -39,15 +41,23 @@ func (r *PaymentOrderRepo) Create(ctx context.Context, order *model.PaymentOrder
 		INSERT INTO payment_orders (
 			id, order_no, user_id, plan_id, plan_name, period_code, amount_usdt,
 			amount_cny, exchange_rate, discount_amount, final_amount, coupon_code,
-			pay_address, pay_currency, payment_method, status, expires_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			pay_address, pay_currency, payment_method, gateway, gateway_trade_no, payment_uri, status, expires_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		RETURNING created_at, updated_at`
 	return r.pool.QueryRow(ctx, query,
 		order.ID, order.OrderNo, order.UserID, order.PlanID, order.PlanName,
 		order.PeriodCode, order.AmountUSDT, order.AmountCNY, order.ExchangeRate,
 		order.DiscountAmount, order.FinalAmount,
-		order.CouponCode, order.PayAddress, order.PayCurrency, order.PaymentMethod, order.Status, order.ExpiresAt,
+		order.CouponCode, order.PayAddress, order.PayCurrency, order.PaymentMethod,
+		order.Gateway, order.GatewayTradeNo, order.PaymentURI, order.Status, order.ExpiresAt,
 	).Scan(&order.CreatedAt, &order.UpdatedAt)
+}
+
+// UpdateGatewayInfo 写入易支付网关返回的流水号、支付跳转地址与二维码内容。
+func (r *PaymentOrderRepo) UpdateGatewayInfo(ctx context.Context, id uuid.UUID, gateway, tradeNo, paymentURI, qrcode string) error {
+	query := `UPDATE payment_orders SET gateway = $2, gateway_trade_no = $3, payment_uri = $4, pay_address = $5, updated_at = now() WHERE id = $1`
+	_, err := r.pool.Exec(ctx, query, id, gateway, tradeNo, paymentURI, qrcode)
+	return err
 }
 
 func (r *PaymentOrderRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.PaymentOrder, error) {

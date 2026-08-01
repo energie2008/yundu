@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -112,10 +113,11 @@ type WechatConfig struct {
 	OrderExpiryHours int  `json:"order_expiry_hours"`
 	AutoActivate     bool `json:"auto_activate"`
 	// 以下字段为后续对接真实接口预留，当前框架模式不使用
-	MchID     string `json:"mch_id,omitempty"`
-	APIKey    string `json:"api_key,omitempty"`
-	AppID     string `json:"app_id,omitempty"`
-	NotifyURL string `json:"notify_url,omitempty"`
+	MchID     string     `json:"mch_id,omitempty"`
+	APIKey    string     `json:"api_key,omitempty"`
+	AppID     string     `json:"app_id,omitempty"`
+	NotifyURL string     `json:"notify_url,omitempty"`
+	Epay      EpayConfig `json:"epay,omitempty"`
 }
 
 // AlipayConfig 支付宝支付配置（框架预留，暂不对接真实接口）
@@ -124,9 +126,10 @@ type AlipayConfig struct {
 	OrderExpiryHours int  `json:"order_expiry_hours"`
 	AutoActivate     bool `json:"auto_activate"`
 	// 以下字段为后续对接真实接口预留，当前框架模式不使用
-	AppID      string `json:"app_id,omitempty"`
-	PrivateKey string `json:"private_key,omitempty"`
-	NotifyURL  string `json:"notify_url,omitempty"`
+	AppID      string     `json:"app_id,omitempty"`
+	PrivateKey string     `json:"private_key,omitempty"`
+	NotifyURL  string     `json:"notify_url,omitempty"`
+	Epay       EpayConfig `json:"epay,omitempty"`
 }
 
 type PaymentService struct {
@@ -621,7 +624,15 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 	if err := s.paymentOrderRepo.Create(ctx, order); err != nil {
 		return nil, fmt.Errorf("create order: %w", err)
 	}
-	order.PaymentURI = s.GetPaymentURI(order)
+	if model.IsFiatPayment(order.PaymentMethod) {
+		if err := s.createEpayPayment(ctx, order); err != nil {
+			// 网关不可用时取消订单，避免产生无支付入口的死单
+			_, _ = s.paymentOrderRepo.UpdateStatus(ctx, order.ID, model.PaymentStatusCanceled, nil, nil, nil)
+			return nil, err
+		}
+	} else {
+		order.PaymentURI = s.GetPaymentURI(order)
+	}
 	if req.CouponCode != "" {
 		coupon, _ := s.couponRepo.GetByCode(ctx, req.CouponCode)
 		if coupon != nil {
@@ -670,10 +681,162 @@ func (s *PaymentService) GetPaymentURI(order *model.PaymentOrder) string {
 		amount := strconv.FormatFloat(order.FinalAmount*1000000, 'f', 0, 64)
 		return fmt.Sprintf("tron:%s?amount=%s&contract=%s", order.PayAddress, amount, cfg.USDTContract)
 	case model.PaymentMethodWechat, model.PaymentMethodAlipay:
-		// 法币支付框架预留：返回占位 URI，后续对接真实接口时替换为支付链接/二维码 URL
+		if order.PaymentURI != "" {
+			return order.PaymentURI
+		}
+		// 兼容旧订单：未走网关时返回占位 URI
 		return fmt.Sprintf("pending:%s?amount=%.2f&currency=CNY&method=%s", order.OrderNo, order.FinalAmount, order.PaymentMethod)
 	default:
 		return ""
+	}
+}
+
+func (s *PaymentService) epayGatewayFor(method string) (*EpayGateway, error) {
+	switch method {
+	case model.PaymentMethodWechat:
+		cfg := s.GetWechatConfig()
+		if !cfg.Epay.Configured() {
+			return nil, fmt.Errorf("epay gateway not configured for wechat")
+		}
+		payType := cfg.Epay.PayType
+		if payType == "" {
+			payType = "wxpay"
+		}
+		return NewEpayGateway(s.log, s.httpClient, cfg.Epay, payType), nil
+	case model.PaymentMethodAlipay:
+		cfg := s.GetAlipayConfig()
+		if !cfg.Epay.Configured() {
+			return nil, fmt.Errorf("epay gateway not configured for alipay")
+		}
+		payType := cfg.Epay.PayType
+		if payType == "" {
+			payType = "alipay"
+		}
+		return NewEpayGateway(s.log, s.httpClient, cfg.Epay, payType), nil
+	default:
+		return nil, fmt.Errorf("unsupported epay method: %s", method)
+	}
+}
+
+func (s *PaymentService) epayAutoActivate(method string) bool {
+	switch method {
+	case model.PaymentMethodWechat:
+		return s.GetWechatConfig().AutoActivate
+	case model.PaymentMethodAlipay:
+		return s.GetAlipayConfig().AutoActivate
+	default:
+		return true
+	}
+}
+
+func (s *PaymentService) createEpayPayment(ctx context.Context, order *model.PaymentOrder) error {
+	gw, err := s.epayGatewayFor(order.PaymentMethod)
+	if err != nil {
+		return err
+	}
+	pay, err := gw.CreatePayment(ctx, order)
+	if err != nil {
+		return err
+	}
+	order.Gateway = gw.Name()
+	order.GatewayTradeNo = pay.TradeNo
+	order.PaymentURI = pay.URL
+	order.PayAddress = pay.QRCode
+	if err := s.paymentOrderRepo.UpdateGatewayInfo(ctx, order.ID, order.Gateway, pay.TradeNo, pay.URL, pay.QRCode); err != nil {
+		return fmt.Errorf("save epay gateway info: %w", err)
+	}
+	return nil
+}
+
+// HandleEpayNotify 处理易支付异步回调：验签、金额校验、幂等激活。
+func (s *PaymentService) HandleEpayNotify(ctx context.Context, method string, params map[string]string) (string, error) {
+	gw, err := s.epayGatewayFor(method)
+	if err != nil {
+		return "", err
+	}
+	notify, err := gw.VerifyNotify(params)
+	if err != nil {
+		return "", err
+	}
+	if notify.OutTradeNo == "" {
+		return "", errors.New("missing out_trade_no")
+	}
+	if notify.Status != "" && notify.Status != "TRADE_SUCCESS" && notify.Status != "SUCCESS" {
+		return "", fmt.Errorf("trade not success: %s", notify.Status)
+	}
+	order, err := s.paymentOrderRepo.GetByOrderNo(ctx, notify.OutTradeNo)
+	if err != nil {
+		return "", err
+	}
+	if order == nil {
+		return "", errors.New("order not found")
+	}
+	if order.PaymentMethod != method {
+		return "", fmt.Errorf("payment method mismatch: %s", order.PaymentMethod)
+	}
+	if math.Abs(notify.Amount-order.FinalAmount) > 0.01 {
+		return "", fmt.Errorf("amount mismatch: notify=%v order=%v", notify.Amount, order.FinalAmount)
+	}
+	tradeNo := notify.TradeNo
+	if tradeNo == "" {
+		tradeNo = "EPAY:" + order.OrderNo
+	}
+	now := time.Now()
+	updated, err := s.paymentOrderRepo.MarkPaidIfPending(ctx, order.ID, tradeNo, order.FinalAmount, now)
+	if err != nil {
+		return "", err
+	}
+	if !updated {
+		return "", errors.New("order not pending")
+	}
+	_ = s.paymentOrderRepo.UpdateGatewayInfo(ctx, order.ID, gw.Name(), tradeNo, order.PaymentURI, order.PayAddress)
+	order.Status = model.PaymentStatusPaid
+	order.TxHash = &tradeNo
+	order.PaidAmount = &order.FinalAmount
+	order.PaidAt = &now
+	s.log.Info("epay order paid via notify", "order_no", order.OrderNo, "method", method, "trade_no", tradeNo, "amount", notify.Amount)
+	if s.epayAutoActivate(method) {
+		s.activateOrder(ctx, order, order.FinalAmount)
+	}
+	return "success", nil
+}
+
+func (s *PaymentService) pollEpayOrder(ctx context.Context, o *model.PaymentOrder) {
+	if time.Since(o.CreatedAt) < time.Minute {
+		return
+	}
+	gw, err := s.epayGatewayFor(o.PaymentMethod)
+	if err != nil {
+		return
+	}
+	tradeNo, paid, err := gw.QueryOrder(ctx, o)
+	if err != nil {
+		s.log.Warn("epay query order error", "order_no", o.OrderNo, "method", o.PaymentMethod, "error", err)
+		return
+	}
+	if !paid {
+		return
+	}
+	if tradeNo == "" {
+		tradeNo = "EPAY:" + o.OrderNo
+	}
+	now := time.Now()
+	updated, err := s.paymentOrderRepo.MarkPaidIfPending(ctx, o.ID, tradeNo, o.FinalAmount, now)
+	if err != nil {
+		s.log.Error("mark epay order paid", "error", err)
+		return
+	}
+	if !updated {
+		return
+	}
+	_ = s.paymentOrderRepo.UpdateGatewayInfo(ctx, o.ID, gw.Name(), tradeNo, o.PaymentURI, o.PayAddress)
+	o.Status = model.PaymentStatusPaid
+	o.TxHash = &tradeNo
+	o.PaidAmount = &o.FinalAmount
+	o.PaidAt = &now
+	s.log.Info("epay order paid via query", "order_no", o.OrderNo, "method", o.PaymentMethod, "trade_no", tradeNo)
+	if s.epayAutoActivate(o.PaymentMethod) {
+		s.activateOrder(ctx, o, o.FinalAmount)
 	}
 }
 
@@ -977,6 +1140,8 @@ func (s *PaymentService) pollPendingOrders() {
 			s.matchTRC20(ctx, o, trcTransfers, trcCfg)
 		case model.PaymentMethodUSDTERC20:
 			s.matchERC20(ctx, o, ercByNetwork, ercCfg)
+		case model.PaymentMethodWechat, model.PaymentMethodAlipay:
+			s.pollEpayOrder(ctx, o)
 		}
 	}
 }

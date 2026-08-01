@@ -137,6 +137,7 @@ func Run() {
 	couponValidateHandler := handler.NewCouponValidateHandler(couponService)
 	adminOrderHandler := handler.NewAdminOrderHandler(paymentOrderRepo, userService)
 	adminPaymentHandler := handler.NewAdminPaymentHandler(settingRepo, paymentService)
+	paymentNotifyHandler := handler.NewPaymentNotifyHandler(paymentService)
 	adminCommissionHandler := handler.NewAdminCommissionHandler(commissionService)
 	userExtrasHandler := handler.NewUserExtrasHandler(userService, ticketService, notificationService, commissionService)
 	adminMailHandler := handler.NewAdminMailHandler(mailService, userService)
@@ -146,6 +147,9 @@ func Run() {
 	opts.Logger = logger
 	opts.RegisterRoutes = func(api *gin.RouterGroup) {
 		healthHandler.RegisterRoutes(api)
+
+		// 第三方支付网关异步回调（公开，网关验签）
+		api.POST("/payment/notify/:method", paymentNotifyHandler.Notify)
 
 		// 公开套餐接口
 		plans := api.Group("/plans")
@@ -351,10 +355,10 @@ func Run() {
 			{
 				adminMail.GET("/templates", rbacMiddleware.RequirePermission("system.read"), adminMailHandler.ListTemplates)
 				adminMail.PUT("/templates/:id", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.UpdateTemplate)
-			adminMail.POST("/templates/reload", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.ReloadCache)
-			adminMail.POST("/test", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendTestMail)
-			adminMail.POST("/send", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendMail)
-			adminMail.POST("/broadcast", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.BroadcastMail)
+				adminMail.POST("/templates/reload", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.ReloadCache)
+				adminMail.POST("/test", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendTestMail)
+				adminMail.POST("/send", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendMail)
+				adminMail.POST("/broadcast", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.BroadcastMail)
 				// SMTP 配置管理（保存后即时刷新内存，无需重启）
 				adminMail.GET("/smtp-config", rbacMiddleware.RequirePermission("system.read"), adminMailHandler.GetSMTPConfig)
 				adminMail.PUT("/smtp-config", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.UpdateSMTPConfig)

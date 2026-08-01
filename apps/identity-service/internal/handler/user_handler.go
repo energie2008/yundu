@@ -443,8 +443,8 @@ func (h *UserHandler) ListPaymentMethods(c *gin.Context) {
 		Networks []string `json:"networks,omitempty"`
 	}
 	methods := []paymentMethod{
-		{Method: model.PaymentMethodAlipay, Name: "支付宝", Currency: "CNY", Enabled: alipay.Enabled, Fiat: true},
-		{Method: model.PaymentMethodWechat, Name: "微信支付", Currency: "CNY", Enabled: wechat.Enabled, Fiat: true},
+		{Method: model.PaymentMethodAlipay, Name: "支付宝", Currency: "CNY", Enabled: alipay.Enabled && alipay.Epay.Configured(), Fiat: true},
+		{Method: model.PaymentMethodWechat, Name: "微信支付", Currency: "CNY", Enabled: wechat.Enabled && wechat.Epay.Configured(), Fiat: true},
 		{Method: model.PaymentMethodUSDTTRC20, Name: "USDT-TRC20", Currency: "USDT", Enabled: trc20.Enabled && trc20.Address != "", Fiat: false, Network: "tron"},
 		{Method: model.PaymentMethodUSDTERC20, Name: "USDT", Currency: "USDT", Enabled: erc20.Enabled && erc20.Address != "" && len(erc20.EnabledNetworks()) > 0, Fiat: false, Network: erc20.Network, Networks: erc20.EnabledNetworks()},
 	}

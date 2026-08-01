@@ -105,6 +105,12 @@ func Run() {
 
 	r.Any("/sub/*action", subscriptionProxy)
 
+	// 支付网关异步回调：独立验签保护，不参与登录/注册限流
+	notifyAPI := r.Group("/api/v1")
+	{
+		notifyAPI.POST("/payment/notify/:method", identityProxy)
+	}
+
 	public := r.Group("/api/v1")
 	// 公开接口：登录 5 次/分钟、注册 3 次/小时（按 IP），登录失败累计触发防暴力破解锁定
 	public.Use(gwmiddleware.RateLimitMiddleware(redisClient))
