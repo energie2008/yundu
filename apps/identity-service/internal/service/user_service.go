@@ -1468,21 +1468,15 @@ func (s *UserService) RefreshMailConfig(ctx context.Context) {
 		return
 	}
 	if s.mailSvc != nil {
-		baseURL := "http://localhost:3000"
-		siteName := "YunDu"
-		urlSetting, err := s.settings.GetByGroupKey(ctx, "general", "frontend_url")
-		if err == nil && urlSetting != nil {
-			var url string
-			if json.Unmarshal(urlSetting.ValueJSON, &url) == nil && url != "" {
-				baseURL = url
-			}
+		baseURL := "https://7.tiktokplay.na.am"
+		siteName := "yundu云渡服务"
+		// 站点地址/名称优先读 general 组（系统设置页面保存的规范键），
+		// 兼容历史数据里可能存在的 site 组，保证“站点地址常换”时邮件模板自动跟随。
+		if v := s.readSiteSetting(ctx, "frontend_url", "general", "site"); v != "" {
+			baseURL = v
 		}
-		nameSetting, err := s.settings.GetByGroupKey(ctx, "general", "app_name")
-		if err == nil && nameSetting != nil {
-			var name string
-			if json.Unmarshal(nameSetting.ValueJSON, &name) == nil && name != "" {
-				siteName = name
-			}
+		if v := s.readSiteSetting(ctx, "app_name", "general", "site"); v != "" {
+			siteName = v
 		}
 		if cfg != nil {
 			cfg.BaseURL = baseURL
@@ -1494,6 +1488,26 @@ func (s *UserService) RefreshMailConfig(ctx context.Context) {
 			s.logger.Warn("failed to reload mail template cache", "error", err)
 		}
 	}
+}
+
+// readSiteSetting 依次从候选组读取站点设置字符串值。
+func (s *UserService) readSiteSetting(ctx context.Context, key string, groups ...string) string {
+	for _, group := range groups {
+		setting, err := s.settings.GetByGroupKey(ctx, group, key)
+		if err != nil || setting == nil {
+			continue
+		}
+		var v string
+		if json.Unmarshal(setting.ValueJSON, &v) == nil && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// ListBroadcastEmails 按群发范围返回收件人邮箱列表。
+func (s *UserService) ListBroadcastEmails(ctx context.Context, scope string, planID *uuid.UUID, emails []string) ([]string, error) {
+	return s.users.ListBroadcastEmails(ctx, scope, planID, emails)
 }
 
 var ErrUserNotFound = fmt.Errorf("user not found")

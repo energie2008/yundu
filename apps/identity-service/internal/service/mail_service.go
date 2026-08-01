@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/airport-panel/identity-service/internal/model"
 	"github.com/airport-panel/identity-service/internal/repo"
@@ -50,8 +52,8 @@ func NewMailService(mailRepo *repo.MailTemplateRepo, logger *slog.Logger) *MailS
 		repo:     mailRepo,
 		logger:   logger,
 		cache:    make(map[string]*model.MailTemplate),
-		siteName: "YunDu",
-		siteURL:  "http://localhost:3000",
+		siteName: "yundu云渡服务",
+		siteURL:  "https://7.tiktokplay.na.am",
 	}
 }
 
@@ -425,4 +427,67 @@ func (s *MailService) SendTestMail(ctx context.Context, to, subject, body string
 
 	sender := NewSMTPSender(cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.From)
 	return sender.Send(ctx, to, subject, body)
+}
+
+// SendBroadcast 全局邮件群发（促销/通知）。
+// 同一封邮件发送给一批收件人；按 SMTP 实际发送结果统计成功/失败。
+// 并发数固定为 4，避免瞬间打爆 SMTP 连接；单封发送成功后短暂休眠平滑节流。
+func (s *MailService) SendBroadcast(ctx context.Context, subject, body string, emails []string) (int, int, error) {
+	cfg := s.getSMTPConfig()
+	if !cfg.Enabled {
+		return 0, 0, ErrMailNotConfigured
+	}
+	if len(emails) == 0 {
+		return 0, 0, errors.New("no recipients")
+	}
+
+	siteName, siteURL := s.getSiteInfo()
+	data := map[string]interface{}{
+		"SiteName": siteName,
+		"SiteURL":  siteURL,
+	}
+	renderedSubject, err := s.renderPlaceholders(subject, data)
+	if err != nil {
+		return 0, 0, err
+	}
+	renderedBody, err := s.renderPlaceholders(body, data)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	sender := NewSMTPSender(cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.From)
+	const workers = 4
+	jobs := make(chan string)
+	var sent, failed atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for to := range jobs {
+				if err := sender.Send(ctx, to, renderedSubject, renderedBody); err != nil {
+					s.logger.Warn("broadcast email failed", "to", to, "subject", renderedSubject, "error", err)
+					failed.Add(1)
+				} else {
+					sent.Add(1)
+					time.Sleep(60 * time.Millisecond)
+				}
+			}
+		}()
+	}
+	for _, to := range emails {
+		select {
+		case jobs <- to:
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return int(sent.Load()), int(failed.Load()), ctx.Err()
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	s.logger.Info("broadcast email completed",
+		"total", len(emails), "sent", sent.Load(), "failed", failed.Load(), "subject", renderedSubject)
+	return int(sent.Load()), int(failed.Load()), nil
 }

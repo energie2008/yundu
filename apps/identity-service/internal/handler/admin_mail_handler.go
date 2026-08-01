@@ -120,6 +120,42 @@ func (h *AdminMailHandler) SendMail(c *gin.Context) {
 	server.OK(c, gin.H{"sent": true, "to": req.To})
 }
 
+// BroadcastMail POST /api/v1/admin/mail/broadcast - 全局邮件群发（促销/通知）
+func (h *AdminMailHandler) BroadcastMail(c *gin.Context) {
+	var req model.MailBroadcastRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		server.ValidationError(c, err.Error())
+		return
+	}
+
+	emails, err := h.userSvc.ListBroadcastEmails(c.Request.Context(), req.Scope, req.PlanID, req.Emails)
+	if err != nil {
+		server.InternalError(c, "")
+		return
+	}
+	if len(emails) == 0 {
+		server.Fail(c, config.CodeBadRequest, "no recipients matched the selected scope")
+		return
+	}
+
+	sent, failed, err := h.mailSvc.SendBroadcast(c.Request.Context(), req.Subject, req.Body, emails)
+	if err != nil {
+		if err == service.ErrMailNotConfigured {
+			server.Fail(c, config.CodeForbidden, "mail service is not configured")
+			return
+		}
+		server.Fail(c, config.CodeInternalError, "failed to send broadcast email: "+err.Error())
+		return
+	}
+
+	server.OK(c, gin.H{
+		"total":  len(emails),
+		"sent":   sent,
+		"failed": failed,
+		"scope":  req.Scope,
+	})
+}
+
 // ReloadCache POST /api/v1/admin/mail/templates/reload - 重新加载模板缓存
 func (h *AdminMailHandler) ReloadCache(c *gin.Context) {
 	if err := h.mailSvc.ReloadCache(c.Request.Context()); err != nil {

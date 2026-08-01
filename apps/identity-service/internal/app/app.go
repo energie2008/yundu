@@ -351,9 +351,10 @@ func Run() {
 			{
 				adminMail.GET("/templates", rbacMiddleware.RequirePermission("system.read"), adminMailHandler.ListTemplates)
 				adminMail.PUT("/templates/:id", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.UpdateTemplate)
-				adminMail.POST("/templates/reload", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.ReloadCache)
-				adminMail.POST("/test", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendTestMail)
-				adminMail.POST("/send", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendMail)
+			adminMail.POST("/templates/reload", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.ReloadCache)
+			adminMail.POST("/test", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendTestMail)
+			adminMail.POST("/send", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.SendMail)
+			adminMail.POST("/broadcast", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.BroadcastMail)
 				// SMTP 配置管理（保存后即时刷新内存，无需重启）
 				adminMail.GET("/smtp-config", rbacMiddleware.RequirePermission("system.read"), adminMailHandler.GetSMTPConfig)
 				adminMail.PUT("/smtp-config", rbacMiddleware.RequirePermission("system.write"), adminMailHandler.UpdateSMTPConfig)

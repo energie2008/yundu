@@ -66,6 +66,15 @@ type AdminSendMailRequest struct {
 	Data         map[string]interface{} `json:"data,omitempty"`
 }
 
+// MailBroadcastRequest 全局邮件群发（促销/通知）请求
+type MailBroadcastRequest struct {
+	Subject string   `json:"subject" binding:"required"`
+	Body    string   `json:"body" binding:"required"`
+	Scope   string   `json:"scope" binding:"required,oneof=all active plan users"`
+	PlanID  *uuid.UUID `json:"plan_id,omitempty"`
+	Emails  []string `json:"emails,omitempty"`
+}
+
 // VerifyEmailRequest 邮箱验证请求（POST）
 type VerifyEmailRequest struct {
 	Token string `json:"token" binding:"required"`

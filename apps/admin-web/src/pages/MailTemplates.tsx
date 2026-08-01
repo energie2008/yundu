@@ -8,6 +8,7 @@ import {
   RotateCw,
   Eye,
   Code2,
+  Megaphone,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -16,6 +17,8 @@ import {
   CardContent,
   Button,
   Input,
+  Select,
+  Textarea,
   Badge,
   Skeleton,
   EmptyState,
@@ -57,6 +60,31 @@ const TEMPLATE_NAME_LABELS: Record<string, string> = {
   traffic_warning: '流量预警',
   verify_code: '注册验证码',
 }
+
+// 模板编辑器的变量提示（与后端 mail_service.renderPlaceholders 对齐）
+const COMMON_VARIABLES = [
+  { token: '{{.SiteName}}', desc: '站点名称（系统设置-站点名称）' },
+  { token: '{{.SiteURL}}', desc: '站点地址（系统设置-站点地址）' },
+  { token: '{{.UserName}}', desc: '用户邮箱/昵称' },
+  { token: '{{.Code}}', desc: '注册邮箱验证码' },
+  { token: '{{.VerifyURL}}', desc: '邮箱验证链接' },
+  { token: '{{.ResetURL}}', desc: '密码重置链接' },
+  { token: '{{.OrderID}}', desc: '订单编号' },
+  { token: '{{.Amount}}', desc: '支付金额' },
+  { token: '{{.TicketSubject}}', desc: '工单主题' },
+  { token: '{{.ReplyContent}}', desc: '工单回复内容' },
+  { token: '{{.PlanName}}', desc: '套餐名称' },
+  { token: '{{.ExpireDate}}', desc: '到期日期' },
+  { token: '{{.TrafficUsed}}', desc: '已用流量' },
+  { token: '{{.TrafficTotal}}', desc: '总流量' },
+]
+
+const BROADCAST_SCOPES = [
+  { value: 'all', label: '全部活跃用户' },
+  { value: 'active', label: '有活跃订阅的用户' },
+  { value: 'plan', label: '指定套餐用户' },
+  { value: 'users', label: '手动输入邮箱列表' },
+]
 
 const PAGE_SIZE = 10
 
@@ -111,6 +139,16 @@ export default function MailTemplates() {
 
   const [reloading, setReloading] = useState(false)
 
+  // 群发邮件（全局邮件通知/促销）
+  const [broadcastOpen, setBroadcastOpen] = useState(false)
+  const [broadcastScope, setBroadcastScope] = useState('all')
+  const [broadcastPlanId, setBroadcastPlanId] = useState('')
+  const [broadcastEmails, setBroadcastEmails] = useState('')
+  const [broadcastSubject, setBroadcastSubject] = useState('')
+  const [broadcastBody, setBroadcastBody] = useState('')
+  const [broadcastPlans, setBroadcastPlans] = useState<Array<{ id: string; name: string }>>([])
+  const [broadcastSending, setBroadcastSending] = useState(false)
+
   // ===== 拉取列表 =====
   const fetchTemplates = useCallback(async () => {
     try {
@@ -131,6 +169,15 @@ export default function MailTemplates() {
 
   useEffect(() => {
     fetchTemplates()
+    api
+      .get<unknown>(EP.PLANS, { params: { page: 1, page_size: 200 } })
+      .then((data) => {
+        const items = normalizeList<{ id: string; name: string }>(data)
+        setBroadcastPlans(items)
+      })
+      .catch(() => {
+        setBroadcastPlans([])
+      })
   }, [fetchTemplates])
 
   const filtered = useMemo(() => {
@@ -259,6 +306,60 @@ export default function MailTemplates() {
     }
   }
 
+  // ===== 群发邮件 =====
+  const openBroadcast = () => {
+    setBroadcastScope('all')
+    setBroadcastPlanId('')
+    setBroadcastEmails('')
+    setBroadcastSubject('')
+    setBroadcastBody('')
+    setBroadcastOpen(true)
+  }
+
+  const handleBroadcast = async () => {
+    if (!broadcastSubject.trim() || !broadcastBody.trim()) {
+      toast({ title: '请填写邮件主题和正文', variant: 'destructive' })
+      return
+    }
+    const emails = broadcastScope === 'users'
+      ? broadcastEmails.split(/[\n,，;；]+/).map((s) => s.trim()).filter(Boolean)
+      : []
+    if (broadcastScope === 'users' && emails.length === 0) {
+      toast({ title: '请至少输入一个收件邮箱', variant: 'destructive' })
+      return
+    }
+    if (broadcastScope === 'plan' && !broadcastPlanId) {
+      toast({ title: '请选择套餐', variant: 'destructive' })
+      return
+    }
+    const scopeLabel = BROADCAST_SCOPES.find((s) => s.value === broadcastScope)?.label || broadcastScope
+    if (!window.confirm(`确认向「${scopeLabel}」群发邮件？发送后无法撤回。`)) return
+    try {
+      setBroadcastSending(true)
+      const resp = await api.post<{ total: number; sent: number; failed: number }>(EP.MAIL_BROADCAST, {
+        subject: broadcastSubject,
+        body: broadcastBody,
+        scope: broadcastScope,
+        plan_id: broadcastScope === 'plan' ? broadcastPlanId : undefined,
+        emails,
+      })
+      toast({
+        title: '群发完成',
+        description: `共 ${resp.total} 人，成功 ${resp.sent}，失败 ${resp.failed}`,
+        variant: resp.failed > 0 ? 'default' : 'success',
+      })
+      setBroadcastOpen(false)
+    } catch (err) {
+      toast({
+        title: '群发失败',
+        description: err instanceof ApiError ? err.message : '请稍后重试',
+        variant: 'destructive',
+      })
+    } finally {
+      setBroadcastSending(false)
+    }
+  }
+
   // ===== 预览 =====
   const openPreview = (tpl: MailTemplate) => {
     setPreviewing(tpl)
@@ -295,6 +396,14 @@ export default function MailTemplates() {
           >
             <RotateCw className={`w-4 h-4 mr-1 ${reloading ? 'animate-spin' : ''}`} />
             {reloading ? '重载中...' : '重载模板'}
+          </Button>
+          <Button
+            size="sm"
+            className="bg-indigo-600 hover:bg-indigo-500"
+            onClick={openBroadcast}
+          >
+            <Megaphone className="w-4 h-4 mr-1" />
+            群发邮件
           </Button>
         </div>
       </div>
@@ -503,6 +612,20 @@ export default function MailTemplates() {
                 支持 HTML 语法与变量占位符，编辑后点击保存将立即生效
               </p>
             </div>
+            <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-3">
+              <p className="text-xs font-medium text-zinc-400 mb-2">可用变量</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                {COMMON_VARIABLES.map((v) => (
+                  <div key={v.token} className="flex items-center justify-between gap-2 text-xs">
+                    <code className="font-mono text-sky-400 whitespace-nowrap">{v.token}</code>
+                    <span className="text-zinc-500 truncate">{v.desc}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-500 mt-2">
+                站点名称与站点地址自动读取「系统设置-基础设置」，修改后无需改模板
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -518,6 +641,90 @@ export default function MailTemplates() {
               disabled={saving}
             >
               {saving ? '保存中...' : '保存'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 群发邮件对话框 */}
+      <Dialog open={broadcastOpen} onOpenChange={setBroadcastOpen}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-100 max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              <span className="inline-flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-indigo-400" />
+                全局邮件通知 / 促销群发
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-zinc-300 text-sm">收件范围 *</Label>
+              <Select value={broadcastScope} onChange={(e) => setBroadcastScope(e.target.value)}>
+                {BROADCAST_SCOPES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </Select>
+            </div>
+            {broadcastScope === 'plan' && (
+              <div className="space-y-2">
+                <Label className="text-zinc-300 text-sm">套餐 *</Label>
+                <Select value={broadcastPlanId} onChange={(e) => setBroadcastPlanId(e.target.value)}>
+                  <option value="">请选择套餐</option>
+                  {broadcastPlans.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
+            {broadcastScope === 'users' && (
+              <div className="space-y-2">
+                <Label className="text-zinc-300 text-sm">收件邮箱 *</Label>
+                <Textarea
+                  value={broadcastEmails}
+                  onChange={(e) => setBroadcastEmails(e.target.value)}
+                  placeholder={'每行一个邮箱，支持逗号/分号分隔\nuser1@example.com\nuser2@example.com'}
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100 min-h-[90px] font-mono text-xs"
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label className="text-zinc-300 text-sm">邮件主题 *</Label>
+              <Input
+                value={broadcastSubject}
+                onChange={(e) => setBroadcastSubject(e.target.value)}
+                placeholder="支持 {{.SiteName}} / {{.SiteURL}} 变量"
+                className="bg-zinc-800 border-zinc-700 text-zinc-100"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-zinc-300 text-sm">邮件正文（HTML）*</Label>
+              <textarea
+                value={broadcastBody}
+                onChange={(e) => setBroadcastBody(e.target.value)}
+                placeholder="<html><body>促销/通知内容...</body></html>"
+                spellCheck={false}
+                className="w-full bg-zinc-950 border border-zinc-700 text-zinc-300 font-mono text-xs leading-6 p-3 rounded-md resize-y focus:outline-none min-h-[220px]"
+              />
+              <p className="text-xs text-zinc-500">
+                支持变量：{'{.SiteName}'} / {'{.SiteURL}'} / {'{.UserName}'}，站点信息自动读取系统设置
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              onClick={() => setBroadcastOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              className="bg-indigo-600 hover:bg-indigo-500"
+              onClick={handleBroadcast}
+              disabled={broadcastSending}
+            >
+              {broadcastSending ? '发送中...' : '确认群发'}
             </Button>
           </DialogFooter>
         </DialogContent>

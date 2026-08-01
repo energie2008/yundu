@@ -64,6 +64,60 @@ func (r *UserRepo) Create(ctx context.Context, user *model.User) error {
 	).Scan(&user.CreatedAt, &user.UpdatedAt, &user.UUID)
 }
 
+// ListBroadcastEmails 按收件范围筛选全局群发邮件的收件人邮箱。
+// scope: all=全部活跃用户 / active=有活跃订阅 / plan=指定套餐活跃订阅 / users=指定邮箱列表
+func (r *UserRepo) ListBroadcastEmails(ctx context.Context, scope string, planID *uuid.UUID, emails []string) ([]string, error) {
+	switch scope {
+	case "users":
+		seen := make(map[string]bool)
+		out := make([]string, 0, len(emails))
+		for _, e := range emails {
+			email := strings.ToLower(strings.TrimSpace(e))
+			if email == "" || seen[email] {
+				continue
+			}
+			seen[email] = true
+			out = append(out, email)
+		}
+		return out, nil
+	case "active", "plan":
+		query := `
+			SELECT DISTINCT u.email
+			FROM users u
+			JOIN user_plan_subscriptions ups ON ups.user_id = u.id
+				AND ups.status = 'active' AND ups.deleted_at IS NULL
+			WHERE u.deleted_at IS NULL AND u.status = 'active' AND u.email <> ''`
+		if scope == "plan" && planID != nil {
+			query += ` AND ups.plan_id = $1`
+			return r.queryEmails(ctx, query, *planID)
+		}
+		return r.queryEmails(ctx, query)
+	default:
+		// all：全部活跃用户
+		query := `SELECT email FROM users WHERE deleted_at IS NULL AND status = 'active' AND email <> ''`
+		return r.queryEmails(ctx, query)
+	}
+}
+
+func (r *UserRepo) queryEmails(ctx context.Context, query string, args ...interface{}) ([]string, error) {
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		if email != "" {
+			out = append(out, email)
+		}
+	}
+	return out, rows.Err()
+}
+
 func (r *UserRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
 	query := `SELECT ` + userColumns + ` FROM users WHERE id = $1 AND deleted_at IS NULL`
 	u := &model.User{}
