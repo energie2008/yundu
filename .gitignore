@@ -11,6 +11,7 @@
 *.gz
 *.zip
 *.tar.gz
+*.tgz
 *.rar
 *.7z
 
@@ -53,6 +54,7 @@
 **/tmp/
 *.tmp
 *.bak
+*.bak.*
 *.pid
 *.seed
 
@@ -82,6 +84,17 @@ Thumbs.db
 
 # --- 本地编译产物（非 CI）---
 dist-local/
+
+# --- 临时目录 / 工具残留 ---
+.qoder/
+.tmp-readme/
+.tmp-*/
+
+# --- 子目录编译产物与诊断文件 ---
+apps/node-agent/agent
+apps/node-agent/node-agent-linux
+apps/node-service/node-service-linux
+info.json
 
 # --- 本地敏感文档（含密钥/VPS信息，禁止提交）---
 文档/

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/airport-panel/node-service/internal/exposure"
@@ -328,6 +329,14 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 	listenHost string,
 	creds exposure.NodeCredentials,
 ) (map[string]interface{}, error) {
+	// 排序确保 inbounds 渲染顺序稳定（修复版本号死循环，根因 #6 根治）。
+	// 双保险：① DB 层 ListByRuntimeID 已 ORDER BY priority, id（node_repo.go，id 作稳定 tiebreaker）
+	// ② 此处渲染入口 sort.Slice 按 ID 排序，覆盖所有走 buildConfigViaKernelRender 的路径（xray + sing-box）。
+	// 排序稳定后 hash 不再漂移，无需 panic 断言或 debounce 防抖。
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].ID.String() < nodes[j].ID.String()
+	})
+
 	inbounds := make([]interface{}, 0)
 	hasNodes := false
 	var degradeEvents []CapabilityLostEvent

@@ -1135,8 +1135,17 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 	s.injectNginxVhosts(freshConfig, nodes)
 	s.injectTrafficQuota(freshConfig, nodes)
 	// P2 翻转：sing-box 配置中嵌入 xray 配置，Agent 拉取后分发到 xray 内核（懒加载）
-	s.injectXrayConfig(ctx, freshConfig, rt)
+	// 返回 xray 节点列表，用于后续更新 lpv/dispatch_status（xhttp 节点挂在 xray runtime 下，
+	// 但配置通过 _xray_config 嵌入 sing-box 配置下发，需同步状态避免面板显示"下发失败"）
+	xrayNodes := s.injectXrayConfig(ctx, freshConfig, rt)
 	freshHash := pkg.HashContent(freshConfig)
+	// 合并 sing-box + xray 节点用于状态更新（lpv/dispatch_status）
+	allNodes := nodes
+	if len(xrayNodes) > 0 {
+		allNodes = make([]*model.Node, 0, len(nodes)+len(xrayNodes))
+		allNodes = append(allNodes, nodes...)
+		allNodes = append(allNodes, xrayNodes...)
+	}
 
 	cv, err := s.deploymentRepo.GetLatestActiveConfigVersion(ctx, model.ScopeTypeRuntime, runtimeID)
 	if err != nil {
@@ -1162,15 +1171,8 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 		_ = s.deploymentRepo.CreateConfigVersion(ctx, cv)
 		// P3-1: 构建加密 Payload Manifest 并持久化（兼容期双写，失败不阻断明文配置下发）
 		s.tryCreatePayload(ctx, cv, runtimeType)
-		// P1-2: 更新该 runtime 下所有节点的 last_published_version
-		s.updateNodesPublishedVersion(ctx, nodes, cv.VersionNo)
-		// P2-1: 标记配置下发状态为 pending，推送后更新为 pushed/failed
-		s.markNodesDispatchStatus(ctx, nodes, "pending", cv.VersionNo, "")
-		if pushErr := s.pushConfigToRuntime(ctx, runtimeID, cv); pushErr != nil {
-			s.markNodesDispatchStatus(ctx, nodes, "failed", cv.VersionNo, pushErr.Error())
-		} else {
-			s.markNodesDispatchStatus(ctx, nodes, "pushed", cv.VersionNo, "")
-		}
+		// B-收口：状态流转（lpv→pending→push→pushed/failed）收口到 dispatchAndPush
+		s.dispatchAndPush(ctx, runtimeID, allNodes, cv)
 		return cv, nil
 	}
 
@@ -1193,15 +1195,8 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 		_ = s.deploymentRepo.CreateConfigVersion(ctx, newCv)
 		// P3-1: 构建加密 Payload Manifest 并持久化（兼容期双写，失败不阻断明文配置下发）
 		s.tryCreatePayload(ctx, newCv, runtimeType)
-		// P1-2: 更新该 runtime 下所有节点的 last_published_version
-		s.updateNodesPublishedVersion(ctx, nodes, newCv.VersionNo)
-		// P2-1: 标记配置下发状态为 pending，推送后更新为 pushed/failed
-		s.markNodesDispatchStatus(ctx, nodes, "pending", newCv.VersionNo, "")
-		if pushErr := s.pushConfigToRuntime(ctx, runtimeID, newCv); pushErr != nil {
-			s.markNodesDispatchStatus(ctx, nodes, "failed", newCv.VersionNo, pushErr.Error())
-		} else {
-			s.markNodesDispatchStatus(ctx, nodes, "pushed", newCv.VersionNo, "")
-		}
+		// B-收口：状态流转（lpv→pending→push→pushed/failed）收口到 dispatchAndPush
+		s.dispatchAndPush(ctx, runtimeID, allNodes, newCv)
 		return newCv, nil
 	}
 
@@ -1218,11 +1213,39 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 	// P3-N: 配置未变化时也注入流量限额元数据
 	s.injectTrafficQuota(cloned, nodes)
 	// P2 翻转：配置未变化时也注入 xray 配置
-	s.injectXrayConfig(ctx, cloned, rt)
+	// 801 修复：捕获返回的 xray 节点，若其 lpv 与当前版本不一致则补更新
+	// （旧代码创建的版本可能未更新 xray 节点 lpv，此处兜底修正）
+	xrayNodes = s.injectXrayConfig(ctx, cloned, rt)
+	if len(xrayNodes) > 0 {
+		needsUpdate := false
+		for _, xn := range xrayNodes {
+			if xn.LastPublishedVersion != cv.VersionNo {
+				needsUpdate = true
+				break
+			}
+		}
+		if needsUpdate {
+			allNodes = make([]*model.Node, 0, len(nodes)+len(xrayNodes))
+			allNodes = append(allNodes, nodes...)
+			allNodes = append(allNodes, xrayNodes...)
+			s.updateNodesPublishedVersion(ctx, allNodes, cv.VersionNo)
+		}
+	}
 	// 注入 _audit_rules 禁用 agent 端错误的 SSRF 规则（把域名放在 ip 字段导致 xray 报错），
 	// SSRF/BT 阻断已由服务端 kernelrender.InjectAuditRules 正确注入（IP CIDR 格式）。
 	s.injectAuditRulesCompat(cloned)
 	cv.ContentJSON = cloned
+
+	// 801 修复：path3（hash 不变）也更新 dispatch_status
+	// 当 agent 重启后 version=0 触发 re-fetch，config hash 未变走 path3，
+	// 但 dispatch_status 仍需更新为 pushed，否则旧 failed 状态永远不会被清除
+	path3AllNodes := nodes
+	if len(xrayNodes) > 0 {
+		path3AllNodes = make([]*model.Node, 0, len(nodes)+len(xrayNodes))
+		path3AllNodes = append(path3AllNodes, nodes...)
+		path3AllNodes = append(path3AllNodes, xrayNodes...)
+	}
+	s.markNodesDispatchStatus(ctx, path3AllNodes, "pushed", cv.VersionNo, "")
 
 	return cv, nil
 }
@@ -1289,6 +1312,56 @@ func (s *DeploymentService) markNodesDispatchStatus(ctx context.Context, nodes [
 	if err := s.nodeRepo.UpdateDispatchStatus(ctx, nodeIDs, status, version, errMsg); err != nil {
 		s.logger.Warn("mark nodes dispatch status failed",
 			"status", status, "version", version, "error", err)
+	}
+}
+
+// dispatchAndPush B-收口：封装配置下发的状态流转（lpv更新 → pending → push → pushed/failed）。
+// 收口 path1（cv==nil）和 path2（hash变）的重复逻辑，确保"pending→pushed/failed"流转只在一处定义。
+// path3（hash不变）不需要 push，仍直接调用 markNodesDispatchStatus("pushed")。
+func (s *DeploymentService) dispatchAndPush(ctx context.Context, runtimeID uuid.UUID, allNodes []*model.Node, cv *model.ConfigVersion) {
+	s.updateNodesPublishedVersion(ctx, allNodes, cv.VersionNo)
+	s.markNodesDispatchStatus(ctx, allNodes, "pending", cv.VersionNo, "")
+	if pushErr := s.pushConfigToRuntime(ctx, runtimeID, cv); pushErr != nil {
+		s.markNodesDispatchStatus(ctx, allNodes, "failed", cv.VersionNo, pushErr.Error())
+	} else {
+		s.markNodesDispatchStatus(ctx, allNodes, "pushed", cv.VersionNo, "")
+	}
+}
+
+// SelfHealFailedDispatch D-自愈：清理长时间停留在 failed 的节点下发状态。
+// 复用心跳周期（10s）作为巡检触发点，无需独立 goroutine。
+// 仅处理 failed 超 5 分钟的节点：重置为 pushed，下次 agent re-fetch 时自然收敛。
+// 根因 #4 根治：避免 agent 重启后 version=0 触发 re-fetch 时旧 failed 状态永远不清除。
+func (s *DeploymentService) SelfHealFailedDispatch(ctx context.Context, runtimeID uuid.UUID, latestVersion int64) {
+	nodes, err := s.nodeRepo.ListByRuntimeID(ctx, runtimeID)
+	if err != nil {
+		return
+	}
+	var stale []*model.Node
+	cutoff := time.Now().Add(-5 * time.Minute)
+	for _, n := range nodes {
+		if n == nil || n.Metadata == nil {
+			continue
+		}
+		if status, _ := n.Metadata["_dispatch_status"].(string); status == "failed" {
+			// 以 _dispatch_time 为陈旧判定基准（UpdateDispatchStatus 每次写状态都会刷新），
+			// 避免节点其他字段更新刷新 updated_at 导致 failed 永远不被自愈。
+			// 旧数据无 _dispatch_time 时回退到 updated_at 兼容。
+			ts := n.UpdatedAt
+			if raw, ok := n.Metadata["_dispatch_time"].(string); ok {
+				if t, perr := time.Parse(time.RFC3339Nano, raw); perr == nil {
+					ts = t
+				}
+			}
+			if ts.Before(cutoff) {
+				stale = append(stale, n)
+			}
+		}
+	}
+	if len(stale) > 0 {
+		s.logger.Warn("self-heal: resetting stale failed dispatch status",
+			"runtime_id", runtimeID, "count", len(stale), "latest_version", latestVersion)
+		s.markNodesDispatchStatus(ctx, stale, "pushed", latestVersion, "")
 	}
 }
 
@@ -1990,18 +2063,22 @@ func (s *DeploymentService) injectAuditRulesCompat(config map[string]interface{}
 // 如果存在 xray 节点，渲染 xray 配置并嵌入到 sing-box 配置的 _xray_config 字段。
 // Agent 拉取 sing-box 配置后，提取 _xray_config 并应用到 xray 内核（懒加载）。
 // 这避免了需要修改心跳协议支持多 runtime 配置同步的复杂性。
-func (s *DeploymentService) injectXrayConfig(ctx context.Context, config map[string]interface{}, sbRT *model.Runtime) {
+//
+// 返回值：成功注入时返回 xray 节点列表，供调用方更新 last_published_version / dispatch_status。
+// 双核内嵌模式下 xhttp 节点挂在 xray runtime 下，配置通过 _xray_config 嵌入 sing-box 配置下发。
+// 若不返回此列表，xhttp 节点的 lpv/dispatch_status 永远不更新，面板显示"下发失败"（实际已下发）。
+func (s *DeploymentService) injectXrayConfig(ctx context.Context, config map[string]interface{}, sbRT *model.Runtime) []*model.Node {
 	if config == nil || sbRT == nil {
-		return
+		return nil
 	}
 	// P2 翻转：当前 runtime 必须是 sing-box（主内核），才嵌入 xray 配置
 	if normalizeRuntimeType(sbRT.RuntimeType) != "sing-box" {
-		return
+		return nil
 	}
 	runtimes, err := s.runtimeRepo.ListByServer(ctx, sbRT.ServerID)
 	if err != nil {
 		s.logger.Warn("injectXrayConfig: ListByServer failed", "error", err)
-		return
+		return nil
 	}
 	var xrayRT *model.Runtime
 	for _, rt := range runtimes {
@@ -2011,16 +2088,16 @@ func (s *DeploymentService) injectXrayConfig(ctx context.Context, config map[str
 		}
 	}
 	if xrayRT == nil {
-		return
+		return nil
 	}
 	// 查询 xray runtime 下的节点
 	xrayNodes, err := s.nodeRepo.ListByRuntimeID(ctx, xrayRT.ID)
 	if err != nil {
 		s.logger.Warn("injectXrayConfig: ListByRuntimeID for xray failed", "error", err)
-		return
+		return nil
 	}
 	if len(xrayNodes) == 0 {
-		return // xray runtime 无节点
+		return nil // xray runtime 无节点
 	}
 	// 渲染 xray 配置
 	xrayListenHost := ""
@@ -2031,7 +2108,7 @@ func (s *DeploymentService) injectXrayConfig(ctx context.Context, config map[str
 	xrayConfig, err := s.buildXrayConfigViaKernelRender(ctx, xrayNodes, xrayListenHost, xrayCreds)
 	if err != nil {
 		s.logger.Warn("injectXrayConfig: buildXrayConfig failed", "error", err)
-		return
+		return nil
 	}
 	// 注入 nginx vhosts 和 traffic quota 到 xray 配置
 	s.injectNginxVhosts(xrayConfig, xrayNodes)
@@ -2039,6 +2116,7 @@ func (s *DeploymentService) injectXrayConfig(ctx context.Context, config map[str
 	config["_xray_config"] = xrayConfig
 	s.logger.Info("injectXrayConfig: xray config embedded into sing-box config",
 		"xray_runtime_id", xrayRT.ID, "xray_node_count", len(xrayNodes))
+	return xrayNodes
 }
 
 // GetNodesByRuntimeID D7 修复: 返回指定 runtime 下的所有节点。
@@ -3292,72 +3370,123 @@ func (s *DeploymentService) ReportConfigResult(ctx context.Context, runtimeID uu
 		fmt.Sscanf(versionStr, "%d", &versionNo)
 	}
 
-	if versionNo > 0 {
-		cv, err := s.deploymentRepo.GetConfigVersionByVersionNo(ctx, model.ScopeTypeRuntime, runtimeID, versionNo)
-		if err != nil {
-			return err
-		}
-		if cv != nil {
-			if success {
-				_ = s.deploymentRepo.UpdateConfigVersionApplied(ctx, cv.ID)
-			}
-			// P2-1: agent 上报配置应用结果后，更新节点下发状态
-			nodes, listErr := s.nodeRepo.ListByRuntimeID(ctx, runtimeID)
-			if listErr != nil {
-				s.logger.Warn("ReportConfigResult: list nodes failed", "runtime_id", runtimeID, "error", listErr)
-			} else {
-				status := "applied"
-				errMsg := ""
-				if !success {
-					status = "failed"
-					errMsg = message
-				}
-				s.markNodesDispatchStatus(ctx, nodes, status, versionNo, errMsg)
+	if versionNo <= 0 {
+		return nil
+	}
 
-				// 部署批次推进：agent 回执走的是 runtime 维度，
-				// 而 deployment_targets 以节点维度记录。若不在此反查并推进对应 target，
-				// 批次会因 target 永远停留在 pending/applying 而卡在 running（前端一直显示"部署中"）。
-				targetStatus := model.TargetStatusSuccess
-				if !success {
-					targetStatus = model.TargetStatusFailed
-				}
-				for _, n := range nodes {
-					if n == nil {
-						continue
-					}
-					activeTargets, tErr := s.deploymentRepo.ListActiveTargetsByNodeAndVersion(ctx, n.ID, cv.ID)
-					if tErr != nil {
-						s.logger.Warn("ReportConfigResult: list active targets failed",
-							"node_id", n.ID, "version_id", cv.ID, "error", tErr)
-						continue
-					}
-					for _, t := range activeTargets {
-						updReq := &model.UpdateDeploymentResultRequest{
-							TargetID: t.ID,
-							Status:   targetStatus,
-							ApplyResult: map[string]interface{}{
-								"reported_via": "config_result",
-								"version_no":   versionNo,
-								"message":      message,
-							},
-						}
-						if !success {
-							m := message
-							updReq.ErrorMessage = &m
-						}
-						if uErr := s.UpdateDeploymentResult(ctx, t.ID, updReq); uErr != nil {
-							s.logger.Warn("ReportConfigResult: advance deployment target failed",
-								"target_id", t.ID, "batch_id", t.DeploymentBatchID, "error", uErr)
-						} else {
-							s.logger.Info("ReportConfigResult: deployment target advanced",
-								"target_id", t.ID, "batch_id", t.DeploymentBatchID, "status", targetStatus)
-						}
-					}
-				}
+	cv, err := s.deploymentRepo.GetConfigVersionByVersionNo(ctx, model.ScopeTypeRuntime, runtimeID, versionNo)
+	if err != nil {
+		return err
+	}
+	if cv == nil {
+		return nil
+	}
+	if success {
+		_ = s.deploymentRepo.UpdateConfigVersionApplied(ctx, cv.ID)
+	}
+
+	// 收集同 server 全部 node-agent runtime 的节点：ack 来自主配置应用，
+	// xray 节点配置通过 _xray_config 内嵌在同一次下发中，节点级状态必须一并闭环。
+	allNodes, listErr := s.nodesForRuntimeAndServer(ctx, runtimeID)
+	if listErr != nil {
+		s.logger.Warn("ReportConfigResult: list nodes failed", "runtime_id", runtimeID, "error", listErr)
+		return nil
+	}
+
+	status := "applied"
+	errMsg := ""
+	if !success {
+		status = "failed"
+		errMsg = message
+	}
+
+	// B-精确：只标记 lpv==versionNo 的节点为 applied/failed。
+	// 全部不匹配（延迟 ack/版本跳变/ack 挂错 runtime）时只记日志，不兜底标记全部，
+	// 否则会制造 lpv != _dispatch_version 的矛盾态。
+	var targetNodes []*model.Node
+	for _, n := range allNodes {
+		if n != nil && n.LastPublishedVersion == versionNo {
+			targetNodes = append(targetNodes, n)
+		}
+	}
+	if len(targetNodes) == 0 {
+		s.logger.Warn("ReportConfigResult: no nodes match ack version, skip node status update",
+			"runtime_id", runtimeID, "version", versionNo, "node_count", len(allNodes), "success", success)
+	} else {
+		s.markNodesDispatchStatus(ctx, targetNodes, status, versionNo, errMsg)
+	}
+
+	// 部署批次推进：agent 回执走的是 runtime 维度，
+	// 而 deployment_targets 以节点维度记录。若不在此反查并推进对应 target，
+	// 批次会因 target 永远停留在 pending/applying 而卡在 running（前端一直显示"部署中"）。
+	// 遍历同 server 全部节点，避免 ack 解析到错误 runtime 时推进错 target。
+	targetStatus := model.TargetStatusSuccess
+	if !success {
+		targetStatus = model.TargetStatusFailed
+	}
+	for _, n := range allNodes {
+		if n == nil {
+			continue
+		}
+		activeTargets, tErr := s.deploymentRepo.ListActiveTargetsByNodeAndVersion(ctx, n.ID, cv.ID)
+		if tErr != nil {
+			s.logger.Warn("ReportConfigResult: list active targets failed",
+				"node_id", n.ID, "version_id", cv.ID, "error", tErr)
+			continue
+		}
+		for _, t := range activeTargets {
+			updReq := &model.UpdateDeploymentResultRequest{
+				TargetID: t.ID,
+				Status:   targetStatus,
+				ApplyResult: map[string]interface{}{
+					"reported_via": "config_result",
+					"version_no":   versionNo,
+					"message":      message,
+				},
+			}
+			if !success {
+				m := message
+				updReq.ErrorMessage = &m
+			}
+			if uErr := s.UpdateDeploymentResult(ctx, t.ID, updReq); uErr != nil {
+				s.logger.Warn("ReportConfigResult: advance deployment target failed",
+					"target_id", t.ID, "batch_id", t.DeploymentBatchID, "error", uErr)
+			} else {
+				s.logger.Info("ReportConfigResult: deployment target advanced",
+					"target_id", t.ID, "batch_id", t.DeploymentBatchID, "status", targetStatus)
 			}
 		}
 	}
 	return nil
+}
+
+// nodesForRuntimeAndServer 返回指定 runtime 及其同 server 下所有 node-agent runtime 的启用节点。
+// 双内核内嵌模式下，xray 节点挂在 xray runtime，但配置经 _xray_config 随 sing-box 主配置下发，
+// ack 回写必须覆盖两台 runtime 的节点，否则 xray 节点状态无法闭环。
+func (s *DeploymentService) nodesForRuntimeAndServer(ctx context.Context, runtimeID uuid.UUID) ([]*model.Node, error) {
+	rt, err := s.runtimeRepo.GetByID(ctx, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	if rt == nil {
+		return nil, fmt.Errorf("runtime not found: %s", runtimeID)
+	}
+	runtimes, err := s.runtimeRepo.ListByServer(ctx, rt.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	var out []*model.Node
+	for _, r := range runtimes {
+		if r == nil || r.ProviderType != model.RuntimeProviderNodeAgent {
+			continue
+		}
+		ns, err := s.nodeRepo.ListByRuntimeID(ctx, r.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ns...)
+	}
+	return out, nil
 }
 
 // ReconcileDispatchStatusOnHeartbeat 心跳自愈：当 agent 上报版本 == 面板最新版本 且 runtime 运行中时，

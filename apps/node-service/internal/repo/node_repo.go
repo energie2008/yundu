@@ -511,7 +511,7 @@ func (r *NodeRepo) ListByRuntimeID(ctx context.Context, runtimeID uuid.UUID) ([]
 	query := fmt.Sprintf(`
 		SELECT %s
 		FROM nodes WHERE runtime_id = $1 AND deleted_at IS NULL AND is_enabled = true
-		ORDER BY priority ASC`, nodeSelectColumns)
+		ORDER BY priority ASC, id ASC`, nodeSelectColumns)
 	rows, err := r.pool.Query(ctx, query, runtimeID)
 	if err != nil {
 		return nil, err

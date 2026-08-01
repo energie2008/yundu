@@ -60,10 +60,12 @@ jobs:
             ( cd "$mod" && go mod download )
             echo "::endgroup::"
           done
-          # node-agent 需要 with_quic/with_wireguard/with_utls/with_gvisor 构建 Hysteria2/Tuic/WireGuard/WARP
+          # node-agent 需要全部 6 个功能标签：
+          #   with_utls=REALITY, with_wireguard+with_gvisor=WireGuard, with_quic=Hysteria2/Tuic,
+          #   with_grpc=gRPC传输, with_clash_api=流量统计
           # -ldflags "-X main.AgentVersion=<version>" 注入版本号,self-upgrader 据此判断是否需要升级
           echo "::group::Build node-agent"
-          ( cd apps/node-agent && go build -tags "with_quic,with_wireguard,with_utls,with_gvisor" -ldflags "-X main.AgentVersion=${AGENT_VERSION}" -o ../../dist/node-agent-${GOARCH} ./cmd/agent/ )
+          ( cd apps/node-agent && go build -tags "with_utls,with_wireguard,with_gvisor,with_quic,with_grpc,with_clash_api" -ldflags "-s -w -X main.AgentVersion=${AGENT_VERSION}" -o ../../dist/node-agent-${GOARCH} ./cmd/agent/ )
           echo "::endgroup::"
 
           echo "::group::Build node-service"

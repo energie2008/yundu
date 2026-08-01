@@ -190,28 +190,49 @@ func TestEnhancementValidator_MuxFieldExclusivity(t *testing.T) {
 	}
 }
 
-// TestEnhancementValidator_RealitySNIWarning 测试 REALITY SNI 不推荐值警告
+// TestEnhancementValidator_RealitySNIWarning 测试 REALITY SNI 不推荐值警告。
+// 用户规范统一使用 mesu.apple.com 伪装站，apple.com 不再检测；
+// bing.com / microsoft.com 仍属于被 GFW 主动探测频繁的域名，必须触发警告。
 func TestEnhancementValidator_RealitySNIWarning(t *testing.T) {
-	spec := &nodespec.NodeSpec{
-		Security: nodespec.SecurityReality,
-		Reality: &nodespec.RealityConfig{
-			SNI:         "www.apple.com", // 不推荐值
-			PrivateKey:  "key",
-			ShortID:     "id",
-			Fingerprint: "chrome",
-		},
-	}
-
-	errs := RunEnhancementValidators(spec, nil)
-	found := false
-	for _, e := range errs {
-		if e.Level == LevelWarning && containsStr(e.Message, "GFW 主动探测频繁") {
-			found = true
+	t.Run("apple.com no longer warned", func(t *testing.T) {
+		spec := &nodespec.NodeSpec{
+			Security: nodespec.SecurityReality,
+			Reality: &nodespec.RealityConfig{
+				SNI:         "www.apple.com",
+				PrivateKey:  "key",
+				ShortID:     "id",
+				Fingerprint: "chrome",
+			},
 		}
-	}
-	if !found {
-		t.Errorf("应检测到apple.com SNI警告, got: %+v", errs)
-	}
+		errs := RunEnhancementValidators(spec, nil)
+		for _, e := range errs {
+			if e.Level == LevelWarning && containsStr(e.Message, "GFW 主动探测频繁") {
+				t.Fatalf("apple.com 不应再触发 GFW 警告, got: %+v", errs)
+			}
+		}
+	})
+
+	t.Run("bing.com warned", func(t *testing.T) {
+		spec := &nodespec.NodeSpec{
+			Security: nodespec.SecurityReality,
+			Reality: &nodespec.RealityConfig{
+				SNI:         "www.bing.com", // 不推荐值
+				PrivateKey:  "key",
+				ShortID:     "id",
+				Fingerprint: "chrome",
+			},
+		}
+		errs := RunEnhancementValidators(spec, nil)
+		found := false
+		for _, e := range errs {
+			if e.Level == LevelWarning && containsStr(e.Message, "GFW 主动探测频繁") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("应检测到 bing.com SNI 警告, got: %+v", errs)
+		}
+	})
 }
 
 func containsStr(s, substr string) bool {

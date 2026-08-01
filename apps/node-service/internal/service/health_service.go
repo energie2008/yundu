@@ -53,6 +53,20 @@ func (s *HealthService) ReportHeartbeat(ctx context.Context, serverCode string, 
 		return err
 	}
 
+	// A-时序修复：agent_version 无条件更新，移出 metrics 条件块。
+	// 原逻辑在下方 metrics 条件块内更新 agent_version，首次心跳若不带 metrics（agent 刚启动
+	// 未采集到），agent_version 不更新 → pushConfigToRuntime 读到旧版本号 → 拒绝推送 _xray_config
+	// → dispatch_status 误判 failed（根因 #5 竞态）。移出后每次心跳都更新，根治竞态。
+	if req.AgentVersion != "" {
+		if server.Metadata == nil {
+			server.Metadata = make(map[string]interface{})
+		}
+		server.Metadata["agent_version"] = req.AgentVersion
+		if err := s.serverRepo.Update(ctx, server); err != nil {
+			_ = err // 不阻断心跳主流程
+		}
+	}
+
 	// 保存系统metrics到 server.Metadata（CPU/内存/磁盘/网络等）
 	// 同时将 online_users 写入 system.online_users，使 Servers 页面能展示实时在线人数。
 	// online_users 来自 agent 的 ActiveUserCount()（连接生命周期计数），精确反映当前在线状态。
@@ -85,9 +99,6 @@ func (s *HealthService) ReportHeartbeat(ctx context.Context, serverCode string, 
 		}
 		if req.Pid > 0 {
 			server.Metadata["agent_pid"] = req.Pid
-		}
-		if req.AgentVersion != "" {
-			server.Metadata["agent_version"] = req.AgentVersion
 		}
 		if err := s.serverRepo.Update(ctx, server); err != nil {
 			// metrics更新失败不阻断心跳主流程

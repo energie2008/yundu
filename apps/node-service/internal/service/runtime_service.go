@@ -9,6 +9,7 @@ import (
 	"github.com/airport-panel/node-service/internal/model"
 	"github.com/airport-panel/node-service/internal/repo"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type RuntimeService struct {
@@ -30,6 +31,22 @@ func (s *RuntimeService) RegisterRuntime(ctx context.Context, serverCode string,
 	}
 	if server == nil {
 		return nil, ErrServerNotFound
+	}
+
+	// D-注册门禁（观察模式）：低于 MinAgentVersionForP2 的 Agent 无法处理 _xray_config。
+	// 观察期仅记录 warning 不阻断，确认无误报后转强制拒绝。
+	// Agent 注册的版本号在 Metadata["agent_version"]（HTTP 顶层字段历史兼容）。
+	agentVersion := req.AgentVersion
+	if agentVersion == "" && req.Metadata != nil {
+		if v, ok := req.Metadata["agent_version"].(string); ok {
+			agentVersion = v
+		}
+	}
+	if agentVersion != "" && compareVersion(agentVersion, MinAgentVersionForP2) < 0 {
+		slog.Warn("register: agent version below minimum (observe mode, not blocking)",
+			"server_code", serverCode,
+			"agent_version", agentVersion,
+			"min_version", MinAgentVersionForP2)
 	}
 
 	primaryRT, err := s.registerRuntimeInternal(ctx, server, req)
@@ -196,7 +213,17 @@ func (s *RuntimeService) registerRuntimeInternal(ctx context.Context, server *mo
 
 	normalizedType := normalizeRuntimeType(req.RuntimeType)
 
-	existing, err := s.runtimeRepo.GetByServerAndProvider(ctx, server.ID, providerType, req.ProviderRef)
+	// 根因修复：Agent 的 RegisterRequest 不含 ProviderRef 字段（client.RegisterRequest 无此字段），
+	// 注册时 req.ProviderRef 恒为 nil。若直接用 nil 查询 provider_ref IS NULL，将无法命中
+	// 已有的 provider_ref='sing-box' 主 runtime → 进入创建分支 → 产生重复的 provider_ref=NULL runtime。
+	// 回退：ProviderRef 为 nil 且 RuntimeType 已知时，用 normalizedType 作为 provider_ref，
+	// 确保同一 server+kernel 的注册复用同一 runtime 记录，杜绝重复 runtime 产生。
+	providerRef := req.ProviderRef
+	if providerRef == nil && normalizedType != "" {
+		providerRef = &normalizedType
+	}
+
+	existing, err := s.runtimeRepo.GetByServerAndProvider(ctx, server.ID, providerType, providerRef)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +270,7 @@ func (s *RuntimeService) registerRuntimeInternal(ctx context.Context, server *mo
 		RuntimeType:         normalizedType,
 		RuntimeVersion:      req.RuntimeVersion,
 		ProviderType:        providerType,
-		ProviderRef:         req.ProviderRef,
+		ProviderRef:         providerRef,
 		ListenHost:          req.ListenHost,
 		APIPort:             req.APIPort,
 		Status:              model.RuntimeStatusActive,
@@ -253,6 +280,15 @@ func (s *RuntimeService) registerRuntimeInternal(ctx context.Context, server *mo
 	}
 
 	if err := s.runtimeRepo.Create(ctx, runtime); err != nil {
+		// A-约束兜底：仅 PostgreSQL 唯一约束冲突（23505）时重试查询已存在记录并返回，
+		// 其余错误（连接失败等）原样返回，避免把 DB 故障伪装成注册成功。
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			existing, qerr := s.runtimeRepo.GetByServerAndProvider(ctx, server.ID, providerType, providerRef)
+			if qerr == nil && existing != nil {
+				return existing, nil
+			}
+		}
 		return nil, err
 	}
 

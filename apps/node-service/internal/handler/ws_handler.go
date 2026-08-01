@@ -159,7 +159,7 @@ func (h *WSHandler) HandleWebSocket(c *gin.Context) {
 			versionStr := strconv.FormatInt(cr.GetVersion(), 10)
 			success := cr.GetSuccess()
 			errMsg := cr.GetError()
-			h.handleWSConfigResult(serverCode, versionStr, success, errMsg)
+			h.handleWSConfigResult(serverCode, versionStr, success, errMsg, cr.GetKernelType())
 			continue
 		}
 	}
@@ -167,7 +167,9 @@ func (h *WSHandler) HandleWebSocket(c *gin.Context) {
 
 // handleWSConfigResult 处理 WS 上报的配置应用结果，更新节点下发状态。
 // 与 gRPC onMessage 中的 ConfigResult 处理逻辑对齐。
-func (h *WSHandler) handleWSConfigResult(serverCode, versionStr string, success bool, errMsg string) {
+// kernelType 为 Agent 上报的应用配置内核（sing-box/xray），用于精确解析 runtime，
+// 避免 nil-ref 回退误选到 xray runtime（双内核架构下会把 sing-box 的 ack 挂到 xray 节点）。
+func (h *WSHandler) handleWSConfigResult(serverCode, versionStr string, success bool, errMsg, kernelType string) {
 	if h.deploymentService == nil || h.serverService == nil || h.runtimeService == nil {
 		h.logger.Warn("ws ConfigResult: required service missing",
 			"server_code", serverCode)
@@ -181,10 +183,15 @@ func (h *WSHandler) handleWSConfigResult(serverCode, versionStr string, success 
 		return
 	}
 	providerType := model.RuntimeProviderNodeAgent
-	rt, err := h.runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, nil)
+	var runtimeRef *string
+	if kernelType != "" {
+		ref := kernelType
+		runtimeRef = &ref
+	}
+	rt, err := h.runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, runtimeRef)
 	if err != nil || rt == nil {
 		h.logger.Warn("ws ConfigResult: runtime not found",
-			"server_code", serverCode, "error", err)
+			"server_code", serverCode, "kernel_type", kernelType, "error", err)
 		return
 	}
 	if err := h.deploymentService.ReportConfigResult(ctx, rt.ID, versionStr, success, errMsg); err != nil {

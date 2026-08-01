@@ -1056,7 +1056,14 @@ func Run() {
 					serverSrv, err := serverService.GetServerByCode(ctx, serverCode)
 					if err == nil && serverSrv != nil {
 						providerType := model.RuntimeProviderNodeAgent
-						rt, err := runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, nil)
+						// 精确解析 runtime：Agent 上报的 kernel_type（sing-box/xray）即 provider_ref，
+						// 避免 nil-ref 回退误选到 xray runtime（双内核架构下会把 sing-box 的 ack 挂到 xray 节点）。
+						var runtimeRef *string
+						if kernelType := cr.GetKernelType(); kernelType != "" {
+							ref := kernelType
+							runtimeRef = &ref
+						}
+						rt, err := runtimeService.GetRuntimeByServerAndProvider(ctx, serverSrv.ID, providerType, runtimeRef)
 						if err == nil && rt != nil {
 							if rerr := deploymentService.ReportConfigResult(ctx, rt.ID, versionStr, success, errMsg); rerr != nil {
 								logger.Warn("gRPC onMessage: ReportConfigResult failed",
