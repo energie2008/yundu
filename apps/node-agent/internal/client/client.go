@@ -58,6 +58,11 @@ func (c *Client) SetRuntimeRef(ref string) {
 	c.runtimeRef = ref
 }
 
+// ResetETag 清除配置 ETag 缓存，强制下一次 FetchConfig 全量拉取（启动 force 刷新用）。
+func (c *Client) ResetETag() {
+	c.configETag = ""
+}
+
 type apiResponse struct {
 	Code      int             `json:"code"`
 	Message   string          `json:"message"`

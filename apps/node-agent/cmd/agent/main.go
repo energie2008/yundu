@@ -863,6 +863,11 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 	}()
 
 	a.logger.Info("fetching config", "version", targetVersion)
+	forceRefresh := targetVersion == "force"
+	if forceRefresh {
+		// force 刷新：清除 ETag，避免面板返回 304 跳过重新拉取
+		a.httpClient.ResetETag()
+	}
 	// P1-9: 优先使用加密 Payload Manifest 拉取配置，失败时回退到明文 FetchConfig
 	a.fetchedViaPayload = false
 	configMap, signature, err := a.fetchConfigViaPayload(ctx, targetVersion)
@@ -871,10 +876,28 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 		configMap, signature, err = a.fetchConfigViaHTTP(ctx, targetVersion)
 		if err != nil {
 			if errors.Is(err, client.ErrNotModified) {
-				a.logger.Info("config not modified (304), skipping apply", "version", targetVersion)
-				success = true
-				errMsg = ""
-				return
+				if forceRefresh {
+					// force 刷新：忽略 304，清 ETag 后重新全量拉取
+					a.logger.Info("force refresh: ignoring 304, refetching config")
+					a.httpClient.ResetETag()
+					configMap, signature, err = a.fetchConfigViaHTTP(ctx, targetVersion)
+					if err != nil {
+						if errors.Is(err, client.ErrNotModified) {
+							a.logger.Info("config still not modified, skipping apply", "version", targetVersion)
+							success = true
+							errMsg = ""
+							return
+						}
+						errMsg = fmt.Sprintf("fetch config failed: %v", err)
+						a.logger.Error("fetch config failed", "error", err)
+						return
+					}
+				} else {
+					a.logger.Info("config not modified (304), skipping apply", "version", targetVersion)
+					success = true
+					errMsg = ""
+					return
+				}
 			}
 			errMsg = fmt.Sprintf("fetch config failed: %v", err)
 			a.logger.Error("fetch config failed", "error", err)
@@ -1087,6 +1110,7 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 					"xray_config_size", len(xrayConfigBytes))
 				// P2 翻转：缓存 xray 配置，供 debounced restart 后重新启动 xray
 				a.lastXrayConfig = xrayConfig
+				a.saveXrayConfigCache(xrayConfig)
 			}
 		}
 	}
@@ -1857,6 +1881,10 @@ func (a *Agent) runAgent(ctx context.Context) error {
 			}
 		}
 	}
+
+	// 进程重启后恢复 xray 辅内核：_xray_config 只在内存，随进程丢失；
+	// 版本与面板一致时不触发 reload，必须从磁盘缓存恢复，否则 xray 节点永久下线。
+	a.restoreXrayFromCache(ctx)
 
 	// D3: 认证后强制刷新配置
 	go func() {
