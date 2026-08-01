@@ -86,6 +86,7 @@ export default function Payments() {
         confirmations: config.confirmations,
         auto_activate: config.auto_activate,
         network: config.network,
+        api_key: config.api_key,
       })
     },
     onSuccess: () => {

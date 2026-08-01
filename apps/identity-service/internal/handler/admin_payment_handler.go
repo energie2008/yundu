@@ -139,6 +139,14 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 		server.ValidationError(c, "unsupported payment method")
 		return
 	}
+	// api_key_configured 仅用于接口展示，不应写入持久化配置
+	delete(cfg, "api_key_configured")
+	// 保存其它字段时保留已配置的 EVM API Key，避免覆盖丢失
+	if key == "erc20" {
+		if cur := h.paymentSvc.GetERC20Config(); cur.EtherscanAPIKey != "" {
+			cfg["etherscan_api_key"] = cur.EtherscanAPIKey
+		}
+	}
 
 	// 应用更新
 	if req.Enabled != nil {
@@ -185,6 +193,14 @@ func (h *AdminPaymentHandler) TogglePaymentMethod(c *gin.Context) {
 	if cfg == nil {
 		server.ValidationError(c, "unsupported payment method")
 		return
+	}
+	// api_key_configured 仅用于接口展示，不应写入持久化配置
+	delete(cfg, "api_key_configured")
+	// toggle 时同样保留已配置的 EVM API Key
+	if method == "usdt_erc20" || method == "erc20" {
+		if cur := h.paymentSvc.GetERC20Config(); cur.EtherscanAPIKey != "" {
+			cfg["etherscan_api_key"] = cur.EtherscanAPIKey
+		}
 	}
 
 	currentEnabled, _ := cfg["enabled"].(bool)
