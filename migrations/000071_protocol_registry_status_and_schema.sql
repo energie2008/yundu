@@ -385,8 +385,3 @@ INSERT INTO protocol_registry (protocol_type, transport_type, security_type, sch
 ON CONFLICT (protocol_type, transport_type, security_type, schema_version) DO UPDATE SET config_schema = EXCLUDED.config_schema, description = EXCLUDED.description, status = 'active';
 
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE protocol_registry DROP COLUMN IF EXISTS status;
--- +goose StatementEnd
