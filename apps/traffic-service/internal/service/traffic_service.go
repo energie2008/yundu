@@ -28,7 +28,6 @@ type TrafficService struct {
 	redisClient      *goredis.Client
 	eventBus         *events.Bus
 	logger           *slog.Logger
-	lastMonthlyReset time.Time
 }
 
 func NewTrafficService(trafficRepo *repo.TrafficRepo, sessionRepo *repo.SessionRepo, credentialRepo *repo.UserNodeCredentialRepo, redisClient *goredis.Client) *TrafficService {
@@ -294,7 +293,7 @@ func (s *TrafficService) StartScheduledJobs(ctx context.Context) {
 
 	go s.runMinuteTicker(ctx)
 	go s.runDailyTicker(ctx)
-	go s.runMonthlyTicker(ctx)
+	go s.runCycleResetTicker(ctx)
 }
 
 // runMinuteTicker 每分钟执行一次：检查过期订阅 + 检查超额订阅。
@@ -327,22 +326,6 @@ func (s *TrafficService) runDailyTicker(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.runDailySummary(ctx)
-		}
-	}
-}
-
-// runMonthlyTicker 每分钟检查当前日期是否为 1 号，若是且本月尚未重置则执行月度流量重置。
-func (s *TrafficService) runMonthlyTicker(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-	// 启动后立即检查一次（应对服务在 1 号启动的场景）
-	s.runMonthlyResetIfNeeded(ctx)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.runMonthlyResetIfNeeded(ctx)
 		}
 	}
 }
@@ -433,22 +416,82 @@ func (s *TrafficService) runDailySummary(ctx context.Context) {
 	)
 }
 
-// runMonthlyResetIfNeeded 检查当前日期是否为 1 号，若是且本月尚未重置则执行 ResetAllTraffic。
-// 通过 lastMonthlyReset 字段保证每月只执行一次（避免重启或多次 tick 重复重置）。
-func (s *TrafficService) runMonthlyResetIfNeeded(ctx context.Context) {
+// runCycleResetTicker 每小时检查一次是否有订阅到达周期重置点，按“购买之日”逐用户重置流量。
+// 替代旧的“每月 1 号全量清零”（导致所有用户统一按自然月重置）。
+func (s *TrafficService) runCycleResetTicker(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	// 启动后立即检查一次（应对服务在重置日启动的场景）
+	s.runCycleResetIfNeeded(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runCycleResetIfNeeded(ctx)
+		}
+	}
+}
+
+// runCycleResetIfNeeded 遍历周期订阅，对“本期已开始但尚未重置”的用户执行流量重置。
+// 锚点 = 订阅 started_at（购买之日）的月-日：每月该日 00:00 为一个新周期起点；
+// 续费只延长 expires_at，不改变重置日。一次性/不限时套餐不参与周期重置。
+func (s *TrafficService) runCycleResetIfNeeded(ctx context.Context) {
+	subs, err := s.trafficRepo.ListCycleSubscriptions(ctx)
+	if err != nil {
+		s.logger.Error("scheduled: list cycle subscriptions failed", "error", err)
+		return
+	}
 	now := time.Now()
-	if now.Day() != 1 {
-		return
+	resetCount := 0
+	for _, sub := range subs {
+		anchor := cycleResetAnchor(sub.StartedAt, now)
+		if anchor.IsZero() {
+			continue // 尚未到达第一个周期起点
+		}
+		if sub.ResetAt != nil && !sub.ResetAt.Before(anchor) {
+			continue // 本期已重置
+		}
+		if err := s.ResetTraffic(ctx, sub.UserID); err != nil {
+			s.logger.Warn("scheduled: cycle traffic reset failed",
+				"user_id", sub.UserID, "anchor", anchor.Format("2006-01-02"), "error", err)
+			continue
+		}
+		resetCount++
+		s.logger.Info("scheduled: cycle traffic reset done",
+			"user_id", sub.UserID, "anchor", anchor.Format("2006-01-02"))
 	}
-	currentMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-	if !s.lastMonthlyReset.IsZero() && !s.lastMonthlyReset.Before(currentMonth) {
-		return
+	if resetCount > 0 {
+		s.logger.Info("scheduled: cycle traffic reset completed", "users", resetCount)
 	}
-	s.logger.Info("scheduled: monthly traffic reset started", "month", currentMonth.Format("2006-01"))
-	if err := s.ResetAllTraffic(ctx); err != nil {
-		s.logger.Error("scheduled: monthly traffic reset failed", "error", err)
-		return
+}
+
+// cycleResetAnchor 计算 <= now 的最近一个周期起点。
+// 锚点基于 started_at 的月-日；当日未到则回退到上一月；未到首个锚点返回零值。
+// 处理月末溢出：如 31 日在 30 天月份取该月最后一天。
+func cycleResetAnchor(startedAt, now time.Time) time.Time {
+	loc := now.Location()
+	day := startedAt.Day()
+
+	y, m := now.Year(), now.Month()
+	candidate := time.Date(y, m, day, 0, 0, 0, 0, loc)
+	// 31 日在短月份会进位到下月，判定为锚点不在本月时回退到本月最后一天
+	if candidate.Month() != m {
+		candidate = time.Date(y, m, 1, 0, 0, 0, 0, loc).AddDate(0, 1, -1)
 	}
-	s.lastMonthlyReset = currentMonth
-	s.logger.Info("scheduled: monthly traffic reset completed", "month", currentMonth.Format("2006-01"))
+	if candidate.After(now) {
+		prev := candidate.AddDate(0, -1, 0)
+		if prev.Month() == candidate.Month() {
+			prev = time.Date(prev.Year(), prev.Month(), 1, 0, 0, 0, 0, loc).AddDate(0, 1, -1)
+		}
+		candidate = prev
+	}
+	firstAnchor := time.Date(startedAt.Year(), startedAt.Month(), day, 0, 0, 0, 0, loc)
+	if firstAnchor.Month() != startedAt.Month() {
+		firstAnchor = time.Date(startedAt.Year(), startedAt.Month(), 1, 0, 0, 0, 0, loc).AddDate(0, 1, -1)
+	}
+	if candidate.Before(firstAnchor) {
+		return time.Time{}
+	}
+	return candidate
 }

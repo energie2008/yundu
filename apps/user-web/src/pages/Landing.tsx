@@ -154,7 +154,7 @@ function PlanCard({ plan }: { plan: PlanResponse }) {
 
       <h3 className="text-lg font-semibold text-[var(--foreground)] mb-1">{plan.name}</h3>
       <p className="text-sm font-medium mb-4" style={{ color: 'var(--secondary-foreground)' }}>
-        {formatTraffic(plan.traffic_bytes)} · 每月重置
+        {formatTraffic(plan.traffic_bytes)} · 按订阅周期重置
       </p>
 
       <div className="mb-6">

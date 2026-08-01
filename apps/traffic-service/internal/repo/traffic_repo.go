@@ -249,6 +249,41 @@ func (r *TrafficRepo) ResetAllMonthlyTraffic(ctx context.Context) error {
 	return err
 }
 
+// CycleSubscription 用于按订阅周期重置流量的订阅信息。
+type CycleSubscription struct {
+	UserID    uuid.UUID
+	StartedAt time.Time
+	ExpiresAt time.Time
+	ResetAt   *time.Time
+}
+
+// ListCycleSubscriptions 列出所有按周期计费（periodic）、当前有效且带起止时间的订阅。
+// 用于按“购买之日”锚点逐用户重置流量，替代每月 1 号全量清零。
+func (r *TrafficRepo) ListCycleSubscriptions(ctx context.Context) ([]CycleSubscription, error) {
+	query := `
+		SELECT ups.user_id, ups.started_at, ups.expires_at, ups.reset_at
+		FROM user_plan_subscriptions ups
+		JOIN plans p ON p.id = ups.plan_id
+		WHERE ups.status = 'active' AND ups.deleted_at IS NULL
+		  AND p.billing_type = 'periodic'
+		  AND ups.started_at IS NOT NULL AND ups.expires_at IS NOT NULL`
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []CycleSubscription
+	for rows.Next() {
+		var s CycleSubscription
+		if err := rows.Scan(&s.UserID, &s.StartedAt, &s.ExpiresAt, &s.ResetAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // MarkExpiredSubscriptions 将所有已过期但仍标记为 active 的订阅置为 expired。
 // 返回过期的 user_id 列表（用于后续踢人通知）。
 func (r *TrafficRepo) MarkExpiredSubscriptions(ctx context.Context) ([]string, error) {
