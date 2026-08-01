@@ -955,7 +955,17 @@ func mergeRenderedLimiterMeta(metas []interface{}) interface{} {
 		if v := metaInt(mm["node_ip_limit"]); v > nodeIP {
 			nodeIP = v
 		}
-		rawUsers, _ := mm["users"].([]interface{})
+		// 兼容两种内存表示：kernelrender 直接产生 []map[string]interface{}，
+		// JSON 往返后是 []interface{}（此前只处理后者导致合并结果恒为空）
+		var rawUsers []interface{}
+		switch u := mm["users"].(type) {
+		case []interface{}:
+			rawUsers = u
+		case []map[string]interface{}:
+			for _, um := range u {
+				rawUsers = append(rawUsers, um)
+			}
+		}
 		for _, ru := range rawUsers {
 			um, ok := ru.(map[string]interface{})
 			if !ok {
@@ -1003,6 +1013,9 @@ func mergeRenderedLimiterMeta(metas []interface{}) interface{} {
 	}
 	out := make([]interface{}, 0, len(users))
 	for _, u := range users {
+		if u.speed <= 0 && u.device <= 0 && u.ip <= 0 {
+			continue
+		}
 		um := make(map[string]interface{})
 		if u.email != "" {
 			um["email"] = u.email
@@ -1023,6 +1036,9 @@ func mergeRenderedLimiterMeta(metas []interface{}) interface{} {
 	}
 	if len(out) > 0 {
 		result["users"] = out
+	}
+	if len(result) == 0 {
+		return nil
 	}
 	return result
 }

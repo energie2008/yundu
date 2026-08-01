@@ -234,15 +234,18 @@ func (m *Manager) ensureBaseLocked(ctx context.Context) error {
 		{"tc", "qdisc", "add", "dev", m.dev, "handle", "ffff:", "ingress"},
 		{"tc", "filter", "add", "dev", m.dev, "parent", "ffff:", "protocol", "ip", "prio", "1", "u32", "match", "u32", "0", "0", "action", "mirred", "egress", "redirect", "dev", m.ifb},
 	}
-	var firstErr error
+	var failed int
 	for _, c := range cmds {
 		if err := m.run(ctx, c...); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+			failed++
 		}
 	}
-	return firstErr
+	// 幂等初始化：已存在的 qdisc/class/filter 返回错误属正常现象，
+	// 不阻断后续规则应用；全部失败时才视为整形不可用。
+	if failed == len(cmds) {
+		return fmt.Errorf("tc base setup failed entirely (dev=%s ifb=%s)", m.dev, m.ifb)
+	}
+	return nil
 }
 
 func (m *Manager) addLocked(ctx context.Context, r Rule) error {
