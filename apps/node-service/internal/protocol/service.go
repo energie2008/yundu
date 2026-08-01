@@ -88,6 +88,10 @@ func (s *ProtocolService) Create(ctx context.Context, req *CreateProtocolRequest
 	if schemaVersion == "" {
 		schemaVersion = "v1"
 	}
+	status := req.Status
+	if status == "" {
+		status = "active"
+	}
 
 	p := &ProtocolRegistry{
 		ProtocolType:  req.ProtocolType,
@@ -96,6 +100,7 @@ func (s *ProtocolService) Create(ctx context.Context, req *CreateProtocolRequest
 		SchemaVersion: schemaVersion,
 		ConfigSchema:  req.ConfigSchema,
 		Description:   req.Description,
+		Status:        status,
 		IsEnabled:     true,
 	}
 
@@ -123,6 +128,9 @@ func (s *ProtocolService) Update(ctx context.Context, id uuid.UUID, req *UpdateP
 	}
 	if req.IsEnabled != nil {
 		p.IsEnabled = *req.IsEnabled
+	}
+	if req.Status != nil {
+		p.Status = *req.Status
 	}
 
 	if err := s.store.Update(ctx, p); err != nil {

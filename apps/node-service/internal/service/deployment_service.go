@@ -688,9 +688,81 @@ func (s *DeploymentService) Deploy(ctx context.Context, adminID uuid.UUID, req *
 		return nil, nil, err
 	}
 
+	// 修复：批次创建后主动推送 Phase1 配置，确保 agent 重新拉取并 ack。
+	// 此前 Publish 先 RefreshConfig 推送、后创建 batch/targets，ack 早于 targets 存在，
+	// 导致 target 永远停留在 pending、batch 永远 running（前端"部署中"）。
+	// 推送后 agent 应用配置，ReportConfigResult 会按 target_version_id 推进 target。
+	pushedRuntimeIDs := make(map[uuid.UUID]bool)
+	for _, n := range nodes {
+		if n == nil || pushedRuntimeIDs[n.RuntimeID] {
+			continue
+		}
+		pushedRuntimeIDs[n.RuntimeID] = true
+		if pushErr := s.pushConfigToRuntime(ctx, n.RuntimeID, configVersion); pushErr != nil {
+			s.logger.Warn("deploy: push config to runtime failed (heartbeat fallback will retry)",
+				"runtime_id", n.RuntimeID, "version", configVersion.VersionNo, "error", pushErr)
+		} else {
+			s.logger.Info("deploy: config pushed to runtime", "runtime_id", n.RuntimeID, "version", configVersion.VersionNo)
+		}
+	}
+
 	s.logger.Info("deployment batch created",
 		"batch_id", batch.ID, "strategy", strategy, "phases", len(phases), "targets", len(targets))
 	return batch, targets, nil
+}
+
+// ReconcileRunningBatches 惰性收口历史/异常批次：
+// 当节点实际已应用目标版本（last_published_version >= target 版本且 dispatch_status 为
+// pushed/applied）而 target 仍停留在 pending/precheck/applying/verifying 时，将 target
+// 推进为 success 并自动推进 phase/batch。用于修复 ack 早于 targets 创建导致的"部署中"卡死，
+// 以及未来 ack 丢失场景的兜底。
+func (s *DeploymentService) ReconcileRunningBatches(ctx context.Context) {
+	batches, _, err := s.deploymentRepo.ListBatches(ctx, 1, 100, model.DeploymentStatusRunning, "")
+	if err != nil {
+		return
+	}
+	for _, b := range batches {
+		targets, err := s.deploymentRepo.ListTargetsByBatchID(ctx, b.ID)
+		if err != nil {
+			continue
+		}
+		for _, t := range targets {
+			if t.Status != model.TargetStatusPending &&
+				t.Status != model.TargetStatusPrecheck &&
+				t.Status != model.TargetStatusApplying &&
+				t.Status != model.TargetStatusVerifying {
+				continue
+			}
+			node, err := s.nodeRepo.GetByID(ctx, t.TargetID)
+			if err != nil || node == nil {
+				continue
+			}
+			cv, err := s.deploymentRepo.GetConfigVersionByID(ctx, t.TargetVersionID)
+			if err != nil || cv == nil {
+				continue
+			}
+			dispStatus, _ := node.Metadata["_dispatch_status"].(string)
+			if node.LastPublishedVersion >= cv.VersionNo &&
+				(dispStatus == "applied" || dispStatus == "pushed") {
+				updReq := &model.UpdateDeploymentResultRequest{
+					TargetID: t.ID,
+					Status:   model.TargetStatusSuccess,
+					ApplyResult: map[string]interface{}{
+						"reported_via": "batch_reconcile",
+						"version_no":   cv.VersionNo,
+						"message":      "node already applied target version, reconciled",
+					},
+				}
+				if uErr := s.UpdateDeploymentResult(ctx, t.ID, updReq); uErr != nil {
+					s.logger.Warn("reconcile: advance target failed",
+						"target_id", t.ID, "batch_id", b.ID, "error", uErr)
+				} else {
+					s.logger.Info("reconcile: target advanced to success",
+						"target_id", t.ID, "batch_id", b.ID, "version", cv.VersionNo)
+				}
+			}
+		}
+	}
 }
 
 // planPhases 根据 strategy 将节点划分为多个 phase。

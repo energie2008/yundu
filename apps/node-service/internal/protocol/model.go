@@ -17,6 +17,7 @@ type ProtocolRegistry struct {
 	SchemaVersion string    `json:"schema_version"`
 	ConfigSchema  Map       `json:"config_schema"`
 	Description   *string   `json:"description,omitempty"`
+	Status        string    `json:"status"` // active/draft/deprecated
 	IsEnabled     bool      `json:"is_enabled"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -48,11 +49,13 @@ type CreateProtocolRequest struct {
 	SchemaVersion string `json:"schema_version"`
 	ConfigSchema  Map    `json:"config_schema" binding:"required"`
 	Description   *string `json:"description"`
+	Status        string `json:"status"` // active/draft/deprecated，默认 active
 }
 
 type UpdateProtocolRequest struct {
 	ConfigSchema *Map   `json:"config_schema"`
 	Description  *string `json:"description"`
+	Status       *string `json:"status"`
 	IsEnabled    *bool  `json:"is_enabled"`
 }
 
@@ -73,12 +76,17 @@ type ProtocolResponse struct {
 	SchemaVersion string    `json:"schema_version"`
 	ConfigSchema  Map       `json:"config_schema"`
 	Description   *string   `json:"description,omitempty"`
+	Status        string    `json:"status"`
 	IsEnabled     bool      `json:"is_enabled"`
 	CreatedAt     string    `json:"created_at"`
 	UpdatedAt     string    `json:"updated_at"`
 }
 
 func NewProtocolResponse(p *ProtocolRegistry) ProtocolResponse {
+	status := p.Status
+	if status == "" {
+		status = "active"
+	}
 	return ProtocolResponse{
 		ID:            p.ID,
 		ProtocolType:  p.ProtocolType,
@@ -87,6 +95,7 @@ func NewProtocolResponse(p *ProtocolRegistry) ProtocolResponse {
 		SchemaVersion: p.SchemaVersion,
 		ConfigSchema:  p.ConfigSchema,
 		Description:   p.Description,
+		Status:        status,
 		IsEnabled:     p.IsEnabled,
 		CreatedAt:     p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:     p.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),

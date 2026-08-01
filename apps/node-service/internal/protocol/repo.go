@@ -19,22 +19,22 @@ func NewProtocolRegistryRepo(pool *pgxpool.Pool) *ProtocolRegistryRepo {
 	return &ProtocolRegistryRepo{pool: pool}
 }
 
-const protocolColumns = `id, protocol_type, transport_type, security_type, schema_version, config_schema, description, is_enabled, created_at, updated_at`
+const protocolColumns = `id, protocol_type, transport_type, security_type, schema_version, config_schema, description, status, is_enabled, created_at, updated_at`
 
 func scanProtocol(row pgx.Row, p *ProtocolRegistry) error {
 	return row.Scan(
 		&p.ID, &p.ProtocolType, &p.TransportType, &p.SecurityType, &p.SchemaVersion,
-		&p.ConfigSchema, &p.Description, &p.IsEnabled, &p.CreatedAt, &p.UpdatedAt,
+		&p.ConfigSchema, &p.Description, &p.Status, &p.IsEnabled, &p.CreatedAt, &p.UpdatedAt,
 	)
 }
 
 func (r *ProtocolRegistryRepo) Create(ctx context.Context, p *ProtocolRegistry) error {
 	query := `
-		INSERT INTO protocol_registry (protocol_type, transport_type, security_type, schema_version, config_schema, description, is_enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO protocol_registry (protocol_type, transport_type, security_type, schema_version, config_schema, description, status, is_enabled)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at, updated_at`
 	return r.pool.QueryRow(ctx, query,
-		p.ProtocolType, p.TransportType, p.SecurityType, p.SchemaVersion, p.ConfigSchema, p.Description, p.IsEnabled,
+		p.ProtocolType, p.TransportType, p.SecurityType, p.SchemaVersion, p.ConfigSchema, p.Description, p.Status, p.IsEnabled,
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 }
 
@@ -69,9 +69,9 @@ func (r *ProtocolRegistryRepo) FindByCombo(ctx context.Context, protocolType, tr
 func (r *ProtocolRegistryRepo) Update(ctx context.Context, p *ProtocolRegistry) error {
 	query := `
 		UPDATE protocol_registry SET
-			config_schema = $2, description = $3, is_enabled = $4, updated_at = now()
+			config_schema = $2, description = $3, status = $4, is_enabled = $5, updated_at = now()
 		WHERE id = $1`
-	_, err := r.pool.Exec(ctx, query, p.ID, p.ConfigSchema, p.Description, p.IsEnabled)
+	_, err := r.pool.Exec(ctx, query, p.ID, p.ConfigSchema, p.Description, p.Status, p.IsEnabled)
 	return err
 }
 

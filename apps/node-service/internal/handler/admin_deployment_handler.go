@@ -159,6 +159,9 @@ func (h *AdminDeploymentHandler) ListBatches(c *gin.Context) {
 	status := model.DeploymentStatus(c.Query("status"))
 	scopeType := model.ScopeType(c.Query("scope_type"))
 
+	// 惰性收口：节点已应用但 target 未推进的历史/异常批次（修复"部署中"卡死）
+	h.deploymentService.ReconcileRunningBatches(c.Request.Context())
+
 	batches, total, err := h.deploymentService.ListBatches(c.Request.Context(), page, pageSize, status, scopeType)
 	if err != nil {
 		server.InternalError(c, "")
@@ -282,6 +285,9 @@ func (h *AdminDeploymentHandler) GetBatchResults(c *gin.Context) {
 		server.BadRequest(c, "invalid batch id")
 		return
 	}
+
+	// 惰性收口：节点已应用但 target 未推进时自动推进（修复"部署中"卡死）
+	h.deploymentService.ReconcileRunningBatches(c.Request.Context())
 
 	result, err := h.deploymentService.GetBatchResults(c.Request.Context(), batchID)
 	if err != nil {

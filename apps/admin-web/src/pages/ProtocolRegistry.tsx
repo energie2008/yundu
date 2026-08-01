@@ -40,7 +40,7 @@ interface ProtocolRegistry {
   transport_type: string
   security_type: string
   schema_version: string
-  schema_json: string
+  config_schema: Record<string, unknown>
   status: ProtocolStatus
   created_at?: string
   updated_at?: string
@@ -69,7 +69,7 @@ function getStatusBadge(status: ProtocolStatus) {
     draft: { label: '草稿', variant: 'secondary' },
     deprecated: { label: '已废弃', variant: 'destructive' },
   }
-  const v = variants[status] || variants.draft
+  const v = variants[status] || variants.active
   return <Badge variant={v.variant}>{v.label}</Badge>
 }
 
@@ -108,7 +108,7 @@ const emptyForm = {
   security_type: 'none',
   schema_version: '1',
   schema_json: '{}',
-  status: 'draft' as ProtocolStatus,
+  status: 'active' as ProtocolStatus,
 }
 
 const emptyTemplateForm = {
@@ -201,8 +201,8 @@ export default function ProtocolRegistry() {
       transport_type: p.transport_type || 'tcp',
       security_type: p.security_type || 'none',
       schema_version: p.schema_version || '1',
-      schema_json: p.schema_json || '{}',
-      status: p.status || 'draft',
+      schema_json: JSON.stringify(p.config_schema || {}, null, 2),
+      status: p.status || 'active',
     })
     setErrors({})
     setDialogOpen(true)
@@ -227,11 +227,19 @@ export default function ProtocolRegistry() {
     if (!validateForm()) return
     setSubmitting(true)
     try {
+      const payload: Record<string, unknown> = {
+        protocol_type: form.protocol_type,
+        transport_type: form.transport_type,
+        security_type: form.security_type,
+        schema_version: form.schema_version,
+        status: form.status,
+        config_schema: JSON.parse(form.schema_json),
+      }
       if (editingId) {
-        await api.patch(EP.PROTOCOL_REGISTRY_ITEM(editingId), form)
+        await api.patch(EP.PROTOCOL_REGISTRY_ITEM(editingId), payload)
         toast({ title: '更新成功', description: `协议 ${form.protocol_type} 已更新`, variant: 'success' })
       } else {
-        await api.post(EP.PROTOCOL_REGISTRY, form)
+        await api.post(EP.PROTOCOL_REGISTRY, payload)
         toast({ title: '创建成功', description: `协议 ${form.protocol_type} 已注册`, variant: 'success' })
       }
       setDialogOpen(false)
