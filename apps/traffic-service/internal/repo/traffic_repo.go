@@ -38,7 +38,6 @@ func (r *TrafficRepo) RecordUsage(ctx context.Context, userID uuid.UUID, nodeID 
 		UPDATE traffic_usage_daily
 		SET upload_bytes = upload_bytes + $4,
 		    download_bytes = download_bytes + $5,
-		    total_bytes = total_bytes + $4 + $5,
 		    updated_at = now()
 		WHERE usage_date = $1 AND user_id = $2 AND node_id IS NOT DISTINCT FROM $3`
 	tag, err := r.pool.Exec(ctx, updateQuery, date, userID, nodeID, uploadBytes, downloadBytes)
