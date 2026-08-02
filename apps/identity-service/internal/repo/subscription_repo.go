@@ -170,7 +170,7 @@ func (r *SubscriptionRepo) ListExpiringSoon(ctx context.Context, withinHours int
 		WHERE ups.status = 'active' AND ups.deleted_at IS NULL
 		  AND ups.expires_at IS NOT NULL
 		  AND ups.expires_at > now()
-		  AND ups.expires_at <= now() + ($1 || ' hours')::interval
+		  AND ups.expires_at <= now() + make_interval(hours => $1)
 		ORDER BY ups.expires_at ASC
 		LIMIT 500`
 	rows, err := r.pool.Query(ctx, query, withinHours)
