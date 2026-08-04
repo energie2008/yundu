@@ -125,7 +125,7 @@ type SBRoute struct {
 type SBConfig struct {
 	Log          map[string]interface{} `json:"log,omitempty"`
 	DNS          *SBDNS                 `json:"dns,omitempty"`
-	Inbounds     []SBInbound            `json:"inbounds"`
+	Inbounds     []SBInbound            `json:"inbounds,omitempty"`
 	Outbounds    []SBOutbound           `json:"outbounds"`
 	Route        *SBRoute               `json:"route,omitempty"`
 	Experimental map[string]interface{} `json:"experimental,omitempty"`
@@ -235,19 +235,12 @@ func (r *SingBoxRenderer) Render(nodes []nodespec.NodeSpec) ([]byte, error) {
 			Rules:   dnsRules,
 			Final:   "dns_proxy",
 		},
-		Inbounds: []SBInbound{
-			{Type: "mixed", Tag: "mixed-in", ListenPort: 7890, Sniff: true, SniffOverrideDestination: true, DomainStrategy: "prefer_ipv4"},
-			{Type: "tun", Tag: "tun-in", Address: []string{"172.19.0.1/30", "fd00::1/126"}, AutoRoute: true, Stack: "mixed", StrictRoute: true, Sniff: true, SniffOverrideDestination: true, DomainStrategy: "prefer_ipv4"},
-		},
 		Outbounds: finalOutbounds,
 		Route: &SBRoute{
 			Rules:                 routeRules,
 			Final:                 "🐟 漏网之鱼",
 			AutoDetectInterface:   true,
 			DefaultDomainResolver: "dns_local",
-		},
-		Experimental: map[string]interface{}{
-			"cache_file": map[string]interface{}{"enabled": true},
 		},
 	}
 
