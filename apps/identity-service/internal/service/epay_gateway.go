@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -129,6 +130,8 @@ func (g *EpayGateway) CreatePayment(ctx context.Context, order *model.PaymentOrd
 		return nil, fmt.Errorf("epay create payment: %w", err)
 	}
 	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(resp.Body)
+	bodyText := strings.TrimSpace(string(rawBody))
 
 	var result struct {
 		Code     int    `json:"code"`
@@ -145,7 +148,11 @@ func (g *EpayGateway) CreatePayment(ctx context.Context, order *model.PaymentOrd
 			Redirect string `json:"redirect"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(rawBody, &result); err != nil {
+		// 部分易支付平台返回纯文本错误（如“没有找到商户信息”），直接透传便于排查
+		if bodyText != "" {
+			return nil, fmt.Errorf("epay create payment failed: %s", bodyText)
+		}
 		return nil, fmt.Errorf("epay create payment decode: %w", err)
 	}
 	msg := result.Msg

@@ -849,6 +849,9 @@ func (s *PaymentService) epayAutoActivate(method string) bool {
 	}
 }
 
+// ErrEpayGatewayError 易支付网关调用失败（通道未配置/平台无可用收款账号等）
+var ErrEpayGatewayError = errors.New("epay gateway error")
+
 func (s *PaymentService) createEpayPayment(ctx context.Context, order *model.PaymentOrder) error {
 	gw, err := s.epayGatewayFor(order.PaymentMethod)
 	if err != nil {
@@ -856,7 +859,7 @@ func (s *PaymentService) createEpayPayment(ctx context.Context, order *model.Pay
 	}
 	pay, err := gw.CreatePayment(ctx, order)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %s", ErrEpayGatewayError, err.Error())
 	}
 	order.Gateway = gw.Name()
 	order.GatewayTradeNo = pay.TradeNo

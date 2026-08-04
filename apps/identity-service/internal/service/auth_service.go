@@ -382,6 +382,8 @@ func MapErrorToCode(err error) (config.ErrorCode, string) {
 		return config.CodeBadRequest, err.Error()
 	case errors.Is(err, ErrUnsupportedNetwork):
 		return config.CodeBadRequest, err.Error()
+	case errors.Is(err, ErrEpayGatewayError):
+		return config.CodeServiceUnavailable, "支付通道暂不可用，请稍后重试或联系客服（易支付网关返回异常）"
 	case errors.Is(err, ErrOrderNotPending):
 		return config.CodeConflict, err.Error()
 	case errors.Is(err, ErrTRC20Disabled):
