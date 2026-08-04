@@ -4,11 +4,13 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { EP, adaptPlan, getPeriodLabel, bytesToGB } from '../lib/endpoints';
 import type { PlanResponse, PaymentMethod, PaymentMethodsResponse, OrderResponse, CouponValidateResponse } from '../lib/endpoints';
-import { UsdtLogo } from '../components/PaymentIcons';
+import { PaymentMethodIcon } from '../components/PaymentIcons';
+import { useToast } from '../lib/toast';
 
 const EVM_NETWORK_LABELS: Record<string, string> = {
   polygon: 'Polygon',
   arbitrum: 'Arbitrum One',
+  bsc: 'BSC',
 }
 
 function formatTraffic(bytes: number): string {
@@ -45,7 +47,7 @@ function ConfirmPayCard({
   onCancel: () => void
 }) {
   if (!open) return null
-  const isUsdt = !!method && (method.method === 'usdt_trc20' || method.method === 'usdt_erc20')
+  const isUsdt = !!method && (method.method === 'usdt_trc20' || method.method === 'usdt_erc20' || method.method === 'usdt_bep20')
   const usdtTotal = totalPrice > 0 && rate > 0 ? totalPrice / rate : 0
 
   return (
@@ -97,7 +99,7 @@ function ConfirmPayCard({
           <div className="flex justify-between pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
             <span className="font-semibold" style={{ color: 'var(--foreground)' }}>支付方式</span>
             <span className="font-medium flex items-center gap-2" style={{ color: 'var(--foreground)' }}>
-              {isUsdt && <UsdtLogo size={20} />}
+              {method && <PaymentMethodIcon method={method.method} size={20} />}
               {totalPrice === 0
                 ? '优惠券全额抵扣'
                 : networkLabel
@@ -105,6 +107,11 @@ function ConfirmPayCard({
                   : method?.name || '-'}
             </span>
           </div>
+          {method?.hint && (
+            <div className="rounded-md p-2.5 text-xs mt-2" style={{ background: 'rgba(217,119,87,0.08)', border: '1px solid rgba(217,119,87,0.2)' }}>
+              <p style={{ color: 'var(--primary)' }}>⚠️ {method.hint}</p>
+            </div>
+          )}
           {totalPrice > 0 && isUsdt && usdtTotal > 0 && (
             <div className="flex justify-between">
               <span style={{ color: 'var(--muted-foreground)' }}>应付等值</span>
@@ -139,6 +146,7 @@ function ConfirmPayCard({
 export function Checkout() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const planId = searchParams.get('plan_id') || '';
   const initialPeriod = searchParams.get('period') || 'month';
 
@@ -201,11 +209,21 @@ export function Checkout() {
         navigate(`/dashboard/orders/${order.id}`);
       }
     },
+    onError: (err: Error) => {
+      toast({ title: '下单失败', description: err.message || '创建订单失败，请稍后重试', variant: 'destructive' });
+    },
   });
 
   const plan = planQuery.data;
   const methods = methodsQuery.data?.methods || [];
   const evmNetworks = methods.find(m => m.method === 'usdt_erc20')?.networks || [];
+
+  // 自动选择第一个可用支付方式
+  useEffect(() => {
+    if (!selectedMethod && methods.length > 0) {
+      setSelectedMethod(methods[0].method)
+    }
+  }, [methods, selectedMethod])
 
   useEffect(() => {
     if (selectedMethod === 'usdt_erc20') {
@@ -351,7 +369,7 @@ export function Checkout() {
                 return (
                   <label
                     key={m.method}
-                    className="flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all text-sm"
+                    className="flex flex-wrap items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all text-sm"
                     style={{
                       borderColor: isSelected ? 'var(--primary)' : 'var(--border)',
                       background: isSelected ? 'rgba(217,119,87,0.06)' : 'transparent',
@@ -366,7 +384,7 @@ export function Checkout() {
                       className="accent-purple-600"
                       style={{ accentColor: 'var(--primary)' }}
                     />
-                    <span className="text-lg">{m.icon || (m.fiat ? '💳' : '🪙')}</span>
+                    <PaymentMethodIcon method={m.method} size={26} />
                     <span className="flex-1 font-medium" style={{ color: 'var(--foreground)' }}>{m.name}</span>
                     <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                       {m.currency}
@@ -393,6 +411,13 @@ export function Checkout() {
                         })}
                       </div>
                     )}
+                    {isSelected && m.hint && (
+                      <div className="w-full mt-2 pl-8">
+                        <div className="rounded-md p-2.5 text-xs" style={{ background: 'rgba(217,119,87,0.08)', border: '1px solid rgba(217,119,87,0.2)' }}>
+                          <p style={{ color: 'var(--primary)' }}>⚠️ {m.hint}</p>
+                        </div>
+                      </div>
+                    )}
                   </label>
                 );
               })}
@@ -415,23 +440,23 @@ export function Checkout() {
             {/* 优惠码 */}
             <div className="xboard-card p-5">
               <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--foreground)' }}>优惠码</h3>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-stretch">
                 <input
                   type="text"
                   value={couponCode}
                   onChange={e => setCouponCode(e.target.value)}
                   placeholder="请输入优惠码"
-                  className="flex-1 px-3 py-2 rounded-lg border text-sm"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-lg border text-sm h-10"
                   style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--foreground)' }}
                 />
                 <button
-                onClick={() => couponMut.mutate()}
-                disabled={couponMut.isPending || !couponCode.trim()}
-                className="px-4 py-2 rounded-lg text-sm font-medium border whitespace-nowrap transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 text-center"
-                style={{ borderColor: 'var(--primary)', color: 'var(--primary)', background: 'transparent', minWidth: '72px' }}
-              >
-                {couponMut.isPending ? '验证中...' : '验证'}
-              </button>
+                  onClick={() => couponMut.mutate()}
+                  disabled={couponMut.isPending || !couponCode.trim()}
+                  className="px-4 rounded-lg text-sm font-medium border whitespace-nowrap transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 flex items-center justify-center"
+                  style={{ borderColor: 'var(--primary)', color: 'var(--primary)', background: 'transparent', minWidth: '72px' }}
+                >
+                  {couponMut.isPending ? '验证中...' : '验证'}
+                </button>
               </div>
               <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>输入优惠码可获得订单折扣</p>
               {couponResult && (
@@ -476,7 +501,7 @@ export function Checkout() {
         discount={discount}
         totalPrice={totalPrice}
         method={methodObj}
-        networkLabel={selectedMethod === 'usdt_erc20' ? (EVM_NETWORK_LABELS[selectedNetwork] || selectedNetwork) : undefined}
+        networkLabel={selectedMethod === 'usdt_erc20' ? (EVM_NETWORK_LABELS[selectedNetwork] || selectedNetwork) : (selectedMethod === 'usdt_bep20' ? 'BSC (BEP20)' : undefined)}
         rate={exchangeRate}
         submitting={orderMut.isPending}
         onConfirm={() => orderMut.mutate()}
