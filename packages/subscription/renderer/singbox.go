@@ -117,6 +117,9 @@ type SBRoute struct {
 	Final               string        `json:"final,omitempty"`
 	AutoDetectInterface bool          `json:"auto_detect_interface,omitempty"`
 	OverridePort        int           `json:"override_android_vpn,omitempty"`
+	// DefaultDomainResolver 指定默认域名解析 DNS 服务器（sing-box 1.12+ 要求，
+	// 否则 1.14 起配置无法加载；字符串为 DNS server tag，如 "dns_local"）。
+	DefaultDomainResolver interface{} `json:"default_domain_resolver,omitempty"`
 }
 
 type SBConfig struct {
@@ -223,10 +226,6 @@ func (r *SingBoxRenderer) Render(nodes []nodespec.NodeSpec) ([]byte, error) {
 			"rule_set": []string{"geosite-cn", "geoip-cn"},
 			"outbound": "direct",
 		},
-		map[string]interface{}{
-			"match":    true,
-			"outbound": "🐟 漏网之鱼",
-		},
 	}
 
 	cfg := SBConfig{
@@ -242,9 +241,10 @@ func (r *SingBoxRenderer) Render(nodes []nodespec.NodeSpec) ([]byte, error) {
 		},
 		Outbounds: finalOutbounds,
 		Route: &SBRoute{
-			Rules:               routeRules,
-			Final:               "🚀 节点选择",
-			AutoDetectInterface: true,
+			Rules:                 routeRules,
+			Final:                 "🐟 漏网之鱼",
+			AutoDetectInterface:   true,
+			DefaultDomainResolver: "dns_local",
 		},
 		Experimental: map[string]interface{}{
 			"cache_file": map[string]interface{}{"enabled": true},

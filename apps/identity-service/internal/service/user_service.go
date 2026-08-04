@@ -1272,6 +1272,12 @@ func (s *UserService) AdminChangePlan(ctx context.Context, adminID uuid.UUID, ad
 		IPLimit:           plan.IPLimit,
 		Source:            "admin_change",
 	}
+	// 按套餐时长设置到期时间：与支付激活（activateOrder）保持一致，
+	// 否则订阅接口会输出 expire=0（客户端显示 1970/1/1）。
+	if plan.DurationDays != nil && *plan.DurationDays > 0 {
+		expiresAt := now.AddDate(0, 0, *plan.DurationDays)
+		newSub.ExpiresAt = &expiresAt
+	}
 	if err := s.subs.Create(ctx, newSub); err != nil {
 		return err
 	}
