@@ -27,6 +27,7 @@ import {
 } from '@/lib/theme'
 import { api } from '@/lib/api'
 import { EP } from '@/lib/endpoints'
+import { PaymentMethodIcon } from '@/components/common/PaymentIcons'
 
 const EVM_NETWORK_OPTIONS = [
   { key: 'polygon', label: 'Polygon' },
@@ -47,16 +48,19 @@ interface PaymentMethod {
   method: string
   name: string
   enabled: boolean
-  address: string
-  amount_tolerance: number
-  confirmations: number
-  network: string
-  auto_activate: boolean
+  address?: string
+  amount_tolerance?: number
+  confirmations?: number
+  network?: string
+  auto_activate?: boolean
   api_key_configured?: boolean
   api_key?: string
   networks?: string[]
   epay?: EpayConfig
   epay_configured?: boolean
+  rpc_nodes?: string[]
+  available?: boolean
+  unavailable_reason?: string
 }
 
 interface PaymentMethodsResponse {
@@ -182,7 +186,7 @@ export default function Payments() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: ADMIN_TEXT }}>支付配置</h1>
-          <p className="text-sm mt-1" style={{ color: ADMIN_TEXT_MUTED }}>管理虚拟货币支付方式（USDT TRC20/ERC20）</p>
+          <p className="text-sm mt-1" style={{ color: ADMIN_TEXT_MUTED }}>管理 USDT 支付（TRC20 / EVM Polygon / Arbitrum One 双通道）与支付宝/微信</p>
         </div>
         <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isFetching}>
           <RefreshCw className={`w-4 h-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
@@ -263,9 +267,7 @@ export default function Payments() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${m.enabled ? 'bg-green-900/30' : 'bg-zinc-800'}`}>
-                      <CreditCard className={`w-5 h-5 ${m.enabled ? 'text-green-400' : 'text-zinc-500'}`} />
-                    </div>
+                    <PaymentMethodIcon method={m.method} size={40} />
                     <div>
                       <h3 className="text-base font-semibold" style={{ color: ADMIN_TEXT }}>{m.name}</h3>
                       <p className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>{m.network}</p>
@@ -276,16 +278,32 @@ export default function Payments() {
                   </Badge>
                 </div>
 
+                {(m.enabled && (m.method === 'usdt_trc20' || m.method === 'usdt_erc20' || m.method === 'usdt_bep20') && !m.address) && (
+                  <div className="rounded-lg p-2.5 mb-3 text-xs" style={{ background: 'rgba(205,92,77,0.08)', border: '1px solid rgba(205,92,77,0.25)', color: '#cd5c4d' }}>
+                    已启用但未配置收款地址，用户端不会显示该支付方式。
+                  </div>
+                )}
+                {(m.enabled && (m.method === 'wechat' || m.method === 'alipay') && !m.epay_configured) && (
+                  <div className="rounded-lg p-2.5 mb-3 text-xs" style={{ background: 'rgba(205,92,77,0.08)', border: '1px solid rgba(205,92,77,0.25)', color: '#cd5c4d' }}>
+                    已启用但易支付未配置（需商户ID + 密钥 + 网关地址），用户端不会显示该支付方式。
+                  </div>
+                )}
+                {m.method === 'usdt_bep20' && (
+                  <div className="rounded-lg p-2.5 mb-3 text-xs" style={{ background: 'rgba(232,163,61,0.08)', border: '1px solid rgba(232,163,61,0.25)', color: '#e8a33d' }}>
+                    BSC 自动到账依赖可用 RPC 节点（已内置可用节点）；若无法自动到账，请在编辑里更换/增加 RPC。
+                  </div>
+                )}
+
                 {editMethod === m.method ? (
                   <div className="space-y-3">
-                    {(m.method === 'usdt_trc20' || m.method === 'usdt_erc20') && (
+                    {(m.method === 'usdt_trc20' || m.method === 'usdt_erc20' || m.method === 'usdt_bep20') && (
                       <>
                         <div className="space-y-1">
                           <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>收款钱包地址</label>
                           <Input
                             value={editForm.address || ''}
                             onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-                            placeholder="输入 TRC20/ERC20 钱包地址"
+                            placeholder={m.method === 'usdt_bep20' ? '输入 BEP20 (BSC) 钱包地址' : '输入 TRC20/ERC20 钱包地址'}
                             style={{ background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
                           />
                         </div>
@@ -311,6 +329,21 @@ export default function Payments() {
                           </div>
                         </div>
                       </>
+                    )}
+                    {m.method === 'usdt_bep20' && (
+                      <div className="rounded-lg p-3 space-y-2" style={{ background: 'rgba(243,186,47,0.08)', border: '1px solid rgba(243,186,47,0.2)' }}>
+                        <p className="text-xs font-medium" style={{ color: '#d4a72c' }}>BSC RPC 节点（自动到账依赖此查询）</p>
+                        <p className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
+                          BSC 公共 RPC 对 USDT 转账日志查询全部限流（日志量超限），默认已停用。如需启用请填写可用的 RPC（每行一个，如自建节点/付费 RPC）。
+                        </p>
+                        <textarea
+                          value={(editForm.rpc_nodes || []).join('\n')}
+                          onChange={(e) => setEditForm({ ...editForm, rpc_nodes: e.target.value.split('\n').map((s: string) => s.trim()).filter(Boolean) })}
+                          rows={4}
+                          placeholder={'https://...（每行一个 RPC）'}
+                          style={{ width: '100%', background: ADMIN_INPUT_BG, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT, borderRadius: 8, padding: 8, fontSize: 12, fontFamily: 'monospace' }}
+                        />
+                      </div>
                     )}
                     {m.method === 'usdt_erc20' && (
                       <>
@@ -452,7 +485,7 @@ export default function Payments() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {(m.method === 'usdt_trc20' || m.method === 'usdt_erc20') && (
+                    {(m.method === 'usdt_trc20' || m.method === 'usdt_erc20' || m.method === 'usdt_bep20') && (
                       <>
                         <div className="flex items-center justify-between text-sm">
                           <span style={{ color: ADMIN_TEXT_MUTED }}>收款地址</span>
@@ -519,7 +552,8 @@ export default function Payments() {
         <CardContent className="p-5">
           <h3 className="text-sm font-semibold mb-2" style={{ color: ADMIN_TEXT }}>支付说明</h3>
           <ul className="space-y-1 text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
-            <li>• 系统支持 USDT TRC20（波场网络）和 USDT EVM（Polygon / Arbitrum One）支付方式</li>
+            <li>• USDT 通道：TRC20（波场网络）、EVM 双通道（Polygon / Arbitrum One，共用同一收款地址）</li>
+            <li>• BEP20(BSC) 因公共 RPC 无法查询 USDT 转账日志（日志量超限），自动到账不可用，默认停用</li>
             <li>• 配置收款地址后，用户购买套餐将生成对应网络的支付订单</li>
             <li>• 金额容差：允许用户支付的金额与应付金额的差值（用于处理精度问题）</li>
             <li>• 最小确认数：区块确认数达到此值后订单自动标记为已支付</li>

@@ -23,7 +23,7 @@ import {
   adaptOrder,
 } from '@/lib/endpoints'
 import { QRCode } from '@/components/QRCode'
-import { UsdtLogo } from '@/components/PaymentIcons'
+import { PaymentMethodIcon } from '@/components/PaymentIcons'
 
 const POLL_INTERVAL = 10000
 
@@ -90,7 +90,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={copy}
-      className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors"
+      className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors flex-shrink-0"
       style={{
         color: copied ? 'var(--success)' : 'var(--primary)',
         backgroundColor: copied ? 'rgba(95,141,78,0.1)' : 'rgba(217,119,87,0.1)',
@@ -180,9 +180,13 @@ export default function OrderDetail() {
   }
 
   const payCurrency = order.pay_currency || 'USDT-TRC20'
-  const isTRC20 = payCurrency.toUpperCase().includes('TRC20')
-  const evmLabel = isTRC20 ? 'TRC20' : (payCurrency.replace(/^USDT-\s*/i, '') || 'EVM')
+  const paymentMethod = order.payment_method || ''
+  const isTRC20 = payCurrency.toUpperCase().includes('TRC20') || paymentMethod === 'usdt_trc20'
+  const isBEP20 = payCurrency.toUpperCase().includes('BEP') || payCurrency.toUpperCase().includes('BSC') || paymentMethod === 'usdt_bep20'
+  const isERC20 = !isTRC20 && !isBEP20 && (payCurrency.toUpperCase().includes('ERC') || paymentMethod === 'usdt_erc20')
+  const evmLabel = isTRC20 ? 'TRC20' : (isBEP20 ? 'BEP20' : payCurrency.replace(/^USDT-\s*/i, '') || 'EVM')
   const displayAmount = Math.max(0, order.final_amount ?? order.amount_usdt)
+  const methodIconKey = paymentMethod || (isTRC20 ? 'usdt_trc20' : isBEP20 ? 'usdt_bep20' : isERC20 ? 'usdt_erc20' : 'usdt_trc20')
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
@@ -277,7 +281,7 @@ export default function OrderDetail() {
           <div className="rounded-lg p-4 mb-5" style={{ background: 'var(--muted)' }}>
             <div className="flex items-center justify-between mb-3 gap-3">
               <span className="text-sm flex items-center gap-2" style={{ color: 'var(--muted-foreground)' }}>
-                <UsdtLogo size={22} />
+                <PaymentMethodIcon method={methodIconKey} size={22} />
                 USDT-{evmLabel} 收款地址
               </span>
               <CopyButton text={order.pay_address} />
@@ -285,10 +289,19 @@ export default function OrderDetail() {
             <p className="text-xs font-mono break-all" style={{ color: 'var(--foreground)' }}>{order.pay_address}</p>
           </div>
 
+          {(isTRC20 || isBEP20 || isERC20) && (
+            <div className="rounded-lg p-4 mb-5" style={{ background: 'rgba(243,186,47,0.08)', border: '1px solid rgba(243,186,47,0.25)' }}>
+              <p className="text-xs leading-relaxed font-medium mb-1" style={{ color: '#d4a72c' }}>⚠️ 请勿选错网络</p>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+                请使用与订单一致的 {evmLabel} 网络转账，USDT手续费极低真实可用，优惠码见系统公告。选错网络或币种将无法自动到账。
+              </p>
+            </div>
+          )}
+
           <div className="rounded-lg p-4 mb-5" style={{ background: 'rgba(232,163,61,0.08)', border: '1px solid rgba(232,163,61,0.2)' }}>
             <p className="text-sm" style={{ color: '#e8a33d' }}>
               <Clock className="w-4 h-4 inline mr-1" />
-              请在有效期内支付 <strong style={{ color: 'var(--primary)' }}>{formatUSDT(displayAmount)} USDT</strong>（{evmLabel}网络）到上述地址，支付完成后系统将自动确认并激活您的订阅。
+              请在有效期内支付 <strong style={{ color: 'var(--primary)' }}>{formatUSDT(displayAmount)} USDT</strong>（{isBEP20 ? 'BSC (BEP20)' : evmLabel + '网络'}）到上述地址，支付完成后系统将自动确认并激活您的订阅。
             </p>
           </div>
 
@@ -367,8 +380,11 @@ export default function OrderDetail() {
 
           <div className="rounded-lg p-4 mb-5" style={{ background: 'var(--muted)' }}>
             <div className="flex justify-between items-center mb-3">
-              <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>支付方式</span>
-              <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+              <span className="text-sm flex items-center gap-2" style={{ color: 'var(--muted-foreground)' }}>
+                <PaymentMethodIcon method={order.payment_method || 'alipay'} size={22} />
+                支付方式
+              </span>
+              <span className="text-sm font-medium flex items-center gap-2" style={{ color: 'var(--foreground)' }}>
                 {order.payment_method === 'wechat' ? '微信支付' : '支付宝'}
               </span>
             </div>

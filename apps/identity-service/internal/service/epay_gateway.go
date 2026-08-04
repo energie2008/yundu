@@ -121,7 +121,9 @@ func (g *EpayGateway) CreatePayment(ctx context.Context, order *model.PaymentOrd
 	for k, v := range params {
 		form.Set(k, v)
 	}
-	apiURL := strings.TrimRight(g.cfg.GatewayURL, "/") + "/submit.php"
+	// 彩虹易支付：submit.php 用于表单自动跳转（返回 HTML/文本，服务端无法直接消费），
+	// mapi.php 用于服务端 API 调用（返回 JSON）。这里使用 mapi.php。
+	apiURL := strings.TrimRight(g.cfg.GatewayURL, "/") + "/mapi.php"
 	resp, err := g.client.PostForm(apiURL, form)
 	if err != nil {
 		return nil, fmt.Errorf("epay create payment: %w", err)
@@ -129,23 +131,55 @@ func (g *EpayGateway) CreatePayment(ctx context.Context, order *model.PaymentOrd
 	defer resp.Body.Close()
 
 	var result struct {
-		Code    int    `json:"code"`
-		Msg     string `json:"msg"`
-		TradeNo string `json:"trade_no"`
-		QRCode  string `json:"qrcode"`
-		URL     string `json:"url"`
+		Code     int    `json:"code"`
+		Msg      string `json:"msg"`
+		Message  string `json:"message"`
+		TradeNo  string `json:"trade_no"`
+		QRCode   string `json:"qrcode"`
+		URL      string `json:"url"`
+		Redirect string `json:"redirect"`
+		Data     *struct {
+			TradeNo  string `json:"trade_no"`
+			QRCode   string `json:"qrcode"`
+			URL      string `json:"url"`
+			Redirect string `json:"redirect"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("epay create payment decode: %w", err)
 	}
-	// 彩虹易支付新版本 code=1 成功，旧版本 code=0 成功
-	if result.Code != 0 && result.Code != 1 {
-		return nil, fmt.Errorf("epay create payment failed: code=%d msg=%s", result.Code, result.Msg)
+	msg := result.Msg
+	if msg == "" {
+		msg = result.Message
+	}
+	// 兼容新旧协议：code=1 为成功；部分平台错误也用 code=0，
+	// 需结合 trade_no / 支付链接 / 二维码判断是否真正创建成功。
+	tradeNo := result.TradeNo
+	if tradeNo == "" && result.Data != nil {
+		tradeNo = result.Data.TradeNo
+	}
+	payURL := result.URL
+	if payURL == "" && result.Data != nil {
+		payURL = result.Data.URL
+	}
+	if payURL == "" {
+		payURL = result.Redirect
+	}
+	if payURL == "" && result.Data != nil {
+		payURL = result.Data.Redirect
+	}
+	qrCode := result.QRCode
+	if qrCode == "" && result.Data != nil {
+		qrCode = result.Data.QRCode
+	}
+	success := result.Code == 1 || (tradeNo != "" && (payURL != "" || qrCode != ""))
+	if !success {
+		return nil, fmt.Errorf("epay create payment failed: code=%d msg=%s", result.Code, msg)
 	}
 	return &GatewayPayment{
-		URL:     result.URL,
-		QRCode:  result.QRCode,
-		TradeNo: result.TradeNo,
+		URL:     payURL,
+		QRCode:  qrCode,
+		TradeNo: tradeNo,
 	}, nil
 }
 

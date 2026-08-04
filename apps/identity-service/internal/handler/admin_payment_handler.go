@@ -41,6 +41,7 @@ func (h *AdminPaymentHandler) RegisterRoutesWithGroup(rg *gin.RouterGroup) {
 func (h *AdminPaymentHandler) ListPaymentMethods(c *gin.Context) {
 	trc20 := h.paymentSvc.GetTRC20Config()
 	erc20 := h.paymentSvc.GetERC20Config()
+	bep20 := h.paymentSvc.GetBEP20Config()
 	wechat := h.paymentSvc.GetWechatConfig()
 	alipay := h.paymentSvc.GetAlipayConfig()
 
@@ -59,7 +60,7 @@ func (h *AdminPaymentHandler) ListPaymentMethods(c *gin.Context) {
 			},
 			{
 				"method":             "usdt_erc20",
-				"name":               "USDT",
+				"name":               "USDT-EVM（Polygon / Arbitrum One 双通道）",
 				"enabled":            erc20.Enabled,
 				"address":            erc20.Address,
 				"amount_tolerance":   erc20.AmountTolerance,
@@ -69,6 +70,19 @@ func (h *AdminPaymentHandler) ListPaymentMethods(c *gin.Context) {
 				"auto_activate":      erc20.AutoActivate,
 				"api_key_configured": erc20.EtherscanAPIKey != "",
 				"currency":           "USDT",
+			},
+			{
+				"method":           "usdt_bep20",
+				"name":             "USDT-BEP20",
+				"enabled":          bep20.Enabled,
+				"address":          bep20.Address,
+				"amount_tolerance": bep20.AmountTolerance,
+				"confirmations":    bep20.MinConfirmations,
+				"network":          "bsc",
+				"auto_activate":    bep20.AutoActivate,
+				"currency":         "USDT",
+				"rpc_nodes":        bep20.BscRPC,
+				"available":        true,
 			},
 			{
 				"method":          "wechat",
@@ -114,6 +128,7 @@ type UpdatePaymentMethodRequest struct {
 	Network         *string            `json:"network,omitempty"`
 	APIKey          *string            `json:"api_key,omitempty"`
 	Networks        *[]string          `json:"networks,omitempty"`
+	RPCNodes        *[]string          `json:"rpc_nodes,omitempty"`
 	Epay            *EpayUpdateRequest `json:"epay,omitempty"`
 }
 
@@ -139,13 +154,15 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 	// 读取当前配置
 	group := "payment"
 	// 映射 method 名到 system_settings 的 setting_key
-	// usdt_trc20 → trc20, usdt_erc20 → erc20, wechat/alipay 保持不变
+	// usdt_trc20 → trc20, usdt_erc20 → erc20, usdt_bep20 → bep20, wechat/alipay 保持不变
 	key := method
 	switch method {
 	case "usdt_trc20":
 		key = "trc20"
 	case "usdt_erc20":
 		key = "erc20"
+	case "usdt_bep20":
+		key = "bep20"
 	}
 
 	// 根据方法名确定配置结构
@@ -168,7 +185,7 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 		cfg["enabled"] = *req.Enabled
 	}
 	if req.Address != nil {
-		cfg["address"] = *req.Address
+		cfg["address"] = strings.TrimSpace(*req.Address)
 	}
 	if req.AmountTolerance != nil {
 		cfg["amount_tolerance"] = *req.AmountTolerance
@@ -189,13 +206,24 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 		nets := make([]string, 0, len(*req.Networks))
 		for _, n := range *req.Networks {
 			n = strings.ToLower(strings.TrimSpace(n))
-			if n == "polygon" || n == "arbitrum" {
+			if n == "polygon" || n == "arbitrum" || n == "bsc" {
 				nets = append(nets, n)
 			}
 		}
 		cfg["networks"] = nets
 		if len(nets) > 0 {
 			cfg["network"] = nets[0]
+		}
+	}
+	if req.RPCNodes != nil && key == "bep20" {
+		nodes := make([]string, 0, len(*req.RPCNodes))
+		for _, n := range *req.RPCNodes {
+			if s := strings.TrimSpace(n); s != "" {
+				nodes = append(nodes, s)
+			}
+		}
+		if len(nodes) > 0 {
+			cfg["rpc_nodes"] = nodes
 		}
 	}
 	if req.Epay != nil && (method == "wechat" || method == "alipay") {
@@ -282,6 +310,8 @@ func (h *AdminPaymentHandler) TogglePaymentMethod(c *gin.Context) {
 		settingKey = "trc20"
 	case "usdt_erc20":
 		settingKey = "erc20"
+	case "usdt_bep20":
+		settingKey = "bep20"
 	}
 
 	adminID := getAdminIDFromContext(c)
@@ -316,7 +346,7 @@ func (h *AdminPaymentHandler) getMethodConfig(method string) map[string]interfac
 		cfg := h.paymentSvc.GetERC20Config()
 		return map[string]interface{}{
 			"method":             "usdt_erc20",
-			"name":               "USDT",
+			"name":               "USDT-EVM（Polygon / Arbitrum One 双通道）",
 			"enabled":            cfg.Enabled,
 			"address":            cfg.Address,
 			"amount_tolerance":   cfg.AmountTolerance,
@@ -325,6 +355,19 @@ func (h *AdminPaymentHandler) getMethodConfig(method string) map[string]interfac
 			"networks":           cfg.EnabledNetworks(),
 			"auto_activate":      cfg.AutoActivate,
 			"api_key_configured": cfg.EtherscanAPIKey != "",
+		}
+	case "usdt_bep20", "bep20":
+		cfg := h.paymentSvc.GetBEP20Config()
+		return map[string]interface{}{
+			"method":            "usdt_bep20",
+			"name":              "USDT-BEP20",
+			"enabled":           cfg.Enabled,
+			"address":           cfg.Address,
+			"amount_tolerance":  cfg.AmountTolerance,
+			"min_confirmations": cfg.MinConfirmations,
+			"network":           "bsc",
+			"auto_activate":     cfg.AutoActivate,
+			"rpc_nodes":         cfg.BscRPC,
 		}
 	case "wechat":
 		cfg := h.paymentSvc.GetWechatConfig()

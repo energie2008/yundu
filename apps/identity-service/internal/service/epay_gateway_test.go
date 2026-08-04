@@ -16,6 +16,10 @@ func newEpayMock(t *testing.T, submitBody, queryBody string) *httptest.Server {
 	mux.HandleFunc("/submit.php", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(submitBody))
 	})
+	// CreatePayment 使用 mapi.php（服务端 JSON API），submit.php 返回 HTML/文本
+	mux.HandleFunc("/mapi.php", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(submitBody))
+	})
 	mux.HandleFunc("/api.php", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(queryBody))
 	})

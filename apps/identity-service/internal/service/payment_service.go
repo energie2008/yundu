@@ -1,15 +1,18 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"math/big"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,11 +55,24 @@ type ERC20Config struct {
 	Networks         []string `json:"networks"`
 }
 
+type BEP20Config struct {
+	Enabled          bool     `json:"enabled"`
+	Address          string   `json:"address"`
+	USDTContract     string   `json:"usdt_contract"`
+	BscRPC           []string `json:"bsc_rpc"`
+	MinConfirmations int      `json:"min_confirmations"`
+	OrderExpiryHours int      `json:"order_expiry_hours"`
+	AmountTolerance  float64  `json:"amount_tolerance"`
+	AutoActivate     bool     `json:"auto_activate"`
+	PollInterval     int      `json:"poll_interval_seconds"`
+}
+
 type evmNetworkMeta struct {
 	Key          string
 	Label        string
 	ChainID      int
 	USDTContract string
+	Decimals     int
 }
 
 // evmNetworks 支持的低手续费 EVM 网络（Ethereum 主网手续费过高，已下线）
@@ -66,12 +82,21 @@ var evmNetworks = map[string]evmNetworkMeta{
 		Label:        "Polygon",
 		ChainID:      137,
 		USDTContract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+		Decimals:     6,
 	},
 	"arbitrum": {
 		Key:          "arbitrum",
 		Label:        "Arbitrum One",
 		ChainID:      42161,
 		USDTContract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+		Decimals:     6,
+	},
+	"bsc": {
+		Key:          "bsc",
+		Label:        "BEP20",
+		ChainID:      56,
+		USDTContract: "0x55d398326f99059fF775485246999027B3197955",
+		Decimals:     18,
 	},
 }
 
@@ -99,10 +124,16 @@ func (c ERC20Config) EnabledNetworks() []string {
 
 func evmNetworkKeyFromPayCurrency(payCurrency string) string {
 	label := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(payCurrency, "USDT-")))
+	if strings.Contains(label, "bep") || strings.Contains(label, "bsc") {
+		return "bsc"
+	}
 	for key, meta := range evmNetworks {
 		if strings.ToLower(meta.Label) == label {
 			return key
 		}
+	}
+	if strings.Contains(label, "polygon") {
+		return "polygon"
 	}
 	return "polygon"
 }
@@ -151,6 +182,7 @@ type PaymentService struct {
 	pollWg            sync.WaitGroup
 	trc20Cfg          TRC20Config
 	erc20Cfg          ERC20Config
+	bep20Cfg          BEP20Config
 	wechatCfg         WechatConfig
 	alipayCfg         AlipayConfig
 	cfgMu             sync.RWMutex
@@ -200,6 +232,7 @@ func NewPaymentService(
 	}
 	svc.trc20Cfg = svc.loadTRC20Config()
 	svc.erc20Cfg = svc.loadERC20Config()
+	svc.bep20Cfg = svc.loadBEP20Config()
 	svc.wechatCfg = svc.loadWechatConfig()
 	svc.alipayCfg = svc.loadAlipayConfig()
 	svc.exchangeRate = svc.loadExchangeRate()
@@ -315,6 +348,7 @@ func (s *PaymentService) loadTRC20Config() TRC20Config {
 		return cfg
 	}
 	_ = json.Unmarshal(data, &cfg)
+	cfg.Address = strings.TrimSpace(cfg.Address)
 	return cfg
 }
 
@@ -337,8 +371,33 @@ func (s *PaymentService) loadERC20Config() ERC20Config {
 		return cfg
 	}
 	_ = json.Unmarshal(data, &cfg)
+	cfg.Address = strings.TrimSpace(cfg.Address)
 	if cfg.EtherscanAPI == "" || strings.Contains(cfg.EtherscanAPI, "api.polygonscan.com") {
 		cfg.EtherscanAPI = "https://api.etherscan.io/v2/api"
+	}
+	return cfg
+}
+
+func (s *PaymentService) loadBEP20Config() BEP20Config {
+	cfg := BEP20Config{
+		Enabled:          false,
+		USDTContract:     "0x55d398326f99059fF775485246999027B3197955",
+		BscRPC:           []string{"https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3", "https://bsc-dataseed.binance.org", "https://bsc-dataseed1.bnbchain.org"},
+		MinConfirmations: 3,
+		OrderExpiryHours: 6,
+		AmountTolerance:  0.01,
+		AutoActivate:     true,
+		PollInterval:     60,
+	}
+	data, err := s.settingRepo.GetJSON(context.Background(), "payment", "bep20")
+	if err != nil {
+		s.log.Warn("loadBEP20Config fallback to defaults", "error", err)
+		return cfg
+	}
+	_ = json.Unmarshal(data, &cfg)
+	cfg.Address = strings.TrimSpace(cfg.Address)
+	if len(cfg.BscRPC) == 0 {
+		cfg.BscRPC = []string{"https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3", "https://bsc-dataseed.binance.org", "https://bsc-dataseed1.bnbchain.org"}
 	}
 	return cfg
 }
@@ -383,6 +442,12 @@ func (s *PaymentService) GetERC20Config() ERC20Config {
 	return s.erc20Cfg
 }
 
+func (s *PaymentService) GetBEP20Config() BEP20Config {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.bep20Cfg
+}
+
 func (s *PaymentService) GetWechatConfig() WechatConfig {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
@@ -399,6 +464,7 @@ func (s *PaymentService) ReloadConfigs() {
 	s.cfgMu.Lock()
 	s.trc20Cfg = s.loadTRC20Config()
 	s.erc20Cfg = s.loadERC20Config()
+	s.bep20Cfg = s.loadBEP20Config()
 	s.wechatCfg = s.loadWechatConfig()
 	s.alipayCfg = s.loadAlipayConfig()
 	s.exchangeRate = s.loadExchangeRate()
@@ -489,10 +555,11 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 	paymentMethod := req.PaymentMethod
 	if finalCNY > 0 {
 		if paymentMethod == "" {
-			// 默认选择优先级：支付宝 > 微信 > USDT-TRC20 > USDT-ERC20
+			// 默认选择优先级：支付宝 > 微信 > USDT-TRC20 > USDT-BEP20 > USDT-ERC20
 			alipay := s.GetAlipayConfig()
 			wechat := s.GetWechatConfig()
 			trc := s.GetTRC20Config()
+			bep := s.GetBEP20Config()
 			erc := s.GetERC20Config()
 			if alipay.Enabled {
 				paymentMethod = model.PaymentMethodAlipay
@@ -500,12 +567,14 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 				paymentMethod = model.PaymentMethodWechat
 			} else if trc.Enabled && trc.Address != "" {
 				paymentMethod = model.PaymentMethodUSDTTRC20
+			} else if bep.Enabled && bep.Address != "" {
+				paymentMethod = model.PaymentMethodUSDTBEP20
 			} else if erc.Enabled && erc.Address != "" {
 				paymentMethod = model.PaymentMethodUSDTERC20
 			} else if trc.Enabled {
 				paymentMethod = model.PaymentMethodUSDTTRC20
 			} else {
-				paymentMethod = model.PaymentMethodUSDTERC20
+				paymentMethod = model.PaymentMethodUSDTBEP20
 			}
 		}
 	} else {
@@ -562,6 +631,23 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 				return nil, fmt.Errorf("USDT-TRC20 receiving address not configured by admin")
 			}
 			// CNY → USDT 换算
+			finalAmount = math.Round(finalCNY/rate*100) / 100
+			discountAmount = math.Round(discountCNY/rate*100) / 100
+
+		case model.PaymentMethodUSDTBEP20:
+			cfg := s.GetBEP20Config()
+			if !cfg.Enabled {
+				return nil, fmt.Errorf("USDT BEP20 payment not enabled")
+			}
+			payAddress = cfg.Address
+			payCurrency = "USDT-BEP20"
+			expiryHours = cfg.OrderExpiryHours
+			if expiryHours <= 0 {
+				expiryHours = 6
+			}
+			if payAddress == "" {
+				return nil, fmt.Errorf("USDT-BEP20 receiving address not configured by admin")
+			}
 			finalAmount = math.Round(finalCNY/rate*100) / 100
 			discountAmount = math.Round(discountCNY/rate*100) / 100
 
@@ -670,6 +756,9 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 
 func (s *PaymentService) GetPaymentURI(order *model.PaymentOrder) string {
 	switch order.PaymentMethod {
+	case model.PaymentMethodUSDTBEP20:
+		meta := evmNetworks["bsc"]
+		return fmt.Sprintf("%s:%s?value=%.2f&contract=%s", meta.Key, order.PayAddress, order.FinalAmount, meta.USDTContract)
 	case model.PaymentMethodUSDTERC20:
 		meta, ok := evmNetworks[evmNetworkKeyFromPayCurrency(order.PayCurrency)]
 		if !ok {
@@ -691,6 +780,31 @@ func (s *PaymentService) GetPaymentURI(order *model.PaymentOrder) string {
 	}
 }
 
+// defaultEpayNotifyURL 易支付异步回调地址：未配置时按面板公网地址自动补齐，
+// 避免支付成功却无法回调导致订阅不自动激活。
+func defaultEpayNotifyURL(cur, method string) string {
+	if cur != "" {
+		return cur
+	}
+	base := strings.TrimRight(os.Getenv("AGENT_PANEL_ENDPOINT"), "/")
+	if base == "" {
+		base = "https://6.tiktokplay.na.am"
+	}
+	return base + "/api/v1/payment/notify/" + method
+}
+
+// defaultEpayReturnURL 易支付同步跳转地址：未配置时回退到用户订单列表。
+func defaultEpayReturnURL(cur string) string {
+	if cur != "" {
+		return cur
+	}
+	base := strings.TrimRight(os.Getenv("AGENT_PANEL_ENDPOINT"), "/")
+	if base == "" {
+		base = "https://6.tiktokplay.na.am"
+	}
+	return base + "/api/v1/user/orders"
+}
+
 func (s *PaymentService) epayGatewayFor(method string) (*EpayGateway, error) {
 	switch method {
 	case model.PaymentMethodWechat:
@@ -702,7 +816,10 @@ func (s *PaymentService) epayGatewayFor(method string) (*EpayGateway, error) {
 		if payType == "" {
 			payType = "wxpay"
 		}
-		return NewEpayGateway(s.log, s.httpClient, cfg.Epay, payType), nil
+		epay := cfg.Epay
+		epay.NotifyURL = defaultEpayNotifyURL(epay.NotifyURL, "wechat")
+		epay.ReturnURL = defaultEpayReturnURL(epay.ReturnURL)
+		return NewEpayGateway(s.log, s.httpClient, epay, payType), nil
 	case model.PaymentMethodAlipay:
 		cfg := s.GetAlipayConfig()
 		if !cfg.Epay.Configured() {
@@ -712,7 +829,10 @@ func (s *PaymentService) epayGatewayFor(method string) (*EpayGateway, error) {
 		if payType == "" {
 			payType = "alipay"
 		}
-		return NewEpayGateway(s.log, s.httpClient, cfg.Epay, payType), nil
+		epay := cfg.Epay
+		epay.NotifyURL = defaultEpayNotifyURL(epay.NotifyURL, "alipay")
+		epay.ReturnURL = defaultEpayReturnURL(epay.ReturnURL)
+		return NewEpayGateway(s.log, s.httpClient, epay, payType), nil
 	default:
 		return nil, fmt.Errorf("unsupported epay method: %s", method)
 	}
@@ -983,6 +1103,10 @@ func (s *PaymentService) fetchERC20Transfers(cfg ERC20Config, netKey string) ([]
 	if !ok {
 		return nil, fmt.Errorf("unsupported EVM network: %s", netKey)
 	}
+	// BEP20 使用独立 RPC 查询方式
+	if netKey == "bsc" {
+		return s.fetchBEP20TransfersViaRPC(meta)
+	}
 	if cfg.Address == "" {
 		return nil, nil
 	}
@@ -1038,6 +1162,210 @@ func (s *PaymentService) fetchERC20Transfers(cfg ERC20Config, netKey string) ([]
 	return transfers, nil
 }
 
+type rpcLogEntry struct {
+	Address          string   `json:"address"`
+	Topics           []string `json:"topics"`
+	Data             string   `json:"data"`
+	BlockNumber      string   `json:"blockNumber"`
+	TransactionHash  string   `json:"transactionHash"`
+	TransactionIndex string   `json:"transactionIndex"`
+	BlockHash        string   `json:"blockHash"`
+	LogIndex         string   `json:"logIndex"`
+	Removed          bool     `json:"removed"`
+}
+
+type rpcResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int             `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+type rpcBlockResponse struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Result  string `json:"result"`
+}
+
+// fetchBEP20TransfersViaRPC 使用 BSC 公共 RPC 通过 eth_getLogs 查询 BEP20 USDT 转账事件（免费无需 API Key）
+func (s *PaymentService) fetchBEP20TransfersViaRPC(meta evmNetworkMeta) ([]ethTransaction, error) {
+	bepCfg := s.GetBEP20Config()
+	if bepCfg.Address == "" {
+		return nil, nil
+	}
+	// Transfer 事件签名：Transfer(address indexed from, address indexed to, uint256 value)
+	transferTopic := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	// 将收款地址转换为 topic（32字节，左侧补零）
+	toAddrPadded := strings.ToLower(bepCfg.Address)
+	if strings.HasPrefix(toAddrPadded, "0x") {
+		toAddrPadded = toAddrPadded[2:]
+	}
+	toTopic := "0x000000000000000000000000" + toAddrPadded
+
+	// 获取当前区块号，查询最近 5000 个区块（约 2-3 小时）
+	latestBlock, err := s.getBSCLatestBlock(bepCfg.BscRPC)
+	if err != nil {
+		return nil, fmt.Errorf("get latest block: %w", err)
+	}
+	fromBlock := latestBlock - 5000
+	if fromBlock < 0 {
+		fromBlock = 0
+	}
+
+	// 构造 eth_getLogs 请求
+	reqBody := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "eth_getLogs",
+		"params": []interface{}{
+			map[string]interface{}{
+				"fromBlock": "0x" + strconv.FormatInt(fromBlock, 16),
+				"toBlock":   "0x" + strconv.FormatInt(latestBlock, 16),
+				"address":   meta.USDTContract,
+				"topics":    []interface{}{transferTopic, nil, toTopic},
+			},
+		},
+		"id": 1,
+	}
+
+	var logs []rpcLogEntry
+	for _, rpcURL := range bepCfg.BscRPC {
+		logs, err = s.doRPCLogsQuery(rpcURL, reqBody)
+		if err == nil {
+			break
+		}
+		s.log.Warn("BSC RPC query failed, trying next", "rpc", rpcURL, "error", err)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var transfers []ethTransaction
+	decimals := meta.Decimals
+	if decimals == 0 {
+		decimals = 18
+	}
+	for _, log := range logs {
+		if log.Removed {
+			continue
+		}
+		if len(log.Topics) < 3 {
+			continue
+		}
+		// 解析 to 地址
+		toHex := log.Topics[2]
+		if len(toHex) >= 42 {
+			toHex = "0x" + toHex[26:]
+		}
+		if !strings.EqualFold(toHex, bepCfg.Address) {
+			continue
+		}
+		// 解析 from 地址
+		fromHex := log.Topics[1]
+		if len(fromHex) >= 42 {
+			fromHex = "0x" + fromHex[26:]
+		}
+		// 解析 value (十六进制)
+		valueHex := log.Data
+		valueWei := new(big.Int)
+		if strings.HasPrefix(valueHex, "0x") {
+			valueWei.SetString(valueHex[2:], 16)
+		} else {
+			valueWei.SetString(valueHex, 16)
+		}
+		// 转换为 big.Float 并按小数位数转换
+		valueFloat := new(big.Float).SetInt(valueWei)
+		divisor := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil))
+		amount, _ := new(big.Float).Quo(valueFloat, divisor).Float64()
+
+		// 计算确认数
+		blockNumHex := log.BlockNumber
+		if strings.HasPrefix(blockNumHex, "0x") {
+			blockNumHex = blockNumHex[2:]
+		}
+		blockNum, _ := strconv.ParseInt(blockNumHex, 16, 64)
+		confirmations := latestBlock - blockNum
+
+		transfers = append(transfers, ethTransaction{
+			Hash:          log.TransactionHash,
+			BlockNumber:   log.BlockNumber,
+			From:          fromHex,
+			To:            toHex,
+			Value:         strconv.FormatFloat(amount, 'f', -1, 64),
+			TimeStamp:     strconv.FormatInt(time.Now().Unix(), 10),
+			Confirmations: strconv.FormatInt(confirmations, 10),
+		})
+	}
+	return transfers, nil
+}
+
+func (s *PaymentService) doRPCLogsQuery(rpcURL string, reqBody map[string]interface{}) ([]rpcLogEntry, error) {
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest("POST", rpcURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var rpcResp rpcResponse
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		return nil, err
+	}
+	if rpcResp.Error != nil {
+		return nil, fmt.Errorf("rpc error: %d - %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+	var logs []rpcLogEntry
+	if err := json.Unmarshal(rpcResp.Result, &logs); err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+func (s *PaymentService) getBSCLatestBlock(rpcURLs []string) (int64, error) {
+	reqBody := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "eth_blockNumber",
+		"params":  []interface{}{},
+		"id":      1,
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+	for _, rpcURL := range rpcURLs {
+		req, err := http.NewRequest("POST", rpcURL, bytes.NewReader(bodyBytes))
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+		var rpcResp rpcBlockResponse
+		if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+			resp.Body.Close()
+			continue
+		}
+		resp.Body.Close()
+		blockHex := rpcResp.Result
+		if strings.HasPrefix(blockHex, "0x") {
+			blockHex = blockHex[2:]
+		}
+		blockNum, err := strconv.ParseInt(blockHex, 16, 64)
+		if err == nil {
+			return blockNum, nil
+		}
+	}
+	return 0, fmt.Errorf("all BSC RPC endpoints failed")
+}
+
 func (s *PaymentService) Stop() {
 	close(s.stopPoll)
 	s.pollWg.Wait()
@@ -1070,6 +1398,7 @@ func (s *PaymentService) pollPendingOrders() {
 	s.cfgMu.RLock()
 	trcCfg := s.trc20Cfg
 	ercCfg := s.erc20Cfg
+	bepCfg := s.bep20Cfg
 	s.cfgMu.RUnlock()
 
 	const pageSize = 100
@@ -1093,12 +1422,16 @@ func (s *PaymentService) pollPendingOrders() {
 
 	needTRC := false
 	needEVM := map[string]bool{}
+	needBEP20 := false
 	for _, o := range orders {
 		switch o.PaymentMethod {
 		case model.PaymentMethodUSDTTRC20:
 			needTRC = true
 		case model.PaymentMethodUSDTERC20:
 			needEVM[evmNetworkKeyFromPayCurrency(o.PayCurrency)] = true
+		case model.PaymentMethodUSDTBEP20:
+			needBEP20 = true
+			needEVM["bsc"] = true
 		}
 	}
 
@@ -1114,9 +1447,23 @@ func (s *PaymentService) pollPendingOrders() {
 	}
 
 	ercByNetwork := map[string]map[string]*ethTransaction{}
+	// 查询 BEP20 网络（使用 BSC 公共 RPC）
+	if needBEP20 && bepCfg.Enabled && bepCfg.Address != "" {
+		meta := evmNetworks["bsc"]
+		et, err := s.fetchBEP20TransfersViaRPC(meta)
+		if err != nil {
+			s.log.Warn("fetch BEP20 transfers error", "error", err)
+		} else {
+			m := map[string]*ethTransaction{}
+			for i := range et {
+				m[strings.ToLower(et[i].Hash)] = &et[i]
+			}
+			ercByNetwork["bsc"] = m
+		}
+	}
 	if ercCfg.Enabled && ercCfg.Address != "" {
 		for _, netKey := range ercCfg.EnabledNetworks() {
-			if !needEVM[netKey] {
+			if !needEVM[netKey] || netKey == "bsc" {
 				continue
 			}
 			var et []ethTransaction
@@ -1139,6 +1486,8 @@ func (s *PaymentService) pollPendingOrders() {
 		case model.PaymentMethodUSDTTRC20:
 			s.matchTRC20(ctx, o, trcTransfers, trcCfg)
 		case model.PaymentMethodUSDTERC20:
+			s.matchERC20(ctx, o, ercByNetwork, ercCfg)
+		case model.PaymentMethodUSDTBEP20:
 			s.matchERC20(ctx, o, ercByNetwork, ercCfg)
 		case model.PaymentMethodWechat, model.PaymentMethodAlipay:
 			s.pollEpayOrder(ctx, o)
@@ -1198,20 +1547,47 @@ func (s *PaymentService) matchERC20(ctx context.Context, o *model.PaymentOrder, 
 	if len(transfers) == 0 {
 		return
 	}
+	meta, ok := evmNetworks[netKey]
+	if !ok {
+		meta = evmNetworks["polygon"]
+	}
+	decimals := meta.Decimals
+	if decimals == 0 {
+		decimals = 6
+	}
 	for _, t := range transfers {
-		if !strings.EqualFold(t.To, cfg.Address) {
-			continue
+		if !strings.EqualFold(t.To, cfg.Address) && netKey != "bsc" {
+			// BEP20使用独立配置的地址
+			bepCfg := s.GetBEP20Config()
+			if netKey == "bsc" && !strings.EqualFold(t.To, bepCfg.Address) {
+				continue
+			}
+			if netKey != "bsc" {
+				continue
+			}
 		}
 		valueWei, err := strconv.ParseFloat(t.Value, 64)
 		if err != nil {
 			continue
 		}
-		amount := valueWei / math.Pow10(6)
-		if math.Abs(amount-o.FinalAmount) > cfg.AmountTolerance && amount < o.FinalAmount {
+		amount := valueWei / math.Pow10(decimals)
+		toleranceCfg := cfg.AmountTolerance
+		if netKey == "bsc" {
+			bepCfg := s.GetBEP20Config()
+			toleranceCfg = bepCfg.AmountTolerance
+		}
+		if math.Abs(amount-o.FinalAmount) > toleranceCfg && amount < o.FinalAmount {
 			continue
 		}
 		confirms, _ := strconv.Atoi(t.Confirmations)
-		if confirms < cfg.MinConfirmations {
+		minConf := cfg.MinConfirmations
+		autoActivate := cfg.AutoActivate
+		if netKey == "bsc" {
+			bepCfg := s.GetBEP20Config()
+			minConf = bepCfg.MinConfirmations
+			autoActivate = bepCfg.AutoActivate
+		}
+		if confirms < minConf {
 			continue
 		}
 		paid := amount
@@ -1222,7 +1598,10 @@ func (s *PaymentService) matchERC20(ctx context.Context, o *model.PaymentOrder, 
 		}
 		paidAt := time.Now()
 		var blockNum *int64
-		if bn, err := strconv.ParseInt(strings.TrimPrefix(t.BlockNumber, "0x"), 16, 64); err == nil {
+		bnStr := strings.TrimPrefix(t.BlockNumber, "0x")
+		if bn, err := strconv.ParseInt(bnStr, 16, 64); err == nil {
+			blockNum = &bn
+		} else if bn, err := strconv.ParseInt(t.BlockNumber, 10, 64); err == nil {
 			blockNum = &bn
 		}
 		updated, err := s.paymentOrderRepo.MarkPaidIfPending(ctx, o.ID, hash, paid, paidAt)
@@ -1237,7 +1616,7 @@ func (s *PaymentService) matchERC20(ctx context.Context, o *model.PaymentOrder, 
 			_ = s.paymentOrderRepo.UpdateBlockNumber(ctx, o.ID, blockNum)
 		}
 		s.log.Info("EVM order paid", "network", netKey, "order_no", o.OrderNo, "tx", hash, "amount", paid)
-		if cfg.AutoActivate {
+		if autoActivate {
 			s.activateOrder(ctx, o, paid)
 		}
 	}
