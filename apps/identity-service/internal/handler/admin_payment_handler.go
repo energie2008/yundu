@@ -139,6 +139,9 @@ type EpayUpdateRequest struct {
 	PayType    *string `json:"pay_type,omitempty"`
 	NotifyURL  *string `json:"notify_url,omitempty"`
 	ReturnURL  *string `json:"return_url,omitempty"`
+	MapiPath   *string `json:"mapi_path,omitempty"`
+	SubmitPath *string `json:"submit_path,omitempty"`
+	QueryPath  *string `json:"query_path,omitempty"`
 }
 
 // UpdatePaymentMethod 更新支付方式配置
@@ -239,6 +242,9 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 			"pay_type":    cur.PayType,
 			"notify_url":  cur.NotifyURL,
 			"return_url":  cur.ReturnURL,
+			"mapi_path":   cur.MapiPath,
+			"submit_path": cur.SubmitPath,
+			"query_path":  cur.QueryPath,
 		}
 		if cur.Key != "" {
 			epayMap["key"] = cur.Key
@@ -264,6 +270,15 @@ func (h *AdminPaymentHandler) UpdatePaymentMethod(c *gin.Context) {
 		}
 		if req.Epay.ReturnURL != nil {
 			epayMap["return_url"] = *req.Epay.ReturnURL
+		}
+		if req.Epay.MapiPath != nil {
+			epayMap["mapi_path"] = strings.TrimSpace(*req.Epay.MapiPath)
+		}
+		if req.Epay.SubmitPath != nil {
+			epayMap["submit_path"] = strings.TrimSpace(*req.Epay.SubmitPath)
+		}
+		if req.Epay.QueryPath != nil {
+			epayMap["query_path"] = strings.TrimSpace(*req.Epay.QueryPath)
 		}
 		cfg["epay"] = epayMap
 	}
@@ -403,6 +418,9 @@ func epayConfigMap(cfg service.EpayConfig) map[string]interface{} {
 		"pay_type":       cfg.PayType,
 		"notify_url":     cfg.NotifyURL,
 		"return_url":     cfg.ReturnURL,
+		"mapi_path":      cfg.MapiPath,
+		"submit_path":    cfg.SubmitPath,
+		"query_path":     cfg.QueryPath,
 		"key_configured": cfg.Key != "",
 	}
 }

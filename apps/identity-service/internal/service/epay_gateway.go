@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,8 @@ import (
 )
 
 // EpayConfig 易支付（彩虹易支付协议兼容）网关配置。
+// 除 pid/key/网关地址外，API 路径也做成可配置（默认兼容彩虹易支付标准），
+// 更换第三方（仍兼容彩虹协议）只需改后台配置，无需改代码。
 type EpayConfig struct {
 	Pid        string `json:"pid,omitempty"`
 	Key        string `json:"key,omitempty"`
@@ -26,6 +29,31 @@ type EpayConfig struct {
 	PayType    string `json:"pay_type,omitempty"` // alipay / wxpay
 	NotifyURL  string `json:"notify_url,omitempty"`
 	ReturnURL  string `json:"return_url,omitempty"`
+	// 接口路径（相对网关地址，默认彩虹标准：mapi.php / submit.php / api.php）
+	MapiPath   string `json:"mapi_path,omitempty"`   // 服务端 JSON 下单接口
+	SubmitPath string `json:"submit_path,omitempty"` // 表单跳转下单接口（mapi 不可用时回退）
+	QueryPath  string `json:"query_path,omitempty"`  // 订单查询接口
+}
+
+func (c EpayConfig) mapiPath() string {
+	if c.MapiPath != "" {
+		return c.MapiPath
+	}
+	return "mapi.php"
+}
+
+func (c EpayConfig) submitPath() string {
+	if c.SubmitPath != "" {
+		return c.SubmitPath
+	}
+	return "submit.php"
+}
+
+func (c EpayConfig) queryPath() string {
+	if c.QueryPath != "" {
+		return c.QueryPath
+	}
+	return "api.php"
 }
 
 // Configured 判断易支付配置是否完整可用。
@@ -122,9 +150,19 @@ func (g *EpayGateway) CreatePayment(ctx context.Context, order *model.PaymentOrd
 	for k, v := range params {
 		form.Set(k, v)
 	}
-	// 彩虹易支付：submit.php 用于表单自动跳转（返回 HTML/文本，服务端无法直接消费），
-	// mapi.php 用于服务端 API 调用（返回 JSON）。这里使用 mapi.php。
-	apiURL := strings.TrimRight(g.cfg.GatewayURL, "/") + "/mapi.php"
+	// 彩虹易支付：mapi.php 用于服务端 API 调用（返回 JSON），submit.php 用于表单自动跳转（返回 HTML）。
+	// 先尝试 mapi；若平台没有 mapi 或返回非 JSON，回退到 submit 并从 HTML 中解析跳转链接。
+	if pay, err := g.createPaymentMapi(form); err == nil {
+		return pay, nil
+	} else if !g.isHTMLFallback(err) {
+		return nil, err
+	}
+	return g.createPaymentSubmit(form)
+}
+
+// createPaymentMapi 通过 mapi 接口（JSON）创建支付。
+func (g *EpayGateway) createPaymentMapi(form url.Values) (*GatewayPayment, error) {
+	apiURL := strings.TrimRight(g.cfg.GatewayURL, "/") + "/" + g.cfg.mapiPath()
 	resp, err := g.client.PostForm(apiURL, form)
 	if err != nil {
 		return nil, fmt.Errorf("epay create payment: %w", err)
@@ -149,11 +187,8 @@ func (g *EpayGateway) CreatePayment(ctx context.Context, order *model.PaymentOrd
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rawBody, &result); err != nil {
-		// 部分易支付平台返回纯文本错误（如“没有找到商户信息”），直接透传便于排查
-		if bodyText != "" {
-			return nil, fmt.Errorf("epay create payment failed: %s", bodyText)
-		}
-		return nil, fmt.Errorf("epay create payment decode: %w", err)
+		// 非 JSON（HTML/纯文本）：交给 submit 回退逻辑
+		return nil, &epayNonJSONError{text: bodyText, rawErr: err}
 	}
 	msg := result.Msg
 	if msg == "" {
@@ -183,11 +218,106 @@ func (g *EpayGateway) CreatePayment(ctx context.Context, order *model.PaymentOrd
 	if !success {
 		return nil, fmt.Errorf("epay create payment failed: code=%d msg=%s", result.Code, msg)
 	}
-	return &GatewayPayment{
-		URL:     payURL,
-		QRCode:  qrCode,
-		TradeNo: tradeNo,
-	}, nil
+	return &GatewayPayment{URL: payURL, QRCode: qrCode, TradeNo: tradeNo}, nil
+}
+
+// epayNonJSONError 标记“mapi 返回了非 JSON 内容”，可触发 submit 回退。
+type epayNonJSONError struct {
+	text   string
+	rawErr error
+}
+
+func (e *epayNonJSONError) Error() string {
+	if e.text != "" {
+		return "epay mapi non-json: " + e.text
+	}
+	return "epay mapi non-json: " + e.rawErr.Error()
+}
+
+// isHTMLFallback 判断错误是否值得回退到 submit 接口（非 JSON 且可能是 HTML 表单页）。
+func (g *EpayGateway) isHTMLFallback(err error) bool {
+	var nje *epayNonJSONError
+	if errors.As(err, &nje) {
+		lower := strings.ToLower(nje.text)
+		return strings.Contains(lower, "<form") || strings.Contains(lower, "location.href") ||
+			strings.Contains(lower, "window.location") || strings.Contains(lower, "<html") ||
+			strings.Contains(lower, "<script")
+	}
+	return false
+}
+
+// createPaymentSubmit 通过 submit 接口（HTML 表单自动跳转）创建支付，并解析跳转链接/二维码。
+func (g *EpayGateway) createPaymentSubmit(form url.Values) (*GatewayPayment, error) {
+	apiURL := strings.TrimRight(g.cfg.GatewayURL, "/") + "/" + g.cfg.submitPath()
+	resp, err := g.client.PostForm(apiURL, form)
+	if err != nil {
+		return nil, fmt.Errorf("epay submit payment: %w", err)
+	}
+	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(resp.Body)
+	bodyText := strings.TrimSpace(string(rawBody))
+	if bodyText == "" {
+		return nil, errors.New("epay submit payment: empty response")
+	}
+	// 优先解析 HTML 中的跳转链接
+	if u := extractRedirectFromHTML(bodyText); u != "" {
+		return &GatewayPayment{URL: u}, nil
+	}
+	// 若 submit 返回 JSON（部分平台也支持），走 JSON 解析
+	var result struct {
+		Code     int    `json:"code"`
+		Msg      string `json:"msg"`
+		Message  string `json:"message"`
+		TradeNo  string `json:"trade_no"`
+		QRCode   string `json:"qrcode"`
+		URL      string `json:"url"`
+		Redirect string `json:"redirect"`
+	}
+	if json.Unmarshal(rawBody, &result) == nil {
+		msg := result.Msg
+		if msg == "" {
+			msg = result.Message
+		}
+		payURL := result.URL
+		if payURL == "" {
+			payURL = result.Redirect
+		}
+		qrCode := result.QRCode
+		if result.Code == 1 || (result.TradeNo != "" && (payURL != "" || qrCode != "")) {
+			return &GatewayPayment{URL: payURL, QRCode: qrCode, TradeNo: result.TradeNo}, nil
+		}
+		return nil, fmt.Errorf("epay submit payment failed: code=%d msg=%s", result.Code, msg)
+	}
+	// 纯文本错误直接透传
+	text := bodyText
+	if len(text) > 200 {
+		text = text[:200]
+	}
+	return nil, fmt.Errorf("epay submit payment failed: %s", text)
+}
+
+// extractRedirectFromHTML 从易支付 submit 返回的 HTML 中提取支付跳转 URL。
+// 支持：location.href='...' / window.location.href="..." / <form action="..."> / 首个 http(s) 链接。
+func extractRedirectFromHTML(html string) string {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)location\.href\s*=\s*['"]([^'"]+)['"]`),
+		regexp.MustCompile(`(?i)window\.location\s*=\s*['"]([^'"]+)['"]`),
+		regexp.MustCompile(`(?i)<form[^>]+action\s*=\s*['"]([^'"]+)['"]`),
+		regexp.MustCompile(`(?i)url\s*=\s*['"]([^'"]+)['"]`),
+	}
+	for _, re := range patterns {
+		if m := re.FindStringSubmatch(html); len(m) >= 2 {
+			u := strings.TrimSpace(m[1])
+			if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+				return u
+			}
+		}
+	}
+	// 兜底：找第一个 http(s) 链接
+	if m := regexp.MustCompile(`https?://[^\s"'<>]+`).FindString(html); m != "" {
+		return strings.TrimRight(m, ".;,)'\"")
+	}
+	return ""
 }
 
 func (g *EpayGateway) VerifyNotify(params map[string]string) (*GatewayNotify, error) {
@@ -215,7 +345,7 @@ func (g *EpayGateway) VerifyNotify(params map[string]string) (*GatewayNotify, er
 }
 
 func (g *EpayGateway) QueryOrder(ctx context.Context, order *model.PaymentOrder) (string, bool, error) {
-	apiURL := strings.TrimRight(g.cfg.GatewayURL, "/") + "/api.php"
+	apiURL := strings.TrimRight(g.cfg.GatewayURL, "/") + "/" + g.cfg.queryPath()
 	// 彩虹易支付订单查询：sign = md5(out_trade_no + key)
 	sum := md5.Sum([]byte(order.OrderNo + g.cfg.Key))
 	form := url.Values{}

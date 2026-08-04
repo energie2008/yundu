@@ -41,6 +41,9 @@ interface EpayConfig {
   pay_type?: string
   notify_url?: string
   return_url?: string
+  mapi_path?: string
+  submit_path?: string
+  query_path?: string
   key_configured?: boolean
 }
 
@@ -460,6 +463,38 @@ export default function Payments() {
                                 placeholder="https://7.tiktokplay.na.am/dashboard/orders"
                                 style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
                               />
+                            </div>
+                            <div className="rounded-lg p-3" style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.18)' }}>
+                              <p className="text-xs font-medium mb-2" style={{ color: '#60a5fa' }}>接口路径（高级，默认兼容彩虹易支付标准，换第三方一般无需改）</p>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="space-y-1">
+                                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>JSON下单 (mapi)</label>
+                                  <Input
+                                    value={editForm.epay?.mapi_path || 'mapi.php'}
+                                    onChange={(e) => setEpayField('mapi_path', e.target.value)}
+                                    placeholder="mapi.php"
+                                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>表单下单 (submit)</label>
+                                  <Input
+                                    value={editForm.epay?.submit_path || 'submit.php'}
+                                    onChange={(e) => setEpayField('submit_path', e.target.value)}
+                                    placeholder="submit.php"
+                                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>查单 (query)</label>
+                                  <Input
+                                    value={editForm.epay?.query_path || 'api.php'}
+                                    onChange={(e) => setEpayField('query_path', e.target.value)}
+                                    placeholder="api.php"
+                                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                                  />
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
