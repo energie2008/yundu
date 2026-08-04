@@ -25,7 +25,21 @@ func DetectClientEx(userAgent string) ClientInfo {
 		return info
 	}
 
+	// 注意顺序：Karing / Hiddify 的 UA 会附带 mihomo/clash-verge/ClashMeta/sing-box
+	// 等兼容性 token（如 "Karing/1.2.22.2502 platform/windows;mihomo/1.19.27;clash-verge;
+	// ClashMeta;...;sing-box 1.13.0;..."、"HiddifyNext/4.1.1 like ClashMeta..."），
+	// 必须优先按自身客户端名识别，否则会被误判为 Clash/Mihomo 而返回 Clash YAML，
+	// 导致这类 sing-box 内核客户端导入异常（节点丢失/解析失败）。
 	switch {
+	case containsAny(ua, "karing"):
+		info.Type = model.ClientTypeKaring
+		info.IsMeta = true
+	case containsAny(ua, "hiddify-next", "hiddifynext"):
+		info.Type = model.ClientTypeHiddifyNext
+		info.IsMeta = true
+	case containsAny(ua, "hiddify"):
+		info.Type = model.ClientTypeHiddify
+		info.IsMeta = true
 	case containsAny(ua, "mihomo-party"):
 		info.Type = model.ClientTypeMihomoParty
 		info.IsMeta = true
@@ -52,15 +66,6 @@ func DetectClientEx(userAgent string) ClientInfo {
 		info.Type = model.ClientTypeCFW
 	case containsAny(ua, "flclash", "fl-clash"):
 		info.Type = model.ClientTypeFlClash
-		info.IsMeta = true
-	case containsAny(ua, "karing"):
-		info.Type = model.ClientTypeKaring
-		info.IsMeta = true
-	case containsAny(ua, "hiddify-next", "hiddifynext"):
-		info.Type = model.ClientTypeHiddifyNext
-		info.IsMeta = true
-	case containsAny(ua, "hiddify"):
-		info.Type = model.ClientTypeHiddify
 		info.IsMeta = true
 	case containsAny(ua, "clash"):
 		info.Type = model.ClientTypeClash

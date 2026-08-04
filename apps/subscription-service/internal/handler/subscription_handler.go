@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -99,10 +100,11 @@ func (h *SubscriptionHandler) writeSubscription(c *gin.Context, result *service.
 	// Content-Disposition: 所有订阅响应都附带附件文件名，便于客户端保存
 	c.Header("Content-Disposition", `attachment; filename="`+subscriptionFilename(ct)+`"`)
 	// Profile-Title / Profile-Web-Page-URL: 订阅元信息头，便于客户端展示订阅来源。
-	// 当前 subscription-service 未注入站点设置存储，使用硬编码默认站点名 "YunDu"
-	// 与请求 Host 作为回退；如后续接入 settings 存储，可改为从配置读取 site_name/site_url。
-	c.Header("Profile-Title", "YunDu")
-	c.Header("Profile-Web-Page-URL", c.Request.Host)
+	// 订阅名称优先显示订阅站点（SUB_BASE_URL 的 host，即订阅地址所在网站），
+	// 而不是管理后台品牌名 "YunDu"；如后续接入 settings 存储可再改为可配置 site_name。
+	siteName := subscriptionSiteName(c.Request.Host)
+	c.Header("Profile-Title", siteName)
+	c.Header("Profile-Web-Page-URL", subscriptionSiteURL(c.Request.Host))
 	if isShadowrocket {
 		c.Header("Cache-Control", "private, no-store, no-cache, must-revalidate, max-age=0")
 		c.Header("Access-Control-Allow-Origin", "*")
@@ -160,6 +162,30 @@ func sanitizeSubscriptionContent(content string) string {
 		return ""
 	}
 	return strings.Join(cleaned, "\n") + "\n"
+}
+
+
+// subscriptionSiteName 返回订阅名称（Profile-Title）。
+// 优先级：SITE_NAME 环境变量 > SUB_BASE_URL 的 host > 请求 Host。
+func subscriptionSiteName(fallbackHost string) string {
+	if name := os.Getenv("SITE_NAME"); name != "" {
+		return name
+	}
+	if base := os.Getenv("SUB_BASE_URL"); base != "" {
+		if u, err := url.Parse(base); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+	return fallbackHost
+}
+
+// subscriptionSiteURL 返回订阅站点 URL（Profile-Web-Page-URL）。
+// 优先使用固定的 SUB_BASE_URL（避免随访问域名变化），否则回退到 https://请求Host。
+func subscriptionSiteURL(fallbackHost string) string {
+	if base := os.Getenv("SUB_BASE_URL"); base != "" {
+		return base
+	}
+	return "https://" + fallbackHost
 }
 
 func (h *SubscriptionHandler) GetSubscriptionInfo(c *gin.Context) {
