@@ -1636,8 +1636,9 @@ func (s *PaymentService) activateOrder(ctx context.Context, o *model.PaymentOrde
 	isNewPurchase := false
 	existingSub, _ := s.subRepo.GetActiveByUserID(ctx, o.UserID)
 	if existingSub != nil && existingSub.PlanID == plan.ID {
-		// 同套餐续费：延长有效期
+		// 同套餐续费：延长有效期，并重置流量（新周期重新计算，覆盖上个周期已用流量）
 		_ = s.subRepo.ExtendByDays(ctx, existingSub.ID, days)
+		_ = s.subRepo.ResetTraffic(ctx, o.UserID)
 	} else {
 		// 新订阅或套餐升级：替换旧订阅（如有），创建新订阅
 		isNewPurchase = true

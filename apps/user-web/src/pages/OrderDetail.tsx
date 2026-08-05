@@ -184,6 +184,7 @@ export default function OrderDetail() {
   const isTRC20 = payCurrency.toUpperCase().includes('TRC20') || paymentMethod === 'usdt_trc20'
   const isBEP20 = payCurrency.toUpperCase().includes('BEP') || payCurrency.toUpperCase().includes('BSC') || paymentMethod === 'usdt_bep20'
   const isERC20 = !isTRC20 && !isBEP20 && (payCurrency.toUpperCase().includes('ERC') || paymentMethod === 'usdt_erc20')
+  const isCNY = payCurrency.toUpperCase() === 'CNY' || paymentMethod === 'alipay' || paymentMethod === 'wechat'
   const evmLabel = isTRC20 ? 'TRC20' : (isBEP20 ? 'BEP20' : payCurrency.replace(/^USDT-\s*/i, '') || 'EVM')
   const displayAmount = Math.max(0, order.final_amount ?? order.amount_usdt)
   // qiu-pay 等第三方返回的 pay_address 可能是收款码图片 URL（而非二维码内容）
@@ -442,12 +443,17 @@ export default function OrderDetail() {
         <DetailRow label="订单号" value={<span className="font-mono">{order.order_no}</span>} />
         <DetailRow label="套餐名称" value={order.plan_name} />
         <DetailRow label="订购周期" value={getPeriodLabel(order.period_code)} />
-        <DetailRow label="商品金额" value={`${formatUSDT(order.amount_usdt)} USDT`} />
-        <DetailRow
-          label="实付金额"
-          value={`${formatUSDT(displayAmount)} USDT`}
-          highlight
-        />
+        {isCNY ? (
+          <>
+            <DetailRow label="商品金额" value={`¥${(order.amount_cny ?? 0).toFixed(2)}`} />
+            <DetailRow label="实付金额" value={`¥${displayAmount.toFixed(2)}`} highlight />
+          </>
+        ) : (
+          <>
+            <DetailRow label="商品金额" value={`${formatUSDT(order.amount_usdt)} USDT`} />
+            <DetailRow label="实付金额" value={`${formatUSDT(displayAmount)} USDT`} highlight />
+          </>
+        )}
         <DetailRow label="创建时间" value={formatDateTime(order.created_at)} />
         {order.paid_at && (
           <div className="flex justify-between py-3 border-b" style={{ borderColor: 'var(--border)' }}>
