@@ -186,6 +186,8 @@ export default function OrderDetail() {
   const isERC20 = !isTRC20 && !isBEP20 && (payCurrency.toUpperCase().includes('ERC') || paymentMethod === 'usdt_erc20')
   const evmLabel = isTRC20 ? 'TRC20' : (isBEP20 ? 'BEP20' : payCurrency.replace(/^USDT-\s*/i, '') || 'EVM')
   const displayAmount = Math.max(0, order.final_amount ?? order.amount_usdt)
+  // qiu-pay 等第三方返回的 pay_address 可能是收款码图片 URL（而非二维码内容）
+  const payAddrIsUrl = typeof order.pay_address === 'string' && /^https?:\/\//i.test(order.pay_address)
   const methodIconKey = paymentMethod || (isTRC20 ? 'usdt_trc20' : isBEP20 ? 'usdt_bep20' : isERC20 ? 'usdt_erc20' : 'usdt_trc20')
 
   return (
@@ -374,7 +376,11 @@ export default function OrderDetail() {
 
           {order.pay_address && (
             <div className="rounded-xl p-4 flex justify-center mb-5" style={{ background: 'var(--muted)' }}>
-              <QRCode value={order.pay_address} size={180} />
+              {payAddrIsUrl ? (
+                <img src={order.pay_address} alt="收款二维码" className="rounded-lg" style={{ width: 200, height: 200, objectFit: 'contain' }} />
+              ) : (
+                <QRCode value={order.pay_address} size={180} />
+              )}
             </div>
           )}
 
@@ -402,9 +408,9 @@ export default function OrderDetail() {
             </div>
           </div>
 
-          {order.payment_uri && (
+          {(order.payment_uri || payAddrIsUrl) && (
             <a
-              href={order.payment_uri}
+              href={order.payment_uri || order.pay_address}
               target="_blank"
               rel="noreferrer"
               className="w-full h-10 rounded-lg text-sm font-medium text-white flex items-center justify-center transition-opacity shadow-sm"
@@ -415,7 +421,7 @@ export default function OrderDetail() {
           )}
 
           <p className="text-xs mt-3 text-center" style={{ color: 'var(--muted-foreground)' }}>
-            请在弹出的支付页面完成付款，支付成功后系统将自动确认并激活您的订阅。
+            请扫码或打开支付页面完成付款，支付成功后系统将自动确认并激活您的订阅。
           </p>
 
           <button

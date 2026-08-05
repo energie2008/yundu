@@ -346,7 +346,57 @@ func (g *EpayGateway) VerifyNotify(params map[string]string) (*GatewayNotify, er
 
 func (g *EpayGateway) QueryOrder(ctx context.Context, order *model.PaymentOrder) (string, bool, error) {
 	apiURL := strings.TrimRight(g.cfg.GatewayURL, "/") + "/" + g.cfg.queryPath()
-	// 彩虹易支付订单查询：sign = md5(out_trade_no + key)
+	// 方式一（优先，兼容 Qiu-Pay）：GET api.php?act=order&pid&key&out_trade_no（明文 key 认证，无 sign）
+	if tradeNo, paid, err := g.queryOrderGET(apiURL, order); err == nil {
+		return tradeNo, paid, nil
+	}
+	// 方式二（彩虹标准）：POST api.php + act/pid/key/out_trade_no + sign=md5(out_trade_no+key)
+	return g.queryOrderPOST(apiURL, order)
+}
+
+// queryOrderGET 以 GET 方式查单（Qiu-Pay / 部分彩虹实现）。
+func (g *EpayGateway) queryOrderGET(apiURL string, order *model.PaymentOrder) (string, bool, error) {
+	u := fmt.Sprintf("%s?act=order&pid=%s&key=%s&out_trade_no=%s",
+		apiURL, url.QueryEscape(g.cfg.Pid), url.QueryEscape(g.cfg.Key), url.QueryEscape(order.OrderNo))
+	resp, err := g.client.Get(u)
+	if err != nil {
+		return "", false, fmt.Errorf("epay query order GET: %w", err)
+	}
+	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(resp.Body)
+	var r struct {
+		Code    int    `json:"code"`
+		Msg     string `json:"msg"`
+		Status  *int   `json:"status"`
+		TradeNo string `json:"trade_no"`
+		Data    *struct {
+			Status   *int   `json:"status"`
+			TradeNo  string `json:"trade_no"`
+			OutTrade string `json:"out_trade_no"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rawBody, &r); err != nil {
+		return "", false, fmt.Errorf("epay query order GET decode: %w", err)
+	}
+	status := -1
+	if r.Status != nil {
+		status = *r.Status
+	} else if r.Data != nil && r.Data.Status != nil {
+		status = *r.Data.Status
+	}
+	// 只有解析到明确的 status(0/1) 才认为 GET 查单成功，否则交给 POST 兜底
+	if status == 0 || status == 1 {
+		tradeNo := r.TradeNo
+		if tradeNo == "" && r.Data != nil {
+			tradeNo = r.Data.TradeNo
+		}
+		return tradeNo, status == 1, nil
+	}
+	return "", false, fmt.Errorf("epay query order GET inconclusive: code=%d msg=%s", r.Code, r.Msg)
+}
+
+// queryOrderPOST 以彩虹标准 POST+sign 方式查单。
+func (g *EpayGateway) queryOrderPOST(apiURL string, order *model.PaymentOrder) (string, bool, error) {
 	sum := md5.Sum([]byte(order.OrderNo + g.cfg.Key))
 	form := url.Values{}
 	form.Set("act", "order")
@@ -360,7 +410,7 @@ func (g *EpayGateway) QueryOrder(ctx context.Context, order *model.PaymentOrder)
 		return "", false, fmt.Errorf("epay query order: %w", err)
 	}
 	defer resp.Body.Close()
-
+	rawBody, _ := io.ReadAll(resp.Body)
 	var result struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -370,14 +420,23 @@ func (g *EpayGateway) QueryOrder(ctx context.Context, order *model.PaymentOrder)
 			OutTrade string `json:"out_trade_no"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(rawBody, &result); err != nil {
 		return "", false, fmt.Errorf("epay query order decode: %w", err)
+	}
+	// 兼容 status 在 data 内或顶层
+	status := -1
+	if result.Data != nil {
+		status = result.Data.Status
 	}
 	if result.Code != 0 && result.Code != 1 {
 		return "", false, fmt.Errorf("epay query order failed: code=%d msg=%s", result.Code, result.Msg)
 	}
-	if result.Data == nil {
-		return "", false, nil
+	if status < 0 {
+		return "", false, fmt.Errorf("epay query order: no status in response")
 	}
-	return result.Data.TradeNo, result.Data.Status == 1, nil
+	tradeNo := ""
+	if result.Data != nil {
+		tradeNo = result.Data.TradeNo
+	}
+	return tradeNo, status == 1, nil
 }
