@@ -1633,39 +1633,31 @@ func (s *PaymentService) activateOrder(ctx context.Context, o *model.PaymentOrde
 	}
 	days := model.PeriodDaysMap[o.PeriodCode]
 
-	isNewPurchase := false
+	// 订阅/续费统一按新周期起算：续费不延长原到期时间，完全按新套餐重新计算（新周期 + 流量重置）
 	existingSub, _ := s.subRepo.GetActiveByUserID(ctx, o.UserID)
-	if existingSub != nil && existingSub.PlanID == plan.ID {
-		// 同套餐续费：延长有效期，并重置流量（新周期重新计算，覆盖上个周期已用流量）
-		_ = s.subRepo.ExtendByDays(ctx, existingSub.ID, days)
-		_ = s.subRepo.ResetTraffic(ctx, o.UserID)
-	} else {
-		// 新订阅或套餐升级：替换旧订阅（如有），创建新订阅
-		isNewPurchase = true
-		if existingSub != nil {
-			_ = s.subRepo.MarkReplaced(ctx, existingSub.ID)
-		}
-		now := time.Now()
-		expiresAt := now.AddDate(0, 0, days)
-		sub := &model.UserPlanSubscription{
-			ID:                uuid.New(),
-			UserID:            o.UserID,
-			PlanID:            plan.ID,
-			Status:            model.SubscriptionStatusActive,
-			StartedAt:         &now,
-			ExpiresAt:         &expiresAt,
-			RenewalMode:       model.RenewalModeManual,
-			TrafficQuotaBytes: plan.TrafficBytes,
-			TrafficUsedBytes:  0,
-			SpeedLimitMbps:    plan.SpeedLimitMbps,
-			DeviceLimit:       plan.DeviceLimit,
-			IPLimit:           plan.IPLimit,
-			Source:            "purchase",
-		}
-		if err := s.subRepo.Create(ctx, sub); err != nil {
-			s.log.Error("activate subscription", "error", err)
-			return
-		}
+	if existingSub != nil {
+		_ = s.subRepo.MarkReplaced(ctx, existingSub.ID)
+	}
+	now := time.Now()
+	expiresAt := now.AddDate(0, 0, days)
+	sub := &model.UserPlanSubscription{
+		ID:                uuid.New(),
+		UserID:            o.UserID,
+		PlanID:            plan.ID,
+		Status:            model.SubscriptionStatusActive,
+		StartedAt:         &now,
+		ExpiresAt:         &expiresAt,
+		RenewalMode:       model.RenewalModeManual,
+		TrafficQuotaBytes: plan.TrafficBytes,
+		TrafficUsedBytes:  0,
+		SpeedLimitMbps:    plan.SpeedLimitMbps,
+		DeviceLimit:       plan.DeviceLimit,
+		IPLimit:           plan.IPLimit,
+		Source:            "purchase",
+	}
+	if err := s.subRepo.Create(ctx, sub); err != nil {
+		s.log.Error("activate subscription", "error", err)
+		return
 	}
 
 	s.ensureDefaultSubscriptionToken(ctx, o.UserID)
@@ -1697,24 +1689,11 @@ func (s *PaymentService) activateOrder(ctx context.Context, o *model.PaymentOrde
 	s.log.Info("Subscription activated", "order", o.OrderNo, "user", o.UserID, "days", days)
 	go s.processCommission(context.Background(), o, paidAmount)
 
-	// 发布事件通知 node-service 实时同步用户到节点
-	if isNewPurchase {
-		// 新购/升级：用户可能刚注册或之前无有效订阅，发 Unbanned 添加用户到所有节点
-		s.onEvent(ctx, events.TopicUserUnbanned, events.UserEvent{
-			UserID: o.UserID.String(),
-			Reason: "purchase_activated",
-		})
-	} else {
-		// 续费：延长时间，发 PlanChanged 事件更新用户状态（若之前因过期被ban则恢复）
-		s.onEvent(ctx, events.TopicPlanChanged, struct {
-			UserID   string `json:"user_id"`
-			PlanID   string `json:"plan_id"`
-			Operator string `json:"operator,omitempty"`
-		}{
-			UserID: o.UserID.String(),
-			PlanID: plan.ID.String(),
-		})
-	}
+	// 发布事件通知 node-service 实时同步用户到节点（新周期：重新计算套餐与流量）
+	s.onEvent(ctx, events.TopicUserUnbanned, events.UserEvent{
+		UserID: o.UserID.String(),
+		Reason: "purchase_activated",
+	})
 }
 
 func (s *PaymentService) ensureDefaultSubscriptionToken(ctx context.Context, userID uuid.UUID) {
