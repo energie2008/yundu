@@ -39,9 +39,9 @@ import clsx from 'clsx'
 
 function getStatusConfig(status: string) {
   const configs: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
-    open: { label: '处理中', color: 'var(--primary)', bg: 'rgba(217,119,87,0.1)', icon: Clock },
+    open: { label: '处理中', color: 'var(--primary)', bg: 'rgba(59,169,156,0.1)', icon: Clock },
     pending: { label: '待处理', color: '#e8a33d', bg: 'rgba(232,163,61,0.1)', icon: AlertCircle },
-    replied: { label: '已回复', color: 'var(--primary)', bg: 'rgba(217,119,87,0.1)', icon: MessageSquare },
+    replied: { label: '已回复', color: 'var(--primary)', bg: 'rgba(59,169,156,0.1)', icon: MessageSquare },
     resolved: { label: '已解决', color: 'var(--success)', bg: 'rgba(95,141,78,0.1)', icon: CheckCircle2 },
     closed: { label: '已关闭', color: 'var(--muted-foreground)', bg: 'var(--muted)', icon: XCircle },
   }
@@ -193,7 +193,7 @@ function TicketDetailView({ ticketId, onBack }: { ticketId: string; onBack: () =
                 >
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
-                      style={{ background: msg.is_admin ? 'var(--primary)' : 'linear-gradient(135deg, #d97757, #e08d70)' }}>
+                      style={{ background: msg.is_admin ? 'var(--primary)' : 'linear-gradient(135deg, #3ba99c, #5cc9bc)' }}>
                       {(msg.author_name || (msg.is_admin ? '客服' : '我')).charAt(0)}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -201,7 +201,7 @@ function TicketDetailView({ ticketId, onBack }: { ticketId: string; onBack: () =
                         {msg.author_name || (msg.is_admin ? '客服' : '我')}
                       </span>
                       {msg.is_admin && (
-                        <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(217,119,87,0.1)', color: 'var(--primary)' }}>客服</Badge>
+                        <Badge className="border-0 text-xs" style={{ backgroundColor: 'rgba(59,169,156,0.1)', color: 'var(--primary)' }}>客服</Badge>
                       )}
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{formatTimeAgo(msg.created_at)}</span>
                     </div>
@@ -443,3 +443,4 @@ export default function Tickets() {
     </div>
   )
 }
+

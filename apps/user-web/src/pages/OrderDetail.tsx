@@ -119,9 +119,9 @@ function getStatusBadge(status: OrderResponse['status']) {
 
 function DetailRow({ label, value, highlight }: { label: string; value: ReactNode; highlight?: boolean }) {
   return (
-    <div className="flex justify-between py-3 border-b last:border-b-0" style={{ borderColor: 'var(--border)' }}>
+    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 border-b last:border-b-0 gap-1" style={{ borderColor: 'var(--border)' }}>
       <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
-      <span className={`text-sm font-medium ${highlight ? 'text-lg font-bold' : ''}`} style={{ color: highlight ? 'var(--primary)' : 'var(--foreground)' }}>{value}</span>
+      <span className={`text-sm font-medium break-all ${highlight ? 'text-lg font-bold' : ''}`} style={{ color: highlight ? 'var(--primary)' : 'var(--foreground)' }}>{value}</span>
     </div>
   )
 }
@@ -158,8 +158,8 @@ export default function OrderDetail() {
 
   if (isLoading || !order) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <div className="flex items-center gap-3 mb-6">
+      <div className="p-4 md:p-6 max-w-3xl mx-auto">
+        <div className="flex items-center gap-3 mb-5 md:mb-6">
           <button
             onClick={() => navigate('/dashboard/orders')}
             className="flex items-center -ml-2 text-sm transition-colors px-2 py-1 rounded-lg"
@@ -194,8 +194,8 @@ export default function OrderDetail() {
   const methodIconKey = paymentMethod || (isTRC20 ? 'usdt_trc20' : isBEP20 ? 'usdt_bep20' : isERC20 ? 'usdt_erc20' : 'usdt_trc20')
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="p-4 md:p-6 max-w-3xl mx-auto">
+      <div className="flex items-center flex-wrap gap-2 md:gap-3 mb-5 md:mb-6">
         <button
           onClick={() => navigate('/dashboard/orders')}
           className="flex items-center text-sm -ml-2 px-2 py-1 rounded-lg transition-colors"
@@ -206,7 +206,7 @@ export default function OrderDetail() {
           <ArrowLeft className="w-4 h-4 mr-1" />
           返回
         </button>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>订单详情</h1>
+        <h1 className="text-xl md:text-2xl font-bold" style={{ color: 'var(--foreground)' }}>订单详情</h1>
         {badge && (
           <span
             className="text-xs px-2.5 py-1 rounded-full font-medium"
@@ -280,7 +280,7 @@ export default function OrderDetail() {
           </div>
 
           <div className="rounded-xl p-4 flex justify-center mb-5" style={{ background: 'var(--muted)' }}>
-            <QRCode value={order.pay_address} size={180} />
+            <QRCode value={order.pay_address} size={180} logo={methodIconKey} />
           </div>
 
           <div className="rounded-lg p-4 mb-5" style={{ background: 'var(--muted)' }}>
@@ -382,7 +382,7 @@ export default function OrderDetail() {
               {payAddrIsImage ? (
                 <img src={order.pay_address} alt="收款二维码" className="rounded-lg" style={{ width: 200, height: 200, objectFit: 'contain' }} />
               ) : (
-                <QRCode value={order.pay_address} size={180} />
+                <QRCode value={order.pay_address} size={180} logo={order.payment_method === 'wechat' ? 'wechat' : 'alipay'} />
               )}
             </div>
           )}
@@ -458,7 +458,7 @@ export default function OrderDetail() {
         )}
         <DetailRow label="创建时间" value={formatDateTime(order.created_at)} />
         {order.paid_at && (
-          <div className="flex justify-between py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 border-b gap-1" style={{ borderColor: 'var(--border)' }}>
             <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>支付时间</span>
             <span className="text-sm font-medium" style={{ color: 'var(--success)' }}>{formatDateTime(order.paid_at)}</span>
           </div>

@@ -254,8 +254,8 @@ export function Checkout() {
 
   if (!planId) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <div className="xboard-card p-8 text-center">
+      <div className="p-4 md:p-6 max-w-3xl mx-auto">
+        <div className="xboard-card p-6 md:p-8 text-center">
           <p className="mb-4" style={{ color: 'var(--muted-foreground)' }}>未选择套餐</p>
           <button onClick={() => navigate('/dashboard/plans')} className="px-4 py-2 rounded-lg text-sm text-white" style={{ background: 'var(--primary)' }}>
             选择套餐
@@ -266,13 +266,13 @@ export function Checkout() {
   }
 
   if (planQuery.isLoading) {
-    return <div className="p-6 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>加载中...</div>;
+    return <div className="p-4 md:p-6 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>加载中...</div>;
   }
 
   if (!plan) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <div className="xboard-card p-8 text-center">
+      <div className="p-4 md:p-6 max-w-3xl mx-auto">
+        <div className="xboard-card p-6 md:p-8 text-center">
           <p className="mb-4" style={{ color: 'var(--destructive)' }}>套餐不存在</p>
           <button onClick={() => navigate('/dashboard/plans')} className="px-4 py-2 rounded-lg text-sm text-white" style={{ background: 'var(--primary)' }}>
             返回套餐列表
@@ -283,7 +283,7 @@ export function Checkout() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto">
       {/* Back link */}
       <button
         onClick={() => navigate('/dashboard/plans')}
@@ -296,7 +296,7 @@ export function Checkout() {
       </button>
 
       <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--foreground)' }}>查看并完成您的购买</h1>
-      <p className="text-sm mb-6" style={{ color: 'var(--muted-foreground)' }}>确认订单信息并选择支付方式</p>
+      <p className="text-sm mb-5 md:mb-6" style={{ color: 'var(--muted-foreground)' }}>确认订单信息并选择支付方式</p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Left column */}
@@ -381,7 +381,7 @@ export function Checkout() {
                       value={m.method}
                       checked={isSelected}
                       onChange={() => setSelectedMethod(m.method)}
-                      className="accent-purple-600"
+                      className="accent-teal-600"
                       style={{ accentColor: 'var(--primary)' }}
                     />
                     <PaymentMethodIcon method={m.method} size={26} />
@@ -517,3 +517,4 @@ export function Checkout() {
     </div>
   );
 }
+

@@ -34,13 +34,13 @@ function InfoCard({
   valueColor?: string
 }) {
   return (
-    <div className="flex items-center gap-4 p-4 rounded-xl" style={{ backgroundColor: 'var(--muted)' }}>
-      <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: 'rgba(217,119,87,0.1)' }}>
-        <Icon className="w-5 h-5" style={{ color: 'var(--primary)' }} />
+    <div className="flex items-center gap-3 md:gap-4 p-3 md:p-4 rounded-xl" style={{ backgroundColor: 'var(--muted)' }}>
+      <div className="w-9 h-9 md:w-10 md:h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(217,119,87,0.1)' }}>
+        <Icon className="w-4 h-4 md:w-5 md:h-5" style={{ color: 'var(--primary)' }} />
       </div>
-      <div>
+      <div className="min-w-0 flex-1">
         <p className="text-xs mb-0.5" style={{ color: 'var(--muted-foreground)' }}>{label}</p>
-        <p className="text-sm font-medium" style={{ color: valueColor || 'var(--foreground)' }}>{value}</p>
+        <p className="text-sm font-medium truncate" style={{ color: valueColor || 'var(--foreground)' }}>{value}</p>
       </div>
     </div>
   )
@@ -294,19 +294,19 @@ export default function Profile() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-xl font-bold mb-6" style={{ color: 'var(--foreground)' }}>个人中心</h1>
+    <div className="p-4 md:p-6 max-w-3xl mx-auto">
+      <h1 className="text-xl font-bold mb-5 md:mb-6" style={{ color: 'var(--foreground)' }}>个人中心</h1>
 
-      <div className="xboard-card p-6 mb-5">
-        <div className="flex items-center gap-5">
+      <div className="xboard-card p-4 md:p-6 mb-5">
+        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-5">
           <div
-            className="w-20 h-20 rounded-full flex items-center justify-center text-white text-3xl font-bold shadow-sm"
+            className="w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center text-white text-2xl md:text-3xl font-bold shadow-sm flex-shrink-0"
             style={{ background: 'var(--primary)' }}
           >
             {displayUser.email.charAt(0).toUpperCase()}
           </div>
-          <div className="flex-1">
-            <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--foreground)' }}>{displayUser.email}</h2>
+          <div className="flex-1 min-w-0 text-center sm:text-left">
+            <h2 className="text-lg md:text-xl font-bold mb-1 truncate" style={{ color: 'var(--foreground)' }}>{displayUser.email}</h2>
             <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
               ID: {displayUser.id} · 注册于 {formatDateTime(displayUser.created_at)}
             </p>
@@ -315,7 +315,7 @@ export default function Profile() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
-        <TabsList className="border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'transparent' }}>
+        <TabsList className="border-b overflow-x-auto flex-nowrap w-full justify-start" style={{ borderColor: 'var(--border)', backgroundColor: 'transparent' }}>
           <TabsTrigger value="profile" className="data-[state=active]:border-b-2" style={{ color: activeTab === 'profile' ? 'var(--primary)' : 'var(--muted-foreground)', borderBottomColor: activeTab === 'profile' ? 'var(--primary)' : 'transparent' }}>
             <User className="w-4 h-4 mr-2" />
             个人资料
@@ -525,7 +525,7 @@ export default function Profile() {
                   </div>
                   {errors.confirm_password && <p className="text-sm mt-1" style={{ color: 'var(--destructive)' }}>{errors.confirm_password.message}</p>}
                 </div>
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                   <Button
                     type="submit"
                     disabled={isSubmitting}
@@ -609,7 +609,7 @@ export default function Profile() {
       </Tabs>
 
       <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
-        <DialogContent className="xboard-card" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+        <DialogContent className="xboard-card w-[calc(100vw-2rem)] max-w-md" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--foreground)' }}>确认重置订阅？</DialogTitle>
             <DialogDescription style={{ color: 'var(--muted-foreground)' }}>
@@ -649,7 +649,7 @@ export default function Profile() {
       </Dialog>
 
       <Dialog open={withdrawDialogOpen} onOpenChange={setWithdrawDialogOpen}>
-        <DialogContent className="xboard-card" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+        <DialogContent className="xboard-card w-[calc(100vw-2rem)] max-w-md" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--foreground)' }}>申请佣金提现</DialogTitle>
             <DialogDescription style={{ color: 'var(--muted-foreground)' }}>

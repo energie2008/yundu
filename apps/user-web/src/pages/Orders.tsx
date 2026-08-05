@@ -151,14 +151,14 @@ export default function Orders() {
       : allOrders.filter((o) => o.status === activeTab)
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="mb-6">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto">
+      <div className="mb-5 md:mb-6">
         <h1 className="text-xl font-bold" style={{ color: 'var(--foreground)' }}>我的订单</h1>
         <p className="mt-1 text-sm" style={{ color: 'var(--muted-foreground)' }}>查看您的订单历史</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as StatusFilter)} className="mb-5">
-        <TabsList className="border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'transparent' }}>
+        <TabsList className="border-b overflow-x-auto flex-nowrap" style={{ borderColor: 'var(--border)', backgroundColor: 'transparent' }}>
           {tabs.map((tab) => (
             <TabsTrigger
               key={tab.key}
@@ -188,7 +188,8 @@ export default function Orders() {
         </div>
       ) : (
         <div className="xboard-card overflow-hidden">
-          <table className="w-full">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px]">
             <thead>
               <tr className="border-b" style={{ background: 'var(--muted)', borderColor: 'var(--border)' }}>
                 <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>订单号</th>
@@ -204,6 +205,7 @@ export default function Orders() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

@@ -136,23 +136,23 @@ export function Login() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-4"
+      className="min-h-screen flex items-center justify-center p-3 sm:p-4"
       style={{ background: 'linear-gradient(135deg, #f6efe6 0%, #faf6f0 100%)', minHeight: '100vh' }}
     >
       <div className="w-full max-w-md">
         {/* Brand header */}
-        <div className="text-center mb-6">
-          <div className="mx-auto w-14 h-14 rounded-xl flex items-center justify-center mb-3 shadow-md" style={{ background: 'var(--primary)' }}>
+        <div className="text-center mb-5 sm:mb-6">
+          <div className="mx-auto w-12 sm:w-14 h-12 sm:h-14 rounded-xl flex items-center justify-center mb-3 shadow-md" style={{ background: 'var(--primary)' }}>
             <span className="text-white font-bold text-xl">Y</span>
           </div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>YunDu 云渡</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--foreground)' }}>YunDu 云渡</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>全球化网络加速服务</p>
         </div>
 
         {/* Card */}
-        <div className="xboard-card p-8">
-          <div className="mb-6">
-            <h2 className="text-xl font-bold" style={{ color: 'var(--foreground)' }}>欢迎回来</h2>
+        <div className="xboard-card p-5 sm:p-8">
+          <div className="mb-5 sm:mb-6">
+            <h2 className="text-lg sm:text-xl font-bold" style={{ color: 'var(--foreground)' }}>欢迎回来</h2>
             <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>登录您的 YunDu 账户</p>
           </div>
 

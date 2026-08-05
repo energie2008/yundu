@@ -22,16 +22,16 @@ function NodeModal({ plan, onClose }: { plan: PlanResponse; onClose: () => void 
   const onlineCount = nodes.filter(n => n.is_online).length;
 
   return (
-    <div className="modal-overlay animate-fade-in" onClick={onClose}>
+    <div className="modal-overlay animate-fade-in flex items-center justify-center p-3" onClick={onClose}>
       <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col animate-slide-up overflow-hidden"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col animate-slide-up overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         {/* Purple header like xboard */}
-        <div className="px-5 py-4 flex items-center justify-between text-white" style={{ background: 'var(--primary)' }}>
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🖥️</span>
-            <h3 className="font-semibold text-sm">{plan.name} - 可用节点 ({nodes.length})</h3>
+        <div className="px-4 md:px-5 py-4 flex items-center justify-between text-white" style={{ background: 'var(--primary)' }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-lg flex-shrink-0">🖥️</span>
+            <h3 className="font-semibold text-sm truncate">{plan.name} - 可用节点 ({nodes.length})</h3>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white hover:bg-opacity-20 transition-colors text-lg leading-none">×</button>
         </div>
@@ -118,8 +118,8 @@ export function Plans() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-6">
+    <div className="p-4 md:p-6 max-w-7xl mx-auto">
+      <div className="mb-5 md:mb-6">
         <h1 className="text-xl font-bold mb-1" style={{ color: 'var(--foreground)' }}>购买订阅</h1>
         <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>选择适合您的订阅套餐</p>
       </div>

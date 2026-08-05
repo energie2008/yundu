@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 import { LanguageSelector } from './LanguageSelector';
@@ -18,6 +19,7 @@ export function Layout() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -26,16 +28,34 @@ export function Layout() {
 
   const userInitial = user?.email?.charAt(0).toUpperCase() || 'U';
 
+  const closeSidebar = () => setSidebarOpen(false);
+
   return (
     <div className="flex h-screen" style={{ background: 'var(--background)' }}>
-      {/* Sidebar - xboard style white sidebar */}
-      <aside className="w-52 flex-shrink-0 flex flex-col border-r" style={{ background: 'var(--sidebar-bg)', borderColor: 'var(--sidebar-border)' }}>
+      {/* Sidebar - desktop visible, mobile hidden by default */}
+      <aside
+        className={
+          'fixed md:static inset-y-0 left-0 z-50 w-64 md:w-52 flex-shrink-0 flex flex-col border-r transition-transform duration-200 ' +
+          (sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0')
+        }
+        style={{ background: 'var(--sidebar-bg)', borderColor: 'var(--sidebar-border)' }}
+      >
         {/* Logo */}
         <div className="h-14 flex items-center px-4 border-b" style={{ borderColor: 'var(--sidebar-border)' }}>
           <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-bold text-sm mr-2" style={{ background: 'var(--primary)' }}>
             Y
           </div>
           <span className="font-bold text-lg" style={{ color: 'var(--foreground)' }}>YunDu</span>
+          <button
+            onClick={closeSidebar}
+            className="md:hidden ml-auto w-8 h-8 rounded-lg flex items-center justify-center text-lg transition-colors"
+            style={{ color: 'var(--muted-foreground)' }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--muted)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            aria-label="关闭菜单"
+          >
+            ×
+          </button>
         </div>
 
         {/* Navigation */}
@@ -45,6 +65,7 @@ export function Layout() {
               key={item.to}
               to={item.to}
               end={item.to === '/dashboard'}
+              onClick={closeSidebar}
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all duration-150 ` +
                 (isActive
@@ -89,14 +110,36 @@ export function Layout() {
         </div>
       </aside>
 
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+          onClick={closeSidebar}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top bar */}
-        <header className="h-14 flex items-center justify-between px-6 border-b flex-shrink-0" style={{ background: 'var(--header-bg)', borderColor: 'var(--border)' }}>
-          <div className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-            {/* Breadcrumb or title handled by pages */}
+        <header className="h-14 flex items-center justify-between px-4 md:px-6 border-b flex-shrink-0" style={{ background: 'var(--header-bg)', borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-2">
+            {/* Hamburger button - mobile only */}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-colors"
+              style={{ color: 'var(--muted-foreground)' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--muted)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              aria-label="打开菜单"
+            >
+              ☰
+            </button>
+            <div className="text-sm hidden sm:block" style={{ color: 'var(--muted-foreground)' }}>
+              {/* Breadcrumb or title handled by pages */}
+            </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-3">
             {/* Language selector */}
             <LanguageSelector />
             {/* Theme toggle */}

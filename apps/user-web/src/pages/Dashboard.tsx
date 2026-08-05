@@ -85,7 +85,7 @@ function writeDismissed(ids: string[]) {
 }
 
 const ANNOUNCEMENT_TONE: Record<string, { bg: string; color: string; icon: string }> = {
-  notice: { bg: 'rgba(217,119,87,0.1)', color: '#d97757', icon: '📢' },
+  notice: { bg: 'rgba(59,169,156,0.1)', color: '#3ba99c', icon: '📢' },
   update: { bg: 'rgba(95,141,78,0.1)', color: '#5f8d4e', icon: '✨' },
   maintenance: { bg: 'rgba(232,163,61,0.12)', color: '#e8a33d', icon: '🛠️' },
   alert: { bg: 'rgba(205,92,77,0.1)', color: '#cd5c4d', icon: '⚠️' },
@@ -279,8 +279,8 @@ function TrafficChart({ data }: { data?: TrafficLog[] }) {
   };
 
   return (
-    <div className="px-5 pb-5">
-      <div className="flex items-center gap-2 mb-2">
+    <div className="px-4 md:px-5 pb-5">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>最近7天流量使用</span>
         <div className="ml-auto flex items-center gap-3">
           <div className="flex items-center gap-1">
@@ -293,13 +293,13 @@ function TrafficChart({ data }: { data?: TrafficLog[] }) {
           </div>
         </div>
       </div>
-      <div className="relative h-48">
-        <div className="absolute left-0 top-0 bottom-6 w-14 flex flex-col justify-between text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+      <div className="relative h-40 md:h-48">
+        <div className="absolute left-0 top-0 bottom-6 w-10 md:w-14 flex flex-col justify-between text-[9px] md:text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
           {yLabels.map((v, i) => (
             <span key={i}>{v.toFixed(2)} GB</span>
           ))}
         </div>
-        <div className="ml-14 h-full relative border-l border-b" style={{ borderColor: 'var(--border)' }}>
+        <div className="ml-10 md:ml-14 h-full relative border-l border-b" style={{ borderColor: 'var(--border)' }}>
           {[0, 1, 2, 3, 4].map(i => (
             <div
               key={i}
@@ -430,18 +430,18 @@ export function Dashboard() {
 
   // Quick action items
   const quickActions = [
-    { icon: '🛒', label: '购买订阅', desc: '购买订阅套餐', to: '/dashboard/plans', color: '#d97757' },
-    { icon: '📥', label: '客户端软件下载', desc: '下载各平台客户端', to: '/dashboard/knowledge', color: '#d97757' },
-    { icon: '📋', label: '我的订单', desc: '查看订单历史', to: '/dashboard/orders', color: '#d97757' },
+    { icon: '🛒', label: '购买订阅', desc: '购买订阅套餐', to: '/dashboard/plans', color: '#3ba99c' },
+    { icon: '📥', label: '客户端软件下载', desc: '下载各平台客户端', to: '/dashboard/knowledge', color: '#3ba99c' },
+    { icon: '📋', label: '我的订单', desc: '查看订单历史', to: '/dashboard/orders', color: '#3ba99c' },
     { icon: '💬', label: '工单支持', desc: '获取客服帮助', to: '/dashboard/tickets', color: '#e8a33d' },
     { icon: '🎁', label: '邀请好友', desc: '赚取佣金奖励', to: '/dashboard/invite', color: '#5f8d4e' },
   ];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-4 md:p-6 max-w-6xl mx-auto">
       {/* Page title */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--foreground)' }}>
+      <div className="mb-5 md:mb-6">
+        <h1 className="text-xl md:text-2xl font-bold mb-1" style={{ color: 'var(--foreground)' }}>
           仪表盘, {username}!
         </h1>
         <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
@@ -461,7 +461,7 @@ export function Dashboard() {
             <div className="flex items-start justify-between mb-1">
               <h3 className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>我的订阅</h3>
               {isUnlimited && (
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(217,119,87,0.1)', color: 'var(--primary)' }}>
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(59,169,156,0.1)', color: 'var(--primary)' }}>
                   无限制
                 </span>
               )}
@@ -540,7 +540,7 @@ export function Dashboard() {
                       onClick={() => setImportOpen(!importOpen)}
                       className="w-full py-2.5 px-4 flex items-center justify-center gap-2 text-sm font-medium rounded-lg transition-colors"
                       style={{
-                        background: importOpen ? '#e08d70' : 'var(--muted)',
+                        background: importOpen ? 'var(--primary)' : 'var(--muted)',
                         color: importOpen ? 'white' : 'var(--foreground)',
                       }}
                       onMouseEnter={e => {
@@ -549,7 +549,7 @@ export function Dashboard() {
                       }}
                       onMouseLeave={e => {
                         if (!importOpen) e.currentTarget.style.background = 'var(--muted)';
-                        else e.currentTarget.style.background = '#e08d70';
+                        else e.currentTarget.style.background = 'var(--primary)';
                       }}
                     >
                       <span>📋</span> 快速导入订阅 <span style={{ transition: 'transform 0.2s', transform: importOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block' }}>⌄</span>
@@ -602,9 +602,9 @@ export function Dashboard() {
                         )}
 
                         {/* Platform selection */}
-                        <div className="flex items-center justify-between text-xs mb-2">
+                        <div className="flex items-center justify-between text-xs mb-2 flex-wrap gap-2">
                           <span className="font-medium" style={{ color: 'var(--foreground)' }}>{clientPlatform}</span>
-                          <div className="flex gap-3">
+                          <div className="flex gap-2 sm:gap-3 flex-wrap">
                             {(Object.keys(CLIENT_GROUPS) as (keyof typeof CLIENT_GROUPS)[]).map(p => (
                               <button
                                 key={p}
@@ -792,3 +792,4 @@ export function Dashboard() {
     </div>
   );
 }
+

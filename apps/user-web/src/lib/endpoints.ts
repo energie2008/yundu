@@ -477,6 +477,7 @@ export interface PaymentMethod {
   fiat: boolean
   network?: string
   networks?: string[]
+  hint?: string
 }
 
 export interface PaymentMethodsResponse {

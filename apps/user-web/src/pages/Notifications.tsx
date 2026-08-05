@@ -35,7 +35,7 @@ function getNotifIcon(type: string) {
   const t = (type || '').toLowerCase()
   if (t.includes('expir')) return { icon: Clock, color: '#e8a33d' }
   if (t.includes('traffic')) return { icon: Activity, color: 'var(--primary)' }
-  if (t.includes('ticket')) return { icon: MessageSquare, color: '#d97757' }
+  if (t.includes('ticket')) return { icon: MessageSquare, color: '#3ba99c' }
   if (t.includes('order')) return { icon: AlertTriangle, color: 'var(--destructive)' }
   return { icon: Bell, color: 'var(--primary)' }
 }
@@ -142,13 +142,13 @@ export default function Notifications() {
           <Button
             className="h-10 px-4 rounded-lg border-0 text-sm font-medium flex items-center gap-2 shadow-sm"
             style={{
-              backgroundColor: 'rgba(217,119,87,0.1)',
+              backgroundColor: 'rgba(59,169,156,0.1)',
               color: 'var(--primary)',
             }}
             onClick={() => markAllReadMutation.mutate()}
             disabled={markAllReadMutation.isPending}
             onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(217,119,87,0.15)')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(217,119,87,0.1)')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(59,169,156,0.1)')}
           >
             {markAllReadMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -237,7 +237,7 @@ export default function Notifications() {
                   border: `1px solid ${notif.is_read ? 'var(--border)' : 'rgba(217,119,87,0.2)'}`,
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = notif.is_read ? 'var(--muted)' : 'rgba(217,119,87,0.1)'
+                  e.currentTarget.style.backgroundColor = notif.is_read ? 'var(--muted)' : 'rgba(59,169,156,0.1)'
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = notif.is_read ? 'var(--card)' : 'rgba(217,119,87,0.05)'
@@ -265,7 +265,7 @@ export default function Notifications() {
                           className="text-xs flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg transition-colors"
                           style={{ color: 'var(--primary)' }}
                           onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = 'rgba(217,119,87,0.1)'
+                            e.currentTarget.style.backgroundColor = 'rgba(59,169,156,0.1)'
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.backgroundColor = 'transparent'
@@ -334,3 +334,4 @@ export default function Notifications() {
     </div>
   )
 }
+
