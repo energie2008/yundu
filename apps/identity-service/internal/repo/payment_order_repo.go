@@ -299,11 +299,11 @@ func (r *PaymentOrderRepo) GetRevenueStats(ctx context.Context) (*RevenueStats, 
 	//   - 0 元订单(zero_amount, 100% 券) final_amount=0，不计入营收但计入订单数
 	query := `
 		SELECT
-			COALESCE(SUM(CASE WHEN payment_method IN ('alipay','wechat') THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8 AS today_cny,
 			COALESCE(SUM(CASE WHEN pay_currency LIKE 'USDT%' THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8 AS today_usdt,
+			COALESCE(SUM(CASE WHEN payment_method IN ('alipay','wechat') THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8 AS today_cny,
 			COUNT(*) FILTER (WHERE paid_at >= date_trunc('day', now())) AS today_count,
-			COALESCE(SUM(CASE WHEN payment_method IN ('alipay','wechat') THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_cny,
 			COALESCE(SUM(CASE WHEN pay_currency LIKE 'USDT%' THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_usdt,
+			COALESCE(SUM(CASE WHEN payment_method IN ('alipay','wechat') THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_cny,
 			COUNT(*) FILTER (WHERE paid_at >= date_trunc('month', now())) AS month_count
 		FROM payment_orders
 		WHERE status = 'paid' AND paid_at IS NOT NULL`
