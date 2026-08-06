@@ -168,10 +168,12 @@ func (r *PlanRepo) Create(ctx context.Context, p *model.Plan) error {
 			sort_order, group_id, tags, feature_flags)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		RETURNING id, created_at, updated_at`
+	// feature_flags 是 jsonb 列：pgx 对 []byte 默认编码为 bytea 会类型不匹配（500），
+	// 需转 string（text 可隐式 cast 为 jsonb）
 	return r.pool.QueryRow(ctx, query,
 		p.Code, p.Name, p.Description, p.Content, p.Status, p.BillingType, p.TrafficBytes, p.SpeedLimitMbps,
 		p.DeviceLimit, p.IPLimit, p.ResetCycle, p.DurationDays, p.CanRenew,
-		p.SortOrder, p.GroupID, tags, featureFlags,
+		p.SortOrder, p.GroupID, tags, string(featureFlags),
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 }
 
@@ -194,10 +196,11 @@ func (r *PlanRepo) Update(ctx context.Context, p *model.Plan) error {
 			reset_cycle = $11, duration_days = $12, can_renew = $13,
 			sort_order = $14, group_id = $15, tags = $16, feature_flags = $17, updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL`
+	// feature_flags 是 jsonb 列：转 string 避免 bytea 类型不匹配（同 Create）
 	_, err := r.pool.Exec(ctx, query,
 		p.ID, p.Name, p.Description, p.Content, p.Status, p.BillingType, p.TrafficBytes,
 		p.SpeedLimitMbps, p.DeviceLimit, p.IPLimit, p.ResetCycle, p.DurationDays,
-		p.CanRenew, p.SortOrder, p.GroupID, tags, featureFlags,
+		p.CanRenew, p.SortOrder, p.GroupID, tags, string(featureFlags),
 	)
 	return err
 }

@@ -293,14 +293,18 @@ type RevenueStats struct {
 // GetRevenueStats 汇总当日与当月的营收。时间窗以数据库本地时区的 date_trunc 计算，
 // 避免应用侧时区换算偏差；未成交（非 paid）订单不计入。
 func (r *PaymentOrderRepo) GetRevenueStats(ctx context.Context) (*RevenueStats, error) {
+	// 营收按实付金额（final_amount，已扣优惠券折扣）分币种统计，对齐 xboard：
+	//   - CNY 营收 = 法币订单(alipay/wechat) final_amount 之和
+	//   - USDT 营收 = 加密订单(pay_currency LIKE 'USDT%') final_amount 之和
+	//   - 0 元订单(zero_amount, 100% 券) final_amount=0，不计入营收但计入订单数
 	query := `
 		SELECT
-			COALESCE(SUM(COALESCE(final_amount, amount_usdt)) FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8   AS today_usdt,
-			COALESCE(SUM(COALESCE(amount_cny, 0))            FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8   AS today_cny,
-			COUNT(*)                                         FILTER (WHERE paid_at >= date_trunc('day', now()))               AS today_count,
-			COALESCE(SUM(COALESCE(final_amount, amount_usdt)) FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_usdt,
-			COALESCE(SUM(COALESCE(amount_cny, 0))            FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_cny,
-			COUNT(*)                                         FILTER (WHERE paid_at >= date_trunc('month', now()))             AS month_count
+			COALESCE(SUM(CASE WHEN payment_method IN ('alipay','wechat') THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8 AS today_cny,
+			COALESCE(SUM(CASE WHEN pay_currency LIKE 'USDT%' THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('day', now())), 0)::float8 AS today_usdt,
+			COUNT(*) FILTER (WHERE paid_at >= date_trunc('day', now())) AS today_count,
+			COALESCE(SUM(CASE WHEN payment_method IN ('alipay','wechat') THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_cny,
+			COALESCE(SUM(CASE WHEN pay_currency LIKE 'USDT%' THEN final_amount ELSE 0 END) FILTER (WHERE paid_at >= date_trunc('month', now())), 0)::float8 AS month_usdt,
+			COUNT(*) FILTER (WHERE paid_at >= date_trunc('month', now())) AS month_count
 		FROM payment_orders
 		WHERE status = 'paid' AND paid_at IS NOT NULL`
 	s := &RevenueStats{}
