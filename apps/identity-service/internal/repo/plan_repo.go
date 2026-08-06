@@ -70,6 +70,20 @@ func (r *PlanRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Plan, erro
 	return p, nil
 }
 
+func (r *PlanRepo) GetByCodeAny(ctx context.Context, code string) (*model.Plan, error) {
+	// 含软删记录：软删行仍占用 code UNIQUE 约束，创建时若不查会撞约束返回 500
+	query := fmt.Sprintf(`SELECT %s FROM plans WHERE code = $1`, planColumns)
+	p := &model.Plan{}
+	err := scanPlan(r.pool.QueryRow(ctx, query, code), p)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return p, nil
+}
+
 func (r *PlanRepo) GetByCode(ctx context.Context, code string) (*model.Plan, error) {
 	query := fmt.Sprintf(`SELECT %s FROM plans WHERE code = $1 AND deleted_at IS NULL`, planColumns)
 	p := &model.Plan{}

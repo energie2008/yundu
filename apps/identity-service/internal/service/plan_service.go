@@ -132,7 +132,8 @@ func (s *PlanService) Create(ctx context.Context, req *model.CreatePlanRequest) 
 		return nil, ErrPlanCodeInvalid
 	}
 
-	existing, err := s.planRepo.GetByCode(ctx, req.Code)
+	// 含软删检查：软删 code 仍占用 UNIQUE 约束，不查会导致 Create 撞约束返回 500
+	existing, err := s.planRepo.GetByCodeAny(ctx, req.Code)
 	if err != nil {
 		return nil, err
 	}

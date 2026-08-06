@@ -187,7 +187,8 @@ function slugify(str: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-+/g, '-')
-    || 'plan'
+    // 纯中文/无 ASCII 名时生成唯一 code，避免多套餐都落到固定 'plan' 撞唯一约束
+    || ('plan-' + Date.now().toString(36))
 }
 
 interface FormData {
