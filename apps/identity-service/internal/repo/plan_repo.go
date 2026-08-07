@@ -220,7 +220,11 @@ func (r *PlanRepo) Update(ctx context.Context, p *model.Plan) error {
 }
 
 func (r *PlanRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	query := `UPDATE plans SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL`
+	// 软删同时释放 code 唯一约束（code 加 :del: 后缀），允许之后重建同名套餐；
+	// 否则软删行仍占用 code，新建同名套餐会撞 UNIQUE(code) 返回 500/409
+	query := `UPDATE plans SET deleted_at = now(), updated_at = now(),
+	          code = code || ':del:' || substr(replace(id::text, '-', ''), 1, 8)
+	          WHERE id = $1 AND deleted_at IS NULL`
 	_, err := r.pool.Exec(ctx, query, id)
 	return err
 }
