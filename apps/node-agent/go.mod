@@ -9,15 +9,24 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/libdns/acmedns v0.5.0
 	github.com/libdns/alidns v1.0.6
+	github.com/libdns/azure v0.5.0
 	github.com/libdns/cloudflare v0.2.2
 	github.com/libdns/digitalocean v0.0.0-20250606071607-dfa7af5c2e31
 	github.com/libdns/gandi v1.1.0
 	github.com/libdns/googleclouddns v1.2.0
 	github.com/libdns/hetzner v1.0.0
 	github.com/libdns/linode v0.5.0
+	github.com/libdns/loopia v1.0.1
 	github.com/libdns/namecheap v1.0.0
+	github.com/libdns/namesilo v1.0.0
+	github.com/libdns/netcup v1.0.0
+	github.com/libdns/ovh v1.1.0
+	github.com/libdns/powerdns v0.1.4
+	github.com/libdns/rfc2136 v1.0.1
 	github.com/libdns/route53 v1.6.2
+	github.com/libdns/scaleway v0.3.1
 	github.com/libdns/tencentcloud v1.4.3
+	github.com/libdns/transip v1.1.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sagernet/sing v0.8.11
 	github.com/sagernet/sing-box v1.13.14
@@ -33,6 +42,11 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.18.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.9.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.1 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/dns/armdns v1.2.0 // indirect
+	github.com/AzureAD/microsoft-authentication-library-for-go v1.4.2 // indirect
 	github.com/ajg/form v1.5.1 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
@@ -95,6 +109,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/gofrs/uuid/v5 v5.4.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -116,6 +131,8 @@ require (
 	github.com/keybase/go-keychain v0.0.1 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/kolo/xmlrpc v0.0.0-20201022064351-38db28db192b // indirect
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect
 	github.com/linode/linodego v1.56.0 // indirect
@@ -127,14 +144,18 @@ require (
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
+	github.com/mittwald/go-powerdns v0.6.6 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/openai/openai-go/v3 v3.26.0 // indirect
+	github.com/ovh/go-ovh v1.7.0 // indirect
+	github.com/pbergman/provider v1.1.1 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pires/go-proxyproto v0.11.0 // indirect
+	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/prometheus-community/pro-bing v0.4.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
@@ -193,6 +214,7 @@ require (
 	github.com/sagernet/tailscale v1.92.4-sing-box-1.13-mod.7 // indirect
 	github.com/sagernet/wireguard-go v0.0.2-beta.1.0.20260224074747-506b7631853c // indirect
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854 // indirect
+	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.36 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20231202035212-d3fa0460f47e // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
 	github.com/tailscale/goupnp v1.0.1-0.20210804011211-c64d0f06ea05 // indirect

@@ -1,17 +1,36 @@
 // Package dnsproviders - 未实现的 DNS provider 存根
 //
+// P1-2 完成里程碑：22 个目标 provider 中 20 个已实现真实代码，2 个保留为 stub。
+//
 // 已实现的 provider（各自的 .go 文件）：
-//   - cloudflare / alidns / acmedns
-//   - tencentcloud (DNSPod) / route53 (AWS) / googlecloud (GCP)
-//   - digitalocean / hetzner / linode / gandi / namecheap
+//   1.  cloudflare       (libdns/cloudflare)
+//   2.  alidns           (libdns/alidns)          — 阿里云
+//   3.  acmedns          (libdns/acmedns)
+//   4.  tencentcloud     (libdns/tencentcloud)     — 腾讯云/DNSPod
+//   5.  route53          (libdns/route53)          — AWS
+//   6.  googlecloud      (libdns/googleclouddns)   — GCP
+//   7.  digitalocean     (libdns/digitalocean)
+//   8.  hetzner          (libdns/hetzner)
+//   9.  linode           (libdns/linode)
+//  10.  gandi            (libdns/gandi)
+//  11.  namecheap         (libdns/namecheap)
+//  12.  azure            (libdns/azure)             — Microsoft Azure
+//  13.  ovh              (libdns/ovh)
+//  14.  rfc2136          (libdns/rfc2136)          — BIND/PowerDNS 动态更新
+//  15.  namesilo         (libdns/namesilo)
+//  16.  powerdns         (libdns/powerdns)
+//  17.  transip          (libdns/transip)
+//  18.  loopia           (libdns/loopia)
+//  19.  netcup           (libdns/netcup)
+//  20.  scaleway         (libdns/scaleway)
 //
-// 以下 provider 尚未实现，Build 返回引导用户添加依赖的错误。
-// 当用户需要某个 provider 时，在 go.mod 中添加对应的 libdns 模块，
-// 然后创建对应的 .go 文件并将此文件中对应条目的 stubBuild 替换为真实实现。
+// 以下 2 个 provider 因 libdns 模块未升级至 v1.x API 保留为 stub：
+//  21.  vultr            — github.com/libdns/vultr v1.0.0 仍使用 libdns v0.2.x 旧版 API
+//                        （record.ID/Name/Type 字段访问 + libdns.Record 复合字面量），
+//                        与本项目 libdns v1.x（Record 为接口）不兼容，编译失败。
+//  22.  namedotcom       — github.com/libdns/namedotcom v0.3.3 同样不兼容 libdns v1.x。
 //
-// 注意：vultr 和 namedotcom (name.com) 的最新 libdns 包仍基于 libdns v0.2.x
-// 旧版 API（libdns.Record 为结构体），与本项目使用的 libdns v1.x（Record 为接口）
-// 不兼容，因此暂保留为 stub。
+// 当上游模块升级后，创建对应 .go 文件并将此文件中对应条目的 stubBuild 替换为真实实现。
 //
 // 完整 provider 列表参考：
 // https://github.com/cedar2025/Xboard-Node/blob/dev/docs-dns-providers.md
@@ -28,40 +47,16 @@ import (
 func stubBuild(providerName, libdnsModule string) func(env map[string]string) (certmagic.DNSProvider, error) {
 	return func(env map[string]string) (certmagic.DNSProvider, error) {
 		return nil, fmt.Errorf(
-			"dns_provider %q 未编译入二进制；请运行 `go get %s` 并替换 stubBuild 为真实实现",
+			"dns_provider %q 未编译入二进制（libdns 模块未兼容 v1.x API）；"+
+				"待上游 %s 升级后实现",
 			providerName, libdnsModule,
 		)
 	}
 }
 
 func init() {
-	// 6. Azure DNS
-	Register(&Provider{
-		Name:    "azure",
-		Aliases: []string{"azuredns"},
-		EnvVars: []string{"AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"},
-		Build:   stubBuild("azure", "github.com/libdns/azure"),
-	})
-
-	// 12. OVH
-	Register(&Provider{
-		Name:    "ovh",
-		Aliases: []string{},
-		EnvVars: []string{"OVH_ENDPOINT", "OVH_APPLICATION_KEY", "OVH_APPLICATION_SECRET", "OVH_CONSUMER_KEY"},
-		Build:   stubBuild("ovh", "github.com/libdns/ovh"),
-	})
-
-	// 13. RFC 2136
-	Register(&Provider{
-		Name:    "rfc2136",
-		Aliases: []string{"bind"},
-		EnvVars: []string{"RFC2136_NAMESERVER", "RFC2136_TSIG_KEY", "RFC2136_TSIG_ALGORITHM", "RFC2136_TSIG_SECRET"},
-		Build:   stubBuild("rfc2136", "github.com/libdns/rfc2136"),
-	})
-
-	// 14. Vultr
-	// 注意：github.com/libdns/vultr v1.0.0 仍使用 libdns v0.2.x 旧版 API，
-	// 与本项目 libdns v1.x 不兼容，暂保留为 stub。
+	// 21. Vultr
+	// github.com/libdns/vultr v1.0.0 仍使用 libdns v0.2.x 旧版 API，不兼容。
 	Register(&Provider{
 		Name:    "vultr",
 		Aliases: []string{},
@@ -69,57 +64,8 @@ func init() {
 		Build:   stubBuild("vultr", "github.com/libdns/vultr"),
 	})
 
-	// 16. Namesilo
-	Register(&Provider{
-		Name:    "namesilo",
-		Aliases: []string{},
-		EnvVars: []string{"NAMESILO_API_KEY"},
-		Build:   stubBuild("namesilo", "github.com/libdns/namesilo"),
-	})
-
-	// 17. PowerDNS
-	Register(&Provider{
-		Name:    "powerdns",
-		Aliases: []string{"pdns"},
-		EnvVars: []string{"PDNS_API_URL", "PDNS_API_KEY"},
-		Build:   stubBuild("powerdns", "github.com/libdns/powerdns"),
-	})
-
-	// 18. TransIP
-	Register(&Provider{
-		Name:    "transip",
-		Aliases: []string{},
-		EnvVars: []string{"TRANSIP_ACCOUNT_NAME", "TRANSIP_PRIVATE_KEY_PATH"},
-		Build:   stubBuild("transip", "github.com/libdns/transip"),
-	})
-
-	// 19. Loopia
-	Register(&Provider{
-		Name:    "loopia",
-		Aliases: []string{},
-		EnvVars: []string{"LOOPIA_API_USER", "LOOPIA_API_PASSWORD"},
-		Build:   stubBuild("loopia", "github.com/libdns/loopia"),
-	})
-
-	// 20. Netcup
-	Register(&Provider{
-		Name:    "netcup",
-		Aliases: []string{},
-		EnvVars: []string{"NETCUP_CUSTOMER_NUMBER", "NETCUP_API_KEY", "NETCUP_API_PASSWORD"},
-		Build:   stubBuild("netcup", "github.com/libdns/netcup"),
-	})
-
-	// 21. Scaleway
-	Register(&Provider{
-		Name:    "scaleway",
-		Aliases: []string{"scw"},
-		EnvVars: []string{"SCW_ACCESS_KEY", "SCW_SECRET_KEY"},
-		Build:   stubBuild("scaleway", "github.com/libdns/scaleway"),
-	})
-
 	// 22. Name.com (namedotcom)
-	// 注意：github.com/libdns/namedotcom v0.3.3 仍使用 libdns v0.2.x 旧版 API，
-	// 与本项目 libdns v1.x 不兼容，暂保留为 stub。
+	// github.com/libdns/namedotcom v0.3.3 仍使用 libdns v0.2.x 旧版 API，不兼容。
 	Register(&Provider{
 		Name:    "namedotcom",
 		Aliases: []string{"namecom"},
