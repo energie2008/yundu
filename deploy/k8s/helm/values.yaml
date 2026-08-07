@@ -1,0 +1,117 @@
+# YunDu Helm Chart - Default values
+# This file is intentionally minimal; see values-production.yaml for production settings
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# node-service (panel backend)
+nodeService:
+  enabled: true
+  image:
+    repository: yundu/node-service
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  service:
+    type: ClusterIP
+    port: 8081
+  env:
+    DB_HOST: ""
+    DB_PORT: "5432"
+    DB_NAME: "airport"
+    DB_USER: "app"
+    REDIS_HOST: ""
+    REDIS_PORT: "6379"
+  envSecrets:
+    DB_PASSWORD: ""
+    REDIS_PASSWORD: ""
+  # Database connection - if no external DB, enable postgres subchart
+  externalDB:
+    enabled: true
+
+# node-agent (proxy node)
+nodeAgent:
+  enabled: false  # Disabled by default; enable for edge node deployment
+  image:
+    repository: yundu/node-agent
+    tag: latest
+    pullPolicy: IfNotPresent
+  # Deploy as DaemonSet on edge nodes
+  nodeSelector:
+    yundu.io/role: edge
+  hostNetwork: true
+  hostPID: false
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 256Mi
+    requests:
+      cpu: 200m
+      memory: 128Mi
+  env:
+    RUNTIME_TYPE: sing-box
+    XRAY_API_ENDPOINT: 127.0.0.1:9080
+    SINGBOX_CLASH_ENDPOINT: 127.0.0.1:9090
+  # Standalone mode (no panel connection)
+  standalone:
+    enabled: false
+    config: ""
+
+# admin-web (frontend)
+adminWeb:
+  enabled: true
+  image:
+    repository: yundu/admin-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  resources:
+    limits:
+      cpu: 200m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  service:
+    type: ClusterIP
+    port: 80
+
+# Ingress
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: admin.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Auto-scaling
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# PostgreSQL subchart (disabled by default, use external DB)
+postgresql:
+  enabled: false
+
+# Redis subchart (disabled by default, use external Redis)
+redis:
+  enabled: false

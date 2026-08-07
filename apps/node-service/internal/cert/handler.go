@@ -1,6 +1,7 @@
 package cert
 
 import (
+	"context"
 	"errors"
 	"strconv"
 
@@ -174,7 +175,9 @@ func (h *AdminCertHandler) TriggerRenew(c *gin.Context) {
 		return
 	}
 
-	cert, err := h.svc.TriggerRenew(c.Request.Context(), id)
+	// ACME 续期是长任务，网关/中间件超时后会取消请求 context；
+	// 用 WithoutCancel 保证 lego 完成后 DB 回写不被中断。
+	cert, err := h.svc.TriggerRenew(context.WithoutCancel(c.Request.Context()), id)
 	if err != nil {
 		code, msg := MapCertErrorToCode(err)
 		server.Fail(c, code, msg)
@@ -307,7 +310,8 @@ func (h *AdminCertHandler) ObtainCertificate(c *gin.Context) {
 		return
 	}
 
-	cert, err := h.svc.ObtainCertificate(c.Request.Context(), id)
+	// ACME 签发是长任务，同上使用不随请求取消的 context。
+	cert, err := h.svc.ObtainCertificate(context.WithoutCancel(c.Request.Context()), id)
 	if err != nil {
 		code, msg := MapCertErrorToCode(err)
 		server.Fail(c, code, msg)
@@ -355,8 +359,8 @@ func (h *AdminCertHandler) SyncSANFromNodes(c *gin.Context) {
 	}
 
 	server.OK(c, gin.H{
-		"certificate":  NewCertificateResponse(cert),
-		"added_count":  added,
-		"total_sans":   len(cert.SANs),
+		"certificate": NewCertificateResponse(cert),
+		"added_count": added,
+		"total_sans":  len(cert.SANs),
 	})
 }

@@ -48,6 +48,8 @@ import Notifications from '@/pages/Notifications'
 import MailTemplates from '@/pages/MailTemplates'
 import SubscriptionTemplates from '@/pages/SubscriptionTemplates'
 import Deployments from '@/pages/Deployments'
+import DeploymentDashboard from '@/pages/DeploymentDashboard'
+import CompilerWorkbench from '@/pages/CompilerWorkbench'
 import Presets from '@/pages/Presets'
 
 const queryClient = new QueryClient({
@@ -93,6 +95,8 @@ function AppRoutes() {
         <Route path="proxy-chains" element={<ProxyChains />} />
         <Route path="route-policies" element={<RoutePolicies />} />
         <Route path="deployments" element={<Deployments />} />
+        <Route path="deployment-dashboard" element={<DeploymentDashboard />} />
+        <Route path="compiler-workbench" element={<CompilerWorkbench />} />
 
         <Route path="plans" element={<Plans />} />
         <Route path="subscription-preview" element={<SubscriptionPreview />} />

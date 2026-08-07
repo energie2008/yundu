@@ -15,6 +15,7 @@ const (
 
 	PaymentMethodUSDTTRC20 = "usdt_trc20"
 	PaymentMethodUSDTERC20 = "usdt_erc20"
+	PaymentMethodUSDTBEP20 = "usdt_bep20"
 	PaymentMethodWechat    = "wechat"
 	PaymentMethodAlipay    = "alipay"
 	PaymentMethodZero      = "zero_amount"
@@ -27,7 +28,7 @@ func IsFiatPayment(method string) bool {
 
 // IsUSDPayment 判断是否为 USDT 加密货币支付
 func IsUSDPayment(method string) bool {
-	return method == PaymentMethodUSDTTRC20 || method == PaymentMethodUSDTERC20
+	return method == PaymentMethodUSDTTRC20 || method == PaymentMethodUSDTERC20 || method == PaymentMethodUSDTBEP20
 }
 
 type CreateOrderRequest struct {

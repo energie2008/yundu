@@ -34,7 +34,9 @@ export const EP = {
   TLS_CERTIFICATES: '/admin/tls-certificates',
   TLS_CERTIFICATE: (id: string) => `/admin/tls-certificates/${id}`,
   TLS_CERTIFICATE_RENEW: (id: string) => `/admin/tls-certificates/${id}/renew`,
+  TLS_CERTIFICATE_OBTAIN: (id: string) => `/admin/tls-certificates/${id}/obtain`,
   TLS_CERTIFICATE_DEPLOY_STATUS: (id: string) => `/admin/tls-certificates/${id}/deploy-status`,
+  TLS_CERTIFICATE_DEFAULTS: '/admin/tls-certificates/defaults',
 
   // ===== TLS Profile (node-service) =====
   TLS_PROFILES: '/admin/tls-profiles',

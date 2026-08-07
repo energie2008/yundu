@@ -131,6 +131,21 @@ func (r *UserRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.User, erro
 	return u, nil
 }
 
+func (r *UserRepo) GetByEmailAny(ctx context.Context, email string) (*model.User, error) {
+	// 含软删除记录（软删除行仍占用 email UNIQUE 约束，注册时必须能查到，
+	// 否则 GetByEmail 查不到、Create 撞唯一约束返回 500）
+	query := `SELECT ` + userColumns + ` FROM users WHERE LOWER(email) = LOWER($1)`
+	u := &model.User{}
+	err := scanUser(r.pool.QueryRow(ctx, query, email), u)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return u, nil
+}
+
 func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, error) {
 	query := `SELECT ` + userColumns + ` FROM users WHERE email = $1 AND deleted_at IS NULL`
 	u := &model.User{}

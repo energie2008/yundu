@@ -67,12 +67,12 @@ type Manager struct {
 
 // Options 是 Manager 的构造参数。
 type Options struct {
-	Dev       string // 主网卡（下载整形）
-	Ifb       string // IFB 网卡（上传整形），默认 ifb0
-	ServerIP  string // 本机对外 IP（iptables OUTPUT -s 使用）
-	StateDir  string // 状态文件目录
-	Logger    *slog.Logger
-	Runner    Runner
+	Dev      string // 主网卡（下载整形）
+	Ifb      string // IFB 网卡（上传整形），默认 ifb0
+	ServerIP string // 本机对外 IP（iptables OUTPUT -s 使用）
+	StateDir string // 状态文件目录
+	Logger   *slog.Logger
+	Runner   Runner
 }
 
 // NewManager 创建 Manager。Dev/ServerIP 为空时通过 ip route 自动探测。
@@ -132,6 +132,8 @@ func (m *Manager) EnsureBase(ctx context.Context) error {
 		{"tc", "qdisc", "add", "dev", m.ifb, "root", "handle", "1:", "htb", "default", "1"},
 		{"tc", "class", "add", "dev", m.ifb, "parent", "1:", "classid", "1:1", "htb", "rate", "10gbit", "ceil", "10gbit"},
 		{"tc", "qdisc", "add", "dev", m.dev, "handle", "ffff:", "ingress"},
+		// 先删除历史累积的同款 ingress filter 再添加，避免每次循环重复累积数千条
+		{"tc", "filter", "del", "dev", m.dev, "parent", "ffff:", "protocol", "ip", "prio", "1", "u32", "match", "u32", "0", "0", "action", "mirred", "egress", "redirect", "dev", m.ifb},
 		{"tc", "filter", "add", "dev", m.dev, "parent", "ffff:", "protocol", "ip", "prio", "1", "u32", "match", "u32", "0", "0", "action", "mirred", "egress", "redirect", "dev", m.ifb},
 	}
 	var firstErr error
@@ -232,6 +234,8 @@ func (m *Manager) ensureBaseLocked(ctx context.Context) error {
 		{"tc", "qdisc", "add", "dev", m.ifb, "root", "handle", "1:", "htb", "default", "1"},
 		{"tc", "class", "add", "dev", m.ifb, "parent", "1:", "classid", "1:1", "htb", "rate", "10gbit", "ceil", "10gbit"},
 		{"tc", "qdisc", "add", "dev", m.dev, "handle", "ffff:", "ingress"},
+		// 先删除历史累积的同款 ingress filter 再添加，避免每次循环重复累积数千条
+		{"tc", "filter", "del", "dev", m.dev, "parent", "ffff:", "protocol", "ip", "prio", "1", "u32", "match", "u32", "0", "0", "action", "mirred", "egress", "redirect", "dev", m.ifb},
 		{"tc", "filter", "add", "dev", m.dev, "parent", "ffff:", "protocol", "ip", "prio", "1", "u32", "match", "u32", "0", "0", "action", "mirred", "egress", "redirect", "dev", m.ifb},
 	}
 	var failed int

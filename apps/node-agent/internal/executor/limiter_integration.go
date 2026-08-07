@@ -46,6 +46,9 @@ type LimiterIntegration struct {
 	userIPLimits     sync.Map // uuid/email -> int (ip limit)
 	nodeIPLimit      int      // 节点级 IP 数限制默认值（用户未配置 per-user 限制时生效）
 	logger           *slog.Logger
+	// xrayLimitSyncCallback 在 syncLimiters 完成后被调用，将 per-user 限速映射
+	// 传播到 xray enforcement loop（MultiRuntimePlugin.UpdateXraySpeedLimits）。
+	xrayLimitSyncCallback func(map[string]int)
 }
 
 // NewLimiterIntegration 创建限速器集成实例，初始化空的 SpeedLimiter/DeviceLimiter/IPLimiter。
@@ -56,6 +59,12 @@ func NewLimiterIntegration(logger *slog.Logger) *LimiterIntegration {
 		ipLimiter:     limiter.NewIPLimiter(),
 		logger:        logger.With("component", "limiter-integration"),
 	}
+}
+
+// SetXrayLimitSyncCallback 设置一个在限速同步完成后被调用的回调。
+// 用于将 per-user 限速映射传播到 xray enforcement loop。
+func (li *LimiterIntegration) SetXrayLimitSyncCallback(cb func(map[string]int)) {
+	li.xrayLimitSyncCallback = cb
 }
 
 // ParseLimiterConfig 从配置 JSON 字符串中解析 _limiter 元数据并更新限速器。
@@ -144,6 +153,25 @@ func (li *LimiterIntegration) parseLimiterMeta(rawMeta []byte) {
 		} else {
 			li.userIPLimits.Delete(key)
 		}
+	}
+
+	// 同步完成后，将 per-user 限速映射传播到 xray enforcement loop。
+	// xray StatsService 以 email 为 key 上报流量，因此限速映射优先用 email。
+	if li.xrayLimitSyncCallback != nil {
+		limits := make(map[string]int)
+		for _, u := range meta.Users {
+			key := u.Email
+			if key == "" {
+				key = u.UUID
+			}
+			if key == "" {
+				continue
+			}
+			if u.SpeedLimitMbps > 0 {
+				limits[key] = u.SpeedLimitMbps
+			}
+		}
+		li.xrayLimitSyncCallback(limits)
 	}
 
 	li.logger.Info("limiter config parsed",

@@ -234,18 +234,24 @@ func (s *CouponService) ValidateCoupon(ctx context.Context, code string, userID 
 		return 0, ErrCouponUsedUp
 	}
 
-	// 3. 一次性券：不可重复使用，全局已用过即拒绝
-	if !coupon.IsRepeatable && coupon.UsedCount > 0 {
-		return 0, ErrCouponNotRepeatable
-	}
-
-	// 4. 每用户限用次数（limit_use_by_user=0 表示不限）
+	// 3+4. 每用户限用次数：
+	//   - limit_use_by_user>0：按该值限制（每人可用 N 次）
+	//   - limit_use_by_user=0 且 is_repeatable=false：每人限用 1 次
+	//   （不再按全局 used_count 拒绝，避免"全局用过一次所有人不可再用"与
+	//     limit_use_by_user 设置冲突）
 	if coupon.LimitUseByUser > 0 {
 		usedCount, err := s.couponRepo.CountUsageByUser(ctx, coupon.ID, userID)
 		if err != nil {
 			s.logger.Warn("validate coupon: count usage by user failed", "coupon", coupon.ID, "user", userID, "error", err)
 		} else if usedCount >= coupon.LimitUseByUser {
 			return 0, ErrCouponUsedUp
+		}
+	} else if !coupon.IsRepeatable {
+		usedCount, err := s.couponRepo.CountUsageByUser(ctx, coupon.ID, userID)
+		if err != nil {
+			s.logger.Warn("validate coupon: count usage by user failed", "coupon", coupon.ID, "user", userID, "error", err)
+		} else if usedCount >= 1 {
+			return 0, ErrCouponNotRepeatable
 		}
 	}
 

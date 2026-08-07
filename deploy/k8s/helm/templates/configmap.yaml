@@ -1,0 +1,17 @@
+{{- if .Values.nodeAgent.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "yundu.fullname" . }}-agent-config
+  labels:
+    {{- include "yundu.labels" . | nindent 4 }}
+data:
+  {{- if .Values.nodeAgent.standalone.enabled }}
+  standalone.json: |
+{{ .Values.nodeAgent.standalone.config | default "{}" | indent 4 }}
+  {{- end }}
+  node-agent.env: |
+    RUNTIME_TYPE={{ .Values.nodeAgent.env.RUNTIME_TYPE }}
+    XRAY_API_ENDPOINT={{ .Values.nodeAgent.env.XRAY_API_ENDPOINT }}
+    SINGBOX_CLASH_ENDPOINT={{ .Values.nodeAgent.env.SINGBOX_CLASH_ENDPOINT }}
+{{- end }}

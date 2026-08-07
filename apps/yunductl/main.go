@@ -31,6 +31,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,6 +202,14 @@ Flags:
   bind          查看端口绑定信息
   upgrade       触发自升级检查
   machine list  Machine 模式：远程查询 panel 节点列表
+  version       显示版本信息（agent/runtime/config 版本）
+  health        健康检查（连通性/运行时/配置/在线用户）
+  config        配置操作子命令:
+      validate <file>    验证本地配置文件
+      render <node>      渲染节点配置（dry-run）
+  server        服务器操作子命令:
+      list               列出所有面板注册服务器
+      status <code>      查看服务器详情
   help          显示此帮助信息
 
 环境变量:
@@ -348,6 +357,170 @@ func main() {
 			os.Exit(1)
 		}
 		listMachineNodes()
+
+	case "version":
+		body, err := sendRequest("GET", "/v1/status")
+		if err != nil {
+			body, err = sendRequest("GET", "/status")
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+			os.Exit(1)
+		}
+		// 提取版本相关字段
+		var status map[string]interface{}
+		if err := json.Unmarshal(body, &status); err == nil {
+			fmt.Printf("Agent Version:    %v\n", status["agent_version"])
+			fmt.Printf("Runtime Version:  %v\n", status["runtime_version"])
+			fmt.Printf("Config Version:   %v\n", status["config_version"])
+			fmt.Printf("Runtime Type:     %v\n", status["runtime_type"])
+			fmt.Printf("Running:          %v\n", status["running"])
+		} else {
+			printResult(body)
+		}
+
+	case "health":
+		fmt.Println("=== YunDu Health Check ===")
+
+		// 1. 检查 agent socket/HTTP 连通性
+		fmt.Print("Agent connectivity... ")
+		body, err := sendRequest("GET", "/v1/status")
+		if err != nil {
+			body, err = sendRequest("GET", "/status")
+		}
+		if err != nil {
+			fmt.Println("FAIL")
+			fmt.Fprintf(os.Stderr, "  Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("OK")
+
+		// 2. 解析状态并检查 runtime
+		var status map[string]interface{}
+		if err := json.Unmarshal(body, &status); err == nil {
+			fmt.Print("Runtime status... ")
+			if running, ok := status["running"].(bool); ok && running {
+				fmt.Println("OK (running)")
+			} else {
+				fmt.Println("WARN (not running)")
+			}
+
+			// 3. 检查 config version
+			fmt.Print("Config version... ")
+			if v, ok := status["config_version"]; ok && v != "" && v != "0" {
+				fmt.Printf("OK (%v)\n", v)
+			} else {
+				fmt.Println("WARN (no config applied)")
+			}
+
+			// 4. 检查在线用户
+			fmt.Print("Online users... ")
+			if users, ok := status["online_users"]; ok {
+				fmt.Printf("%v\n", users)
+			} else {
+				fmt.Println("N/A")
+			}
+		}
+
+		// 5. 检查 diag 信息
+		fmt.Print("Diagnostics... ")
+		diagBody, err := sendRequest("GET", "/v1/diag")
+		if err != nil {
+			diagBody, err = sendRequest("GET", "/diag")
+		}
+		if err == nil {
+			fmt.Println("OK")
+			var diag map[string]interface{}
+			if err := json.Unmarshal(diagBody, &diag); err == nil {
+				if grpc, ok := diag["xray_grpc"]; ok {
+					fmt.Printf("  Xray gRPC: %v\n", grpc)
+				}
+				if ports, ok := diag["ports"]; ok {
+					fmt.Printf("  Ports: %v\n", ports)
+				}
+			}
+		} else {
+			fmt.Println("SKIP")
+		}
+		fmt.Println("\nHealth check complete.")
+
+	case "config":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "用法: yunductl config <validate|render> [args]\n")
+			os.Exit(1)
+		}
+		switch args[1] {
+		case "validate":
+			// 验证本地配置文件
+			if len(args) < 3 {
+				fmt.Fprintf(os.Stderr, "用法: yunductl config validate <file>\n")
+				os.Exit(1)
+			}
+			configFile := args[2]
+			data, err := os.ReadFile(configFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "读取配置文件失败: %v\n", err)
+				os.Exit(1)
+			}
+			var v interface{}
+			if err := json.Unmarshal(data, &v); err != nil {
+				fmt.Fprintf(os.Stderr, "JSON 解析失败: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("配置文件格式: OK")
+			// 基本结构检查
+			if m, ok := v.(map[string]interface{}); ok {
+				if _, hasNodes := m["nodes"]; hasNodes {
+					fmt.Println("节点配置: 存在")
+				}
+				if rt, hasRT := m["runtime_type"]; hasRT {
+					fmt.Printf("运行时类型: %v\n", rt)
+				}
+			}
+			fmt.Println("验证完成")
+
+		case "render":
+			// 渲染：调用 agent 的 render 接口（如可用）或显示配置预览
+			if len(args) < 3 {
+				fmt.Fprintf(os.Stderr, "用法: yunductl config render <node-name>\n")
+				os.Exit(1)
+			}
+			nodeName := args[2]
+			// 尝试从 agent 获取渲染后的配置
+			body, err := sendRequest("GET", "/v1/config/preview?node="+url.QueryEscape(nodeName))
+			if err != nil {
+				body, err = sendRequest("GET", "/config/preview?node="+url.QueryEscape(nodeName))
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "渲染失败 (agent 可能不支持此接口): %v\n", err)
+				os.Exit(1)
+			}
+			printResult(body)
+
+		default:
+			fmt.Fprintf(os.Stderr, "未知 config 子命令: %s\n", args[1])
+			os.Exit(1)
+		}
+
+	case "server":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "用法: yunductl server <list|status> [args]\n")
+			os.Exit(1)
+		}
+		switch args[1] {
+		case "list":
+			// 查询面板 API 获取服务器列表（类似 machine list）
+			listPanelServers("")
+		case "status":
+			if len(args) < 3 {
+				fmt.Fprintf(os.Stderr, "用法: yunductl server status <server-code>\n")
+				os.Exit(1)
+			}
+			listPanelServers(args[2])
+		default:
+			fmt.Fprintf(os.Stderr, "未知 server 子命令: %s\n", args[1])
+			os.Exit(1)
+		}
 
 	case "help", "-h", "--help":
 		usage()

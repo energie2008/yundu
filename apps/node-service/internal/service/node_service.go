@@ -31,6 +31,10 @@ type ConfigRefresher interface {
 // 注入后节点保存时自动同步 SNI 到证书 SAN；未注入时跳过（保持旧行为）。
 type CertSyncHook func(ctx context.Context, node *model.Node) error
 
+// CertConsistencyChecker 保存前证书一致性校验（仅告警，不阻断）。
+// 返回需要展示给管理员的警告列表。
+type CertConsistencyChecker func(ctx context.Context, node *model.Node) []string
+
 // EventPublisher 由 events.Bus 实现，用于跨服务事件发布。
 // 采用接口隔离避免 service 层直接依赖 Redis/具体事件总线实现。
 type EventPublisher interface {
@@ -49,6 +53,8 @@ type NodeService struct {
 	logger          *slog.Logger
 	// P1-5: 证书 SAN 同步钩子，节点保存后自动触发
 	certSyncHook CertSyncHook
+	// 证书一致性校验钩子：自签兜底但未配置 insecure/pin 时提示
+	certConsistencyChecker CertConsistencyChecker
 }
 
 func NewNodeService(nodeRepo *repo.NodeRepo, runtimeRepo *repo.RuntimeRepo, healthRepo *repo.HealthRepo, chainRepo *repo.ChainRepo) *NodeService {
@@ -94,6 +100,12 @@ func (s *NodeService) SetLogger(logger *slog.Logger) {
 // 未注入时跳过自动同步（保持旧行为，需手动调用 /certs/:id/sync-san）。
 func (s *NodeService) SetCertSyncHook(hook CertSyncHook) {
 	s.certSyncHook = hook
+}
+
+// SetCertConsistencyChecker 注入证书一致性校验钩子。
+// 注入后节点创建/更新时自动校验证书来源与客户端校验配置是否匹配。
+func (s *NodeService) SetCertConsistencyChecker(checker CertConsistencyChecker) {
+	s.certConsistencyChecker = checker
 }
 
 // publishConfigChanged 发布节点配置变更事件（fire-and-forget，失败只记录日志）
@@ -360,6 +372,13 @@ func (s *NodeService) CreateNode(ctx context.Context, req *model.CreateNodeReque
 			warnMsg := fmt.Sprintf("配置下发失败（agent可能离线）：%v，节点已保存，agent重连后将自动拉取配置", err)
 			log.Printf("warn: auto refresh config failed for new node %s: %v", node.ID, err)
 			warnings = append(warnings, warnMsg)
+		}
+	}
+
+	// 证书一致性校验：自签兜底但未开启 insecure/pin 时提示，不阻断创建
+	if s.certConsistencyChecker != nil {
+		if ws := s.certConsistencyChecker(ctx, node); len(ws) > 0 {
+			warnings = append(warnings, ws...)
 		}
 	}
 
@@ -645,6 +664,13 @@ func (s *NodeService) UpdateNode(ctx context.Context, id uuid.UUID, req *model.U
 			warnMsg := fmt.Sprintf("证书 SAN 自动同步失败：%v，可稍后手动同步", err)
 			log.Printf("warn: auto sync SAN failed for node %s: %v", id, err)
 			updateWarnings = append(updateWarnings, warnMsg)
+		}
+	}
+
+	// 证书一致性校验：自签兜底但未开启 insecure/pin 时提示，不阻断更新
+	if s.certConsistencyChecker != nil {
+		if ws := s.certConsistencyChecker(ctx, node); len(ws) > 0 {
+			updateWarnings = append(updateWarnings, ws...)
 		}
 	}
 

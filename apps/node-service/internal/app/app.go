@@ -460,6 +460,8 @@ func Run() {
 	tlsProfileRepo := cert.NewTLSProfileRepo(pool)
 	certDeployRepo := cert.NewCertDeployRepo(pool)
 	certService := cert.NewCertificateService(certRepo, tlsProfileRepo, certDeployRepo, nil, logger)
+	acmeDefaultsRepo := cert.NewACMEDefaultsRepo(pool)
+	certService.SetACMEDefaultsStore(acmeDefaultsRepo)
 
 	// P1-C: 注入 TLSCertReader 到 DeploymentService（证书四级回退第3级）
 	deploymentService.SetTLSCertReader(service.NewTLSCertReaderAdapter(certRepo))
@@ -487,6 +489,11 @@ func Run() {
 		}
 		sni := *n.SNI
 		for _, c := range certs {
+			// ACME 证书的 SAN 由管理员显式维护（证书页 sync-san / 编辑域名），
+			// 避免把伪装域名等不可验证 SNI 自动合并进 ACME 证书，导致 DNS-01 续期失败。
+			if c.CertType == "acme" {
+				continue
+			}
 			// 检查证书 SANs 是否包含该 SNI 或 CommonName 匹配
 			matched := false
 			for _, san := range c.SANs {
@@ -508,6 +515,9 @@ func Run() {
 		return nil
 	})
 
+	// 证书一致性校验：节点保存时提示“自签兜底但未配置 insecure/pin”的风险（仅告警，不阻断）
+	nodeService.SetCertConsistencyChecker(deploymentService.CertConsistencyWarnings)
+
 	// 阶段 C1: 注入 CertBundleSyncStore，使 ACME 续期成功后自动同步 PEM 到 cert_bundles 表。
 	// *repo.CapabilityRepo 通过 FindCertBundleIDsByDomain/UpdateCertBundlePEM 满足接口。
 	// 未注入时续期仅更新 tls_certificates 表（保持旧行为）。
@@ -517,17 +527,23 @@ func Run() {
 	// 支持按证书维度选择 DNS provider（cloudflare/alidns/dnspod/gandi/namesilo）。
 	// 未配置 ACME_EMAIL 时跳过（不影响启动，但 ObtainCertificate/TriggerRenew 会退化为 pending）。
 	acmeEmail := os.Getenv("ACME_EMAIL")
+	if d, err := acmeDefaultsRepo.Load(ctx); err == nil && d != nil && d.Email != "" {
+		acmeEmail = d.Email
+	}
 	if acmeEmail != "" {
 		acmeDirURL := os.Getenv("ACME_DIR_URL")
+		if d, err := acmeDefaultsRepo.Load(ctx); err == nil && d != nil && d.DirURL != "" {
+			acmeDirURL = d.DirURL
+		}
 		acmeRegistry := cert.NewACMERegistry(acmeEmail, acmeDirURL, logger)
 		certService.SetACMERegistry(acmeRegistry)
-	// 启动证书续期定时任务（每 6 小时检查一次）
-	go certService.StartRenewalJob(ctx)
-	logger.Info("ACME registry injected and renewal job started",
-		"email", acmeEmail, "dir_url", acmeDirURL)
-	// P6: 启动 SAN 24h 批量同步定时任务
-	go certService.StartSANSyncJob(ctx)
-	logger.Info("SAN batch sync job started (24h interval)")
+		// 启动证书续期定时任务（每 6 小时检查一次）
+		go certService.StartRenewalJob(ctx)
+		logger.Info("ACME registry injected and renewal job started",
+			"email", acmeEmail, "dir_url", acmeDirURL)
+		// P6: 启动 SAN 24h 批量同步定时任务
+		go certService.StartSANSyncJob(ctx)
+		logger.Info("SAN batch sync job started (24h interval)")
 	}
 
 	exposureRepo := exposure.NewExposureRepo(pool)
@@ -768,6 +784,7 @@ func Run() {
 			adminDeploymentHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminHealthHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminCertHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
+			cert.NewAdminACMEDefaultsHandler(acmeDefaultsRepo, logger).RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminCertBundleHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminExposureHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)
 			adminDoctorHandler.RegisterRoutesWithGroup(adminRoutes, rbacMiddleware)

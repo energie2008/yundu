@@ -1,0 +1,26 @@
+{
+  "server_code": "standalone-01",
+  "runtime_type": "sing-box",
+  "xray_api_endpoint": "127.0.0.1:9080",
+  "singbox_clash_endpoint": "127.0.0.1:9090",
+  "log_level": "info",
+  "nodes": [
+    {
+      "name": "vless-reality",
+      "protocol": "vless",
+      "port": 443,
+      "transport": "tcp",
+      "exposure_mode": "direct",
+      "uuid": "your-uuid-here",
+      "sni": "www.microsoft.com"
+    },
+    {
+      "name": "hysteria2-direct",
+      "protocol": "hysteria2",
+      "port": 40020,
+      "transport": "udp",
+      "exposure_mode": "direct",
+      "password": "your-password-here"
+    }
+  ]
+}

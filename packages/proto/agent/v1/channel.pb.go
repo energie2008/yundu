@@ -469,13 +469,14 @@ func (x *ServerLoad) GetUptimeSeconds() int64 {
 }
 
 type KernelInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          KernelType             `protobuf:"varint,1,opt,name=type,proto3,enum=agent.v1.KernelType" json:"type,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	ConfigVersion string                 `protobuf:"bytes,3,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"` // 当前生效的配置版本号
-	Running       bool                   `protobuf:"varint,4,opt,name=running,proto3" json:"running,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Type            KernelType             `protobuf:"varint,1,opt,name=type,proto3,enum=agent.v1.KernelType" json:"type,omitempty"`
+	Version         string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	ConfigVersion   string                 `protobuf:"bytes,3,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"` // 当前生效的配置版本号
+	Running         bool                   `protobuf:"varint,4,opt,name=running,proto3" json:"running,omitempty"`
+	SecondaryKernel *KernelInfo            `protobuf:"bytes,5,opt,name=secondary_kernel,json=secondaryKernel,proto3" json:"secondary_kernel,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *KernelInfo) Reset() {
@@ -534,6 +535,13 @@ func (x *KernelInfo) GetRunning() bool {
 		return x.Running
 	}
 	return false
+}
+
+func (x *KernelInfo) GetSecondaryKernel() *KernelInfo {
+	if x != nil {
+		return x.SecondaryKernel
+	}
+	return nil
 }
 
 // ============================================================================
@@ -2648,13 +2656,13 @@ const file_agent_v1_channel_proto_rawDesc = "" +
 	"\n" +
 	"goroutines\x18\x0f \x01(\x03R\n" +
 	"goroutines\x12%\n" +
-	"\x0euptime_seconds\x18\x10 \x01(\x03R\ruptimeSeconds\"\x91\x01\n" +
+	"\x0euptime_seconds\x18\x10 \x01(\x03R\ruptimeSeconds\"\xd2\x01\n" +
 	"\n" +
 	"KernelInfo\x12(\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x14.agent.v1.KernelTypeR\x04type\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
 	"\x0econfig_version\x18\x03 \x01(\tR\rconfigVersion\x12\x18\n" +
-	"\arunning\x18\x04 \x01(\bR\arunning\"\xf8\x01\n" +
+	"\arunning\x18\x04 \x01(\bR\arunning\x12?\n\x10secondary_kernel\x18\x05 \x01(\v2\x14.agent.v1.KernelInfoR\x0fsecondaryKernel\"\xf8\x01\n" +
 	"\n" +
 	"NodeStatus\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
@@ -2921,42 +2929,43 @@ var file_agent_v1_channel_proto_goTypes = []any{
 var file_agent_v1_channel_proto_depIdxs = []int32{
 	0,  // 0: agent.v1.ChannelHealth.state:type_name -> agent.v1.ChannelState
 	1,  // 1: agent.v1.KernelInfo.type:type_name -> agent.v1.KernelType
-	1,  // 2: agent.v1.AuthRequest.preferred_kernel:type_name -> agent.v1.KernelType
-	5,  // 3: agent.v1.Heartbeat.load:type_name -> agent.v1.ServerLoad
-	6,  // 4: agent.v1.Heartbeat.kernel:type_name -> agent.v1.KernelInfo
-	7,  // 5: agent.v1.Heartbeat.nodes:type_name -> agent.v1.NodeStatus
-	4,  // 6: agent.v1.Heartbeat.channel:type_name -> agent.v1.ChannelHealth
-	2,  // 7: agent.v1.HeartbeatAck.action:type_name -> agent.v1.HeartbeatAction
-	13, // 8: agent.v1.ConfigPush.nodes:type_name -> agent.v1.NodeSpec
-	8,  // 9: agent.v1.TrafficReport.entries:type_name -> agent.v1.UserTraffic
-	3,  // 10: agent.v1.MaintenanceCommand.action:type_name -> agent.v1.MaintenanceCommand.Action
-	29, // 11: agent.v1.DeltaUserChange.extra:type_name -> agent.v1.DeltaUserChange.ExtraEntry
-	1,  // 12: agent.v1.DeltaSync.kernel:type_name -> agent.v1.KernelType
-	22, // 13: agent.v1.DeltaSync.add_users:type_name -> agent.v1.DeltaUserChange
-	30, // 14: agent.v1.LogEntry.labels:type_name -> agent.v1.LogEntry.LabelsEntry
-	25, // 15: agent.v1.LogChunk.entries:type_name -> agent.v1.LogEntry
-	9,  // 16: agent.v1.AgentMessage.auth:type_name -> agent.v1.AuthRequest
-	11, // 17: agent.v1.AgentMessage.heartbeat:type_name -> agent.v1.Heartbeat
-	15, // 18: agent.v1.AgentMessage.config_result:type_name -> agent.v1.ConfigResult
-	16, // 19: agent.v1.AgentMessage.traffic_report:type_name -> agent.v1.TrafficReport
-	19, // 20: agent.v1.AgentMessage.ping:type_name -> agent.v1.Ping
-	26, // 21: agent.v1.AgentMessage.log_chunk:type_name -> agent.v1.LogChunk
-	24, // 22: agent.v1.AgentMessage.delta_ack:type_name -> agent.v1.DeltaAck
-	10, // 23: agent.v1.PanelMessage.auth_ack:type_name -> agent.v1.AuthAck
-	12, // 24: agent.v1.PanelMessage.heartbeat_ack:type_name -> agent.v1.HeartbeatAck
-	14, // 25: agent.v1.PanelMessage.config_push:type_name -> agent.v1.ConfigPush
-	17, // 26: agent.v1.PanelMessage.user_ban:type_name -> agent.v1.UserBanNotice
-	18, // 27: agent.v1.PanelMessage.cert_renew:type_name -> agent.v1.CertRenewNotice
-	20, // 28: agent.v1.PanelMessage.pong:type_name -> agent.v1.Pong
-	21, // 29: agent.v1.PanelMessage.maintenance:type_name -> agent.v1.MaintenanceCommand
-	23, // 30: agent.v1.PanelMessage.delta_sync:type_name -> agent.v1.DeltaSync
-	27, // 31: agent.v1.AgentChannel.Stream:input_type -> agent.v1.AgentMessage
-	28, // 32: agent.v1.AgentChannel.Stream:output_type -> agent.v1.PanelMessage
-	32, // [32:33] is the sub-list for method output_type
-	31, // [31:32] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	6,  // 2: agent.v1.KernelInfo.secondary_kernel:type_name -> agent.v1.KernelInfo
+	1,  // 3: agent.v1.AuthRequest.preferred_kernel:type_name -> agent.v1.KernelType
+	5,  // 4: agent.v1.Heartbeat.load:type_name -> agent.v1.ServerLoad
+	6,  // 5: agent.v1.Heartbeat.kernel:type_name -> agent.v1.KernelInfo
+	7,  // 6: agent.v1.Heartbeat.nodes:type_name -> agent.v1.NodeStatus
+	4,  // 7: agent.v1.Heartbeat.channel:type_name -> agent.v1.ChannelHealth
+	2,  // 8: agent.v1.HeartbeatAck.action:type_name -> agent.v1.HeartbeatAction
+	13, // 9: agent.v1.ConfigPush.nodes:type_name -> agent.v1.NodeSpec
+	8,  // 10: agent.v1.TrafficReport.entries:type_name -> agent.v1.UserTraffic
+	3,  // 11: agent.v1.MaintenanceCommand.action:type_name -> agent.v1.MaintenanceCommand.Action
+	29, // 12: agent.v1.DeltaUserChange.extra:type_name -> agent.v1.DeltaUserChange.ExtraEntry
+	1,  // 13: agent.v1.DeltaSync.kernel:type_name -> agent.v1.KernelType
+	22, // 14: agent.v1.DeltaSync.add_users:type_name -> agent.v1.DeltaUserChange
+	30, // 15: agent.v1.LogEntry.labels:type_name -> agent.v1.LogEntry.LabelsEntry
+	25, // 16: agent.v1.LogChunk.entries:type_name -> agent.v1.LogEntry
+	9,  // 17: agent.v1.AgentMessage.auth:type_name -> agent.v1.AuthRequest
+	11, // 18: agent.v1.AgentMessage.heartbeat:type_name -> agent.v1.Heartbeat
+	15, // 19: agent.v1.AgentMessage.config_result:type_name -> agent.v1.ConfigResult
+	16, // 20: agent.v1.AgentMessage.traffic_report:type_name -> agent.v1.TrafficReport
+	19, // 21: agent.v1.AgentMessage.ping:type_name -> agent.v1.Ping
+	26, // 22: agent.v1.AgentMessage.log_chunk:type_name -> agent.v1.LogChunk
+	24, // 23: agent.v1.AgentMessage.delta_ack:type_name -> agent.v1.DeltaAck
+	10, // 24: agent.v1.PanelMessage.auth_ack:type_name -> agent.v1.AuthAck
+	12, // 25: agent.v1.PanelMessage.heartbeat_ack:type_name -> agent.v1.HeartbeatAck
+	14, // 26: agent.v1.PanelMessage.config_push:type_name -> agent.v1.ConfigPush
+	17, // 27: agent.v1.PanelMessage.user_ban:type_name -> agent.v1.UserBanNotice
+	18, // 28: agent.v1.PanelMessage.cert_renew:type_name -> agent.v1.CertRenewNotice
+	20, // 29: agent.v1.PanelMessage.pong:type_name -> agent.v1.Pong
+	21, // 30: agent.v1.PanelMessage.maintenance:type_name -> agent.v1.MaintenanceCommand
+	23, // 31: agent.v1.PanelMessage.delta_sync:type_name -> agent.v1.DeltaSync
+	27, // 32: agent.v1.AgentChannel.Stream:input_type -> agent.v1.AgentMessage
+	28, // 33: agent.v1.AgentChannel.Stream:output_type -> agent.v1.PanelMessage
+	33, // [33:34] is the sub-list for method output_type
+	32, // [32:33] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_agent_v1_channel_proto_init() }

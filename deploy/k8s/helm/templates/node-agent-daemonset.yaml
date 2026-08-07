@@ -1,0 +1,63 @@
+{{- if .Values.nodeAgent.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "yundu.fullname" . }}-node-agent
+  labels:
+    {{- include "yundu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node-agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "yundu.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: node-agent
+  template:
+    metadata:
+      labels:
+        {{- include "yundu.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: node-agent
+    spec:
+      hostNetwork: {{ .Values.nodeAgent.hostNetwork }}
+      hostPID: {{ .Values.nodeAgent.hostPID }}
+      {{- with .Values.nodeAgent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: node-agent
+          image: {{ include "yundu.image" (dict "registry" .Values.global.imageRegistry "repository" .Values.nodeAgent.image.repository "tag" .Values.nodeAgent.image.tag) }}
+          imagePullPolicy: {{ .Values.nodeAgent.image.pullPolicy }}
+          {{- if .Values.nodeAgent.standalone.enabled }}
+          args:
+            - "--standalone"
+            - "--standalone-config=/etc/yundu/standalone.json"
+          {{- end }}
+          env:
+            - name: RUNTIME_TYPE
+              value: {{ .Values.nodeAgent.env.RUNTIME_TYPE | quote }}
+            - name: XRAY_API_ENDPOINT
+              value: {{ .Values.nodeAgent.env.XRAY_API_ENDPOINT | quote }}
+            - name: SINGBOX_CLASH_ENDPOINT
+              value: {{ .Values.nodeAgent.env.SINGBOX_CLASH_ENDPOINT | quote }}
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN", "NET_BIND_SERVICE"]
+            privileged: true
+          resources:
+            {{- toYaml .Values.nodeAgent.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/yundu
+            - name: certs
+              mountPath: /etc/yundu/certs
+            - name: logs
+              mountPath: /var/log/yundu
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "yundu.fullname" . }}-agent-config
+        - name: certs
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+{{- end }}

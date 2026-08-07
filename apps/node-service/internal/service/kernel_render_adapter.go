@@ -340,13 +340,13 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 	//     适合快速套娃（socks5://... trojan://...），自动生成健康降级，用户无需手写 JSON
 	//  2. custom_outbounds + custom_routes (JSON 直接注入)：原样注入当前内核配置
 	//     适合高级用户（xboard 兼容），用户按目标内核格式手填 JSON，无自动降级
-	var chainOutbounds []interface{}         // 套娃出站（URI 方式：xray 或 sing-box 格式，按当前内核构建）
-	var chainRoutingRules []interface{}      // 套娃路由规则（URI 方式：inboundTag→balancer/outbound）
-	var chainBalancers []interface{}         // xray balancer（URI 方式：候选 [chainTag, direct]，leastPing 降级）
-	var chainURLTests []interface{}          // sing-box urltest outbound（URI 方式：候选 [chainTag, direct]，30s 探测）
-	var chainTags []string                   // 套娃出站 tag 列表（URI 方式：xray observatory subjectSelector 用）
-	var customOutbounds []interface{}        // 自定义出站（JSON 方式：原样注入，用户自管内核格式，无降级）
-	var customRoutingRules []interface{}     // 自定义路由规则（JSON 方式：原样注入，用户自管格式）
+	var chainOutbounds []interface{}     // 套娃出站（URI 方式：xray 或 sing-box 格式，按当前内核构建）
+	var chainRoutingRules []interface{}  // 套娃路由规则（URI 方式：inboundTag→balancer/outbound）
+	var chainBalancers []interface{}     // xray balancer（URI 方式：候选 [chainTag, direct]，leastPing 降级）
+	var chainURLTests []interface{}      // sing-box urltest outbound（URI 方式：候选 [chainTag, direct]，30s 探测）
+	var chainTags []string               // 套娃出站 tag 列表（URI 方式：xray observatory subjectSelector 用）
+	var customOutbounds []interface{}    // 自定义出站（JSON 方式：原样注入，用户自管内核格式，无降级）
+	var customRoutingRules []interface{} // 自定义路由规则（JSON 方式：原样注入，用户自管格式）
 	// P-Chain-Bridge: sing-box 桥接（自签证书/insecure 场景）
 	// 当 xray runtime 下 chain URI 含 insecure=1 时，xray 的 pinnedPeerCertSha256 对无 SAN 证书无效。
 	// 自动用 sing-box 桥接（支持 insecure:true），xray chain outbound 改为 socks5 指向本地桥接端口。
@@ -441,32 +441,32 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 						inbMap["listen"] = listenHost
 					}
 					// R2: CDN 节点原始 inbound TLS 处理（不再创建镜像 inbound）
-				// 回退 P4 架构：client → CDN(443/TLS) → nginx(终止TLS, proxy_pass http) → xray(security=none, 明文)
-				// CDN 节点（nginx 持证书）xray security=none，nginx proxy_pass http 回源。
-				// argo_tunnel 节点也剥离 TLS：cloudflared 明文 HTTP 回源，CF Edge 终止 TLS，xray security=none。
-				//
-				// P1 inbound 级 TLS 剥离：每个 inbound 根据自身暴露方式判定，不再节点级一刀切。
-				// 判定逻辑：determineInboundExposureMode(node, inbMap) 返回单个 inbound 的暴露方式，
-				// shouldStripTLSForInbound(em) 决定是否剥离。
-				// - argo_tunnel 上行 inbound → 剥离 TLS（cloudflared 明文回源）
-				// - cdn/cdn_saas 上行 inbound → 回退 P4 剥离 TLS（nginx 持证书，proxy_pass http 回源）
-				// - 下行 inbound（显式 _inbound_role="downstream"，默认 direct/reality）→ 保留 TLS/REALITY
-				// - 纯直连节点 → 不剥离
-				//
-				// is_split_mode 字段【不】参与此处判定（防止状态源双轨）。
-				// 阶段3已完成退役：下行 inbound 身份识别由 _inbound_role 显式字段承担，
-				// tag 后缀仅作展示命名，不参与安全判定路径。
-				em := determineInboundExposureMode(node, inbMap)
-				// P1-1: argo_tunnel 和 cdn/cdn_saas 分别独立判断，避免耦合
-				// 回退 P4：CDN 节点（nginx 持证书）剥离 TLS，xray security=none；argo_tunnel 剥离 TLS（CF 边缘持证书）
-				if shouldStripTLSForArgoTunnel(em) || shouldStripTLSForNginxVhost(em) {
-					if kernelName == "xray" {
-						stripTLSFromXrayInbound(inbMap, node)
-					} else {
-						stripTLSFromSingboxInbound(inbMap)
+					// 回退 P4 架构：client → CDN(443/TLS) → nginx(终止TLS, proxy_pass http) → xray(security=none, 明文)
+					// CDN 节点（nginx 持证书）xray security=none，nginx proxy_pass http 回源。
+					// argo_tunnel 节点也剥离 TLS：cloudflared 明文 HTTP 回源，CF Edge 终止 TLS，xray security=none。
+					//
+					// P1 inbound 级 TLS 剥离：每个 inbound 根据自身暴露方式判定，不再节点级一刀切。
+					// 判定逻辑：determineInboundExposureMode(node, inbMap) 返回单个 inbound 的暴露方式，
+					// shouldStripTLSForInbound(em) 决定是否剥离。
+					// - argo_tunnel 上行 inbound → 剥离 TLS（cloudflared 明文回源）
+					// - cdn/cdn_saas 上行 inbound → 回退 P4 剥离 TLS（nginx 持证书，proxy_pass http 回源）
+					// - 下行 inbound（显式 _inbound_role="downstream"，默认 direct/reality）→ 保留 TLS/REALITY
+					// - 纯直连节点 → 不剥离
+					//
+					// is_split_mode 字段【不】参与此处判定（防止状态源双轨）。
+					// 阶段3已完成退役：下行 inbound 身份识别由 _inbound_role 显式字段承担，
+					// tag 后缀仅作展示命名，不参与安全判定路径。
+					em := determineInboundExposureMode(node, inbMap)
+					// P1-1: argo_tunnel 和 cdn/cdn_saas 分别独立判断，避免耦合
+					// 回退 P4：CDN 节点（nginx 持证书）剥离 TLS，xray security=none；argo_tunnel 剥离 TLS（CF 边缘持证书）
+					if shouldStripTLSForArgoTunnel(em) || shouldStripTLSForNginxVhost(em) {
+						if kernelName == "xray" {
+							stripTLSFromXrayInbound(inbMap, node)
+						} else {
+							stripTLSFromSingboxInbound(inbMap)
+						}
 					}
-				}
-				inbounds = append(inbounds, inbMap)
+					inbounds = append(inbounds, inbMap)
 				}
 			}
 		}
@@ -487,90 +487,90 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 					chainTags = append(chainTags, chainTag)
 
 					if kernelName == "xray" {
-					// P-Chain-Bridge: 自签证书/insecure 自动 sing-box 桥接
-					// xray 26.3.27 移除 allowInsecure，pinnedPeerCertSha256 对无 SAN 证书无效。
-					// 当 URI 含 insecure=1 时，自动用 sing-box 桥接（支持 insecure:true），
-					// xray chain outbound 改为 socks5 指向本地 sing-box 桥接端口。
-					// 零 SSH 方案：面板填入原始 URI（含 insecure=1）→ 自动生成桥接 → 无需手动部署。
-					needsBridge := chainSpec.TLS != nil && chainSpec.TLS.AllowInsecure
-					if needsBridge {
-						sbOb, sbErr := chain.RenderOutboundFromNodeSpec(chain.KernelSingBox, chainSpec, chainTag, "")
-						if sbErr != nil {
-							s.logger.Warn("build singbox bridge outbound failed, falling back to xray",
-								"node_code", node.Code, "error", sbErr)
-							needsBridge = false
-						} else {
-							port := allocChainBridgePort(node.Code)
-							bridgeInTag := fmt.Sprintf("bridge-in-%d", port)
-							chainBridgeInbounds = append(chainBridgeInbounds, map[string]interface{}{
-								"type":        "socks",
-								"tag":         bridgeInTag,
-								"listen":      "127.0.0.1",
-								"listen_port": port,
-							})
-							chainBridgeOutbounds = append(chainBridgeOutbounds, sbOb)
-							chainBridgeRules = append(chainBridgeRules, map[string]interface{}{
-								"action":   "route",
-								"inbound":  []string{bridgeInTag},
-								"outbound": chainTag,
-							})
-							// xray chain outbound = socks5 指向本地 sing-box 桥接
-							ob := map[string]interface{}{
-								"tag":      chainTag,
-								"protocol": "socks",
-								"settings": map[string]interface{}{
-									"servers": []interface{}{
-										map[string]interface{}{
-											"address": "127.0.0.1",
-											"port":    port,
+						// P-Chain-Bridge: 自签证书/insecure 自动 sing-box 桥接
+						// xray 26.3.27 移除 allowInsecure，pinnedPeerCertSha256 对无 SAN 证书无效。
+						// 当 URI 含 insecure=1 时，自动用 sing-box 桥接（支持 insecure:true），
+						// xray chain outbound 改为 socks5 指向本地 sing-box 桥接端口。
+						// 零 SSH 方案：面板填入原始 URI（含 insecure=1）→ 自动生成桥接 → 无需手动部署。
+						needsBridge := chainSpec.TLS != nil && chainSpec.TLS.AllowInsecure
+						if needsBridge {
+							sbOb, sbErr := chain.RenderOutboundFromNodeSpec(chain.KernelSingBox, chainSpec, chainTag, "")
+							if sbErr != nil {
+								s.logger.Warn("build singbox bridge outbound failed, falling back to xray",
+									"node_code", node.Code, "error", sbErr)
+								needsBridge = false
+							} else {
+								port := allocChainBridgePort(node.Code)
+								bridgeInTag := fmt.Sprintf("bridge-in-%d", port)
+								chainBridgeInbounds = append(chainBridgeInbounds, map[string]interface{}{
+									"type":        "socks",
+									"tag":         bridgeInTag,
+									"listen":      "127.0.0.1",
+									"listen_port": port,
+								})
+								chainBridgeOutbounds = append(chainBridgeOutbounds, sbOb)
+								chainBridgeRules = append(chainBridgeRules, map[string]interface{}{
+									"action":   "route",
+									"inbound":  []string{bridgeInTag},
+									"outbound": chainTag,
+								})
+								// xray chain outbound = socks5 指向本地 sing-box 桥接
+								ob := map[string]interface{}{
+									"tag":      chainTag,
+									"protocol": "socks",
+									"settings": map[string]interface{}{
+										"servers": []interface{}{
+											map[string]interface{}{
+												"address": "127.0.0.1",
+												"port":    port,
+											},
 										},
 									},
-								},
+								}
+								chainOutbounds = append(chainOutbounds, ob)
+								// D7-fix: 直接用 outboundTag 路由到 chain，不走 balancer 降级。
+								// leastPing + [chain, direct] 会导致永远走 direct（direct 延迟永远最低）。
+								// 套娃目的就是走 chain，chain 挂了节点不可用，客户端应切换其他节点。
+								chainRoutingRules = append(chainRoutingRules, map[string]interface{}{
+									"type":        "field",
+									"inboundTag":  []string{inboundTag},
+									"outboundTag": chainTag,
+								})
+								s.logger.Info("chain bridge created (sing-box for insecure TLS)",
+									"node_code", node.Code, "bridge_port", port, "chain_tag", chainTag)
 							}
-							chainOutbounds = append(chainOutbounds, ob)
-						// D7-fix: 直接用 outboundTag 路由到 chain，不走 balancer 降级。
-						// leastPing + [chain, direct] 会导致永远走 direct（direct 延迟永远最低）。
-						// 套娃目的就是走 chain，chain 挂了节点不可用，客户端应切换其他节点。
-						chainRoutingRules = append(chainRoutingRules, map[string]interface{}{
-							"type":        "field",
-							"inboundTag":  []string{inboundTag},
-							"outboundTag": chainTag,
-						})
-						s.logger.Info("chain bridge created (sing-box for insecure TLS)",
-							"node_code", node.Code, "bridge_port", port, "chain_tag", chainTag)
 						}
-					}
-					if !needsBridge {
-						ob, err := chain.RenderOutboundFromNodeSpec(chain.KernelXray, chainSpec, chainTag, "")
+						if !needsBridge {
+							ob, err := chain.RenderOutboundFromNodeSpec(chain.KernelXray, chainSpec, chainTag, "")
+							if err != nil {
+								s.logger.Warn("build xray chain outbound failed",
+									"node_code", node.Code, "error", err)
+							} else {
+								chainOutbounds = append(chainOutbounds, ob)
+								// D7-fix: 直接用 outboundTag 路由到 chain，不走 balancer 降级。
+								chainRoutingRules = append(chainRoutingRules, map[string]interface{}{
+									"type":        "field",
+									"inboundTag":  []string{inboundTag},
+									"outboundTag": chainTag,
+								})
+							}
+						}
+					} else {
+						ob, err := chain.RenderOutboundFromNodeSpec(chain.KernelSingBox, chainSpec, chainTag, "")
 						if err != nil {
-							s.logger.Warn("build xray chain outbound failed",
+							s.logger.Warn("build singbox chain outbound failed",
 								"node_code", node.Code, "error", err)
 						} else {
-						chainOutbounds = append(chainOutbounds, ob)
-						// D7-fix: 直接用 outboundTag 路由到 chain，不走 balancer 降级。
-						chainRoutingRules = append(chainRoutingRules, map[string]interface{}{
-							"type":        "field",
-							"inboundTag":  []string{inboundTag},
-							"outboundTag": chainTag,
-						})
+							chainOutbounds = append(chainOutbounds, ob)
+							// D7-fix: 直接路由到 chain，不走 urltest 降级。
+							// sing-box 1.12+ 规则格式：含 action 字段（与 renderSingBoxRoute 对齐）
+							chainRoutingRules = append(chainRoutingRules, map[string]interface{}{
+								"action":   "route",
+								"inbound":  []string{inboundTag},
+								"outbound": chainTag,
+							})
+						}
 					}
-					}
-				} else {
-					ob, err := chain.RenderOutboundFromNodeSpec(chain.KernelSingBox, chainSpec, chainTag, "")
-					if err != nil {
-						s.logger.Warn("build singbox chain outbound failed",
-							"node_code", node.Code, "error", err)
-					} else {
-						chainOutbounds = append(chainOutbounds, ob)
-						// D7-fix: 直接路由到 chain，不走 urltest 降级。
-						// sing-box 1.12+ 规则格式：含 action 字段（与 renderSingBoxRoute 对齐）
-						chainRoutingRules = append(chainRoutingRules, map[string]interface{}{
-							"action":   "route",
-							"inbound":  []string{inboundTag},
-							"outbound": chainTag,
-						})
-					}
-				}
 				}
 			}
 
@@ -799,8 +799,8 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 			rules, _ := xrayRouting["rules"].([]interface{})
 			newRules := make([]interface{}, 0, len(rules)+len(chainRoutingRules)+len(customRoutingRules))
 			newRules = append(newRules, chainRoutingRules...)  // 前插：套娃路由（inboundTag 精确匹配）
-			newRules = append(newRules, rules...)               // 中间：默认规则（api + block private）
-			newRules = append(newRules, customRoutingRules...)  // 后插：用户自定义兜底
+			newRules = append(newRules, rules...)              // 中间：默认规则（api + block private）
+			newRules = append(newRules, customRoutingRules...) // 后插：用户自定义兜底
 			xrayRouting["rules"] = newRules
 		}
 
@@ -891,8 +891,8 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 		rules, _ := sbRoute["rules"].([]interface{})
 		newRules := make([]interface{}, 0, len(rules)+len(chainRoutingRules)+len(customRoutingRules))
 		newRules = append(newRules, chainRoutingRules...)  // 前插：套娃路由（inbound 精确匹配）
-		newRules = append(newRules, rules...)               // 中间：默认规则
-		newRules = append(newRules, customRoutingRules...)  // 后插：用户自定义兜底
+		newRules = append(newRules, rules...)              // 中间：默认规则
+		newRules = append(newRules, customRoutingRules...) // 后插：用户自定义兜底
 		sbRoute["rules"] = newRules
 	}
 
@@ -935,7 +935,7 @@ func (s *DeploymentService) buildConfigViaKernelRender(
 // 无任何限制时返回 nil（保持旧行为：不注入 _limiter）。
 func mergeRenderedLimiterMeta(metas []interface{}) interface{} {
 	type userMeta struct {
-		email, uuid string
+		email, uuid       string
 		speed, device, ip int
 	}
 	users := make(map[string]*userMeta)
@@ -1012,7 +1012,15 @@ func mergeRenderedLimiterMeta(metas []interface{}) interface{} {
 		result["node_ip_limit"] = nodeIP
 	}
 	out := make([]interface{}, 0, len(users))
-	for _, u := range users {
+	// 稳定排序：_limiter.users 会进入配置 hash，map 遍历顺序随机会触发
+	// "配置内容未变但 hash 漂移 -> 每心跳新建版本" 的版本风暴（801 C 工程缺口）。
+	keys := make([]string, 0, len(users))
+	for k := range users {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		u := users[k]
 		if u.speed <= 0 && u.device <= 0 && u.ip <= 0 {
 			continue
 		}

@@ -32,6 +32,16 @@ func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus
 
 	running := runtimeStatus == "running"
 
+	// P1-4: 双核状态上报 —— 构建辅内核 KernelInfo
+	var secondaryKernel *pb.KernelInfo
+	if a.runtimePlugin != nil && a.useNative {
+		if mp, ok := a.runtimePlugin.(interface {
+			GetSecondaryKernelStatus() *pb.KernelInfo
+		}); ok {
+			secondaryKernel = mp.GetSecondaryKernelStatus()
+		}
+	}
+
 	chanHealth := a.cm.GetHealthStatus()
 	var chanState pb.ChannelState
 	switch chanHealth.State {
@@ -61,10 +71,11 @@ func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus
 			Heartbeat: &pb.Heartbeat{
 				ConfigVersion: configVersionNum,
 				Kernel: &pb.KernelInfo{
-					Type:          kernelType,
-					Version:       runtimeVersion,
-					ConfigVersion: currentVersion,
-					Running:       running,
+					Type:            kernelType,
+					Version:         runtimeVersion,
+					ConfigVersion:   currentVersion,
+					Running:         running,
+					SecondaryKernel: secondaryKernel, // P1-4: 辅内核状态
 				},
 				Channel: &pb.ChannelHealth{
 					State: chanState,

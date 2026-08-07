@@ -1,0 +1,72 @@
+{{- if .Values.nodeService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "yundu.fullname" . }}-node-service
+  labels:
+    {{- include "yundu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node-service
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.nodeService.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "yundu.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: node-service
+  template:
+    metadata:
+      labels:
+        {{- include "yundu.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: node-service
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: node-service
+          image: {{ include "yundu.image" (dict "registry" .Values.global.imageRegistry "repository" .Values.nodeService.image.repository "tag" .Values.nodeService.image.tag) }}
+          imagePullPolicy: {{ .Values.nodeService.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: DB_HOST
+              value: {{ .Values.nodeService.env.DB_HOST | quote }}
+            - name: DB_PORT
+              value: {{ .Values.nodeService.env.DB_PORT | quote }}
+            - name: DB_NAME
+              value: {{ .Values.nodeService.env.DB_NAME | quote }}
+            - name: DB_USER
+              value: {{ .Values.nodeService.env.DB_USER | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yundu.fullname" . }}-secrets
+                  key: db-password
+            - name: REDIS_HOST
+              value: {{ .Values.nodeService.env.REDIS_HOST | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.nodeService.env.REDIS_PORT | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yundu.fullname" . }}-secrets
+                  key: redis-password
+          resources:
+            {{- toYaml .Values.nodeService.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+{{- end }}

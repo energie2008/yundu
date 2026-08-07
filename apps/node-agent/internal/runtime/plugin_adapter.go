@@ -61,7 +61,14 @@ func NewPluginAdapter(plugin RuntimePlugin, configDir, configPath, runtimeType s
 		mp.SetSingboxDeviceChecker(dc)
 		ipc := executor.NewSingboxIPChecker(li.IPLimiter(), li.GetIPLimit)
 		mp.SetSingboxIPLimiter(ipc)
+		// P0: xray 限速数据通路 —— xray 无 ConnTracker，通过 enforcement loop 实现
+		mp.SetXraySpeedLimiter(li.SpeedLimiter())
+		// P0: Sync xray speed limits to MultiRuntimePlugin
+		li.SetXrayLimitSyncCallback(func(limits map[string]int) {
+			mp.UpdateXraySpeedLimits(limits)
+		})
 		logger.Info("speed limiter, device checker and ip checker wired to native sing-box runtime")
+		logger.Info("speed limiter wired to native xray runtime (enforcement mode)")
 	}
 	return a
 }

@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -84,4 +86,57 @@ func listMachineNodes() {
 		fmt.Printf("  [%d] server_code=%s  runtime=%s  runtime_id=%s\n",
 			i+1, n.ServerCode, n.RuntimeType, n.RuntimeID)
 	}
+}
+
+// listPanelServers 查询面板 API 获取所有已注册的服务器列表。
+// 若 serverCode 非空，则仅显示该服务器的详情。
+//
+// 环境变量：
+//   - YUNDU_MACHINE_PANEL_URL：面板 URL（如 https://panel.example.com）
+//   - YUNDU_MACHINE_TOKEN：server_token，用于面板认证
+func listPanelServers(serverCode string) {
+	panelURL := os.Getenv("YUNDU_MACHINE_PANEL_URL")
+	if panelURL == "" {
+		fmt.Fprintln(os.Stderr, "错误: 请设置 YUNDU_MACHINE_PANEL_URL 环境变量")
+		os.Exit(1)
+	}
+	token := os.Getenv("YUNDU_MACHINE_TOKEN")
+	if token == "" {
+		fmt.Fprintln(os.Stderr, "错误: 请设置 YUNDU_MACHINE_TOKEN 环境变量")
+		os.Exit(1)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	endpoint := strings.TrimRight(panelURL, "/") + "/api/v1/admin/servers"
+	if serverCode != "" {
+		endpoint = endpoint + "?server_code=" + url.QueryEscape(serverCode)
+	}
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "创建请求失败: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "请求面板失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "读取响应失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "面板返回错误 (HTTP %d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+		os.Exit(1)
+	}
+
+	printResult(body)
 }

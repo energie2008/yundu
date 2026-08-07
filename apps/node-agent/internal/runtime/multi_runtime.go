@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/sagernet/sing-box/option"
+	pb "github.com/airport-panel/proto/agent/v1"
 )
 
 // MultiRuntimePlugin 双内核并行运行时插件。
@@ -50,6 +51,12 @@ type MultiRuntimePlugin struct {
 	singboxDeviceChecker DeviceChecker
 	// singboxIPChecker 存储 sing-box 的 IP 限制检查器，在 singboxPlugin 创建时注入
 	singboxIPChecker IPChecker
+
+	// xraySpeedLimiter 存储 xray 的限速器（RateLimiter 接口，用于 enforcement loop）
+	xraySpeedLimiter RateLimiter
+	// xraySpeedLimits 存储 per-user 限速值（Mbps），由 LimiterIntegration 同步
+	xraySpeedLimits   map[string]int // key: email/uuid → Mbps (0 = unlimited)
+	xraySpeedLimitsMu sync.RWMutex
 
 	logger *slog.Logger
 }
@@ -136,6 +143,41 @@ func (m *MultiRuntimePlugin) SetSingboxIPLimiter(ic IPChecker) {
 		m.singboxPlugin.SetIPLimiter(ic)
 	}
 	m.mu.Unlock()
+}
+
+// SetXraySpeedLimiter 设置 xray 的 per-user 限速器。
+// 用于 xray 数据通路限速 enforcement（xray 无 ConnTracker，通过 StatsService 监控 + AlterInbound 执行）。
+func (m *MultiRuntimePlugin) SetXraySpeedLimiter(l RateLimiter) {
+	m.mu.Lock()
+	m.xraySpeedLimiter = l
+	if m.xrayPlugin != nil {
+		// 在读锁下复制限速映射，避免与 UpdateXraySpeedLimits 竞争
+		m.xraySpeedLimitsMu.RLock()
+		limitsCopy := make(map[string]int, len(m.xraySpeedLimits))
+		for k, v := range m.xraySpeedLimits {
+			limitsCopy[k] = v
+		}
+		m.xraySpeedLimitsMu.RUnlock()
+		m.xrayPlugin.SetSpeedEnforcer(m, limitsCopy)
+	}
+	m.mu.Unlock()
+}
+
+// UpdateXraySpeedLimits 更新 xray per-user 限速映射（由 LimiterIntegration.SyncLimiterConfig 调用）。
+func (m *MultiRuntimePlugin) UpdateXraySpeedLimits(limits map[string]int) {
+	m.xraySpeedLimitsMu.Lock()
+	m.xraySpeedLimits = make(map[string]int, len(limits))
+	for k, v := range limits {
+		m.xraySpeedLimits[k] = v
+	}
+	m.xraySpeedLimitsMu.Unlock()
+}
+
+// GetXraySpeedLimit 返回指定用户的 xray 限速值（Mbps，0 = 不限速）。
+func (m *MultiRuntimePlugin) GetXraySpeedLimit(userID string) int {
+	m.xraySpeedLimitsMu.RLock()
+	defer m.xraySpeedLimitsMu.RUnlock()
+	return m.xraySpeedLimits[userID]
 }
 
 // Start 应用配置到对应内核。
@@ -359,6 +401,55 @@ func (m *MultiRuntimePlugin) Status(ctx context.Context) (*PluginStatus, error) 
 		return m.xrayPlugin.Status(ctx)
 	}
 	return nil, fmt.Errorf("no runtime started")
+}
+
+// GetSecondaryKernelStatus 返回辅内核的状态信息。
+// P1-4: 双核心跳上报 —— 主内核由 PluginAdapter.Status() 上报，
+// 辅内核（xray）的状态通过此方法附加到 Heartbeat.Kernel.SecondaryKernel。
+// sing-box 为主内核时，xray 为辅内核；反之亦然。
+func (m *MultiRuntimePlugin) GetSecondaryKernelStatus() *pb.KernelInfo {
+	m.mu.Lock()
+	xrayStarted := m.xrayStarted
+	sbStarted := m.singboxStarted
+	m.mu.Unlock()
+
+	// sing-box 主 → xray 辅
+	if sbStarted {
+		if xrayStarted && m.xrayPlugin != nil {
+			status, err := m.xrayPlugin.Status(context.Background())
+			if err == nil {
+				return &pb.KernelInfo{
+					Type:    pb.KernelType_KERNEL_TYPE_XRAY,
+					Version: status.Version,
+					Running: status.Running,
+				}
+			}
+		}
+		return &pb.KernelInfo{
+			Type:    pb.KernelType_KERNEL_TYPE_XRAY,
+			Running: false,
+		}
+	}
+
+	// xray 主 → sing-box 辅
+	if xrayStarted {
+		if sbStarted && m.singboxPlugin != nil {
+			status, err := m.singboxPlugin.Status(context.Background())
+			if err == nil {
+				return &pb.KernelInfo{
+					Type:    pb.KernelType_KERNEL_TYPE_SINGBOX,
+					Version: status.Version,
+					Running: status.Running,
+				}
+			}
+		}
+		return &pb.KernelInfo{
+			Type:    pb.KernelType_KERNEL_TYPE_SINGBOX,
+			Running: false,
+		}
+	}
+
+	return nil // 无辅内核
 }
 
 // Validate 校验配置内容（自动检测 runtime_type 分发到对应内核）。

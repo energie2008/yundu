@@ -38,6 +38,12 @@ func (r *XrayRenderer) Render(spec *nodespec.NodeSpec) (map[string]interface{}, 
 	// 2. 计算限速级别映射（P1-7: 为不同限速值分配独立 xray level）
 	speedLevels := computeSpeedLevels(spec)
 
+	// P0-2: CDN/Tunnel 节点（listen=127.0.0.1）无法使用 tc/iptables 限速，
+	// 因为所有流量都来自 nginx/cloudflared 的 127.0.0.1 连接。
+	// 对此类节点，将 speed_limit（bytes/sec）注入每个 client 配置作为元数据，
+	// 供未来的执行机制使用（xray-core 会忽略此未知字段）。
+	isCDN := resolveListenAddress(spec) == "127.0.0.1"
+
 	// 3. 渲染 inbound
 	// P8 端口语义显式分离：
 	//   - port: resolveInboundPort() — CDN/Tunnel 用 ServerPort，DIRECT 用 Port
@@ -47,7 +53,7 @@ func (r *XrayRenderer) Render(spec *nodespec.NodeSpec) (map[string]interface{}, 
 		"listen":   resolveListenAddress(spec),
 		"protocol": string(spec.Protocol),
 		"tag":      fmt.Sprintf("in-%s", spec.Code),
-		"settings": r.renderSettings(spec, speedLevels),
+		"settings": r.renderSettings(spec, speedLevels, isCDN),
 	}
 
 	// 3. 渲染 streamSettings
@@ -225,10 +231,12 @@ func (r *XrayRenderer) checkKernelSupport(spec *nodespec.NodeSpec) error {
 // renderSettings 渲染 inbound settings（协议层：clients/users）
 // P0-4: 优先使用 spec.Clients（多用户），为空时回退到 spec.Credentials（单用户）
 // P1-7: 通过 speedLevelAssignment 为每个 client 分配带限速策略的 xray level
-func (r *XrayRenderer) renderSettings(spec *nodespec.NodeSpec, sl *speedLevelAssignment) map[string]interface{} {
+// P0-2: isCDN=true 时，对有限速配置的 client 注入 speed_limit（bytes/sec）作为元数据，
+// 供 CDN/Tunnel 节点的未来执行机制使用（xray-core 忽略此未知字段）。
+func (r *XrayRenderer) renderSettings(spec *nodespec.NodeSpec, sl *speedLevelAssignment, isCDN bool) map[string]interface{} {
 	// 多用户路径（P0-4）
 	if hasMultiClients(spec) {
-		return r.renderSettingsMultiClient(spec, sl)
+		return r.renderSettingsMultiClient(spec, sl, isCDN)
 	}
 	switch spec.Protocol {
 	case nodespec.ProtocolVLESS:
@@ -243,6 +251,10 @@ func (r *XrayRenderer) renderSettings(spec *nodespec.NodeSpec, sl *speedLevelAss
 		} else if spec.Security == nodespec.SecurityReality && spec.Transport.Type == nodespec.TransportTCP {
 			// REALITY + TCP 默认推荐 vision flow
 			client["flow"] = string(nodespec.FlowXTLSRprxVision)
+		}
+		// P0-2: CDN/Tunnel 节点注入 speed_limit（Mbps → bytes/sec）
+		if isCDN && spec.SpeedLimitMbps > 0 {
+			client["speed_limit"] = spec.SpeedLimitMbps * 1000000 / 8
 		}
 		return map[string]interface{}{
 			"clients":    []interface{}{client},
@@ -261,6 +273,10 @@ func (r *XrayRenderer) renderSettings(spec *nodespec.NodeSpec, sl *speedLevelAss
 			"level":    sl.levelForNode(spec.SpeedLimitMbps),
 			"security": security,
 		}
+		// P0-2: CDN/Tunnel 节点注入 speed_limit（Mbps → bytes/sec）
+		if isCDN && spec.SpeedLimitMbps > 0 {
+			client["speed_limit"] = spec.SpeedLimitMbps * 1000000 / 8
+		}
 		return map[string]interface{}{
 			"clients": []interface{}{client},
 		}
@@ -269,6 +285,10 @@ func (r *XrayRenderer) renderSettings(spec *nodespec.NodeSpec, sl *speedLevelAss
 		client := map[string]interface{}{"password": password}
 		if level := sl.levelForNode(spec.SpeedLimitMbps); level > 0 {
 			client["level"] = level
+		}
+		// P0-2: CDN/Tunnel 节点注入 speed_limit（Mbps → bytes/sec）
+		if isCDN && spec.SpeedLimitMbps > 0 {
+			client["speed_limit"] = spec.SpeedLimitMbps * 1000000 / 8
 		}
 		return map[string]interface{}{
 			"clients": []interface{}{client},
@@ -332,7 +352,9 @@ func (r *XrayRenderer) renderSettings(spec *nodespec.NodeSpec, sl *speedLevelAss
 // renderSettingsMultiClient 渲染多用户 settings（P0-4）
 // 根据 spec.Clients []CredentialSpec 输出 Xray clients 数组
 // P1-7: 通过 speedLevelAssignment 为每个 client 分配带限速策略的 xray level
-func (r *XrayRenderer) renderSettingsMultiClient(spec *nodespec.NodeSpec, sl *speedLevelAssignment) map[string]interface{} {
+// P0-2: isCDN=true 时，对有限速配置的 client 注入 speed_limit（bytes/sec）。
+// 优先使用每用户 c.SpeedLimit，回退到节点级 spec.SpeedLimitMbps。
+func (r *XrayRenderer) renderSettingsMultiClient(spec *nodespec.NodeSpec, sl *speedLevelAssignment, isCDN bool) map[string]interface{} {
 	switch spec.Protocol {
 	case nodespec.ProtocolVLESS:
 		clients := make([]interface{}, 0, len(spec.Clients))
@@ -352,6 +374,16 @@ func (r *XrayRenderer) renderSettingsMultiClient(spec *nodespec.NodeSpec, sl *sp
 			}
 			if flow != "" {
 				client["flow"] = flow
+			}
+			// P0-2: CDN/Tunnel 节点注入 speed_limit（优先每用户，回退节点级；Mbps → bytes/sec）
+			if isCDN {
+				speed := c.SpeedLimit
+				if speed <= 0 {
+					speed = spec.SpeedLimitMbps
+				}
+				if speed > 0 {
+					client["speed_limit"] = speed * 1000000 / 8
+				}
 			}
 			clients = append(clients, client)
 		}
@@ -377,6 +409,16 @@ func (r *XrayRenderer) renderSettingsMultiClient(spec *nodespec.NodeSpec, sl *sp
 			if c.Email != "" {
 				client["email"] = c.Email
 			}
+			// P0-2: CDN/Tunnel 节点注入 speed_limit（优先每用户，回退节点级；Mbps → bytes/sec）
+			if isCDN {
+				speed := c.SpeedLimit
+				if speed <= 0 {
+					speed = spec.SpeedLimitMbps
+				}
+				if speed > 0 {
+					client["speed_limit"] = speed * 1000000 / 8
+				}
+			}
 			clients = append(clients, client)
 		}
 		return map[string]interface{}{
@@ -392,6 +434,16 @@ func (r *XrayRenderer) renderSettingsMultiClient(spec *nodespec.NodeSpec, sl *sp
 			level := sl.levelForClient(c, spec.SpeedLimitMbps)
 			if level > 0 {
 				client["level"] = level
+			}
+			// P0-2: CDN/Tunnel 节点注入 speed_limit（优先每用户，回退节点级；Mbps → bytes/sec）
+			if isCDN {
+				speed := c.SpeedLimit
+				if speed <= 0 {
+					speed = spec.SpeedLimitMbps
+				}
+				if speed > 0 {
+					client["speed_limit"] = speed * 1000000 / 8
+				}
 			}
 			clients = append(clients, client)
 		}
@@ -755,13 +807,14 @@ func (r *XrayRenderer) renderDownloadInbound(spec *nodespec.NodeSpec, sl *speedL
 	// 下行inbound的协议与主inbound相同（VLESS/VMess等）
 	// _inbound_role 是 P1 正式方案的显式元数据：node-service 通过此字段识别下行inbound，
 	// 不再依赖tag字符串模式匹配（tag后缀仅作展示命名，不参与安全判定）。
+	// P0-2: 下行 inbound 永远监听 127.0.0.1（CDN/Tunnel 模式），isCDN=true 注入 speed_limit。
 	dlInbound := map[string]interface{}{
 		"port":          ds.ServerPort,
 		"listen":        "127.0.0.1",
 		"protocol":      string(spec.Protocol),
 		"tag":           fmt.Sprintf("in-%s%s", spec.Code, DownstreamTagSuffix),
 		"_inbound_role": "downstream",
-		"settings":      r.renderSettings(spec, sl),
+		"settings":      r.renderSettings(spec, sl, true),
 	}
 
 	// 构建下行streamSettings

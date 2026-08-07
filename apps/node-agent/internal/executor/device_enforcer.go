@@ -59,10 +59,11 @@ type ReloadFunc func(ctx context.Context) error
 // 注意：步骤 5 移除用户后，用户无法发起新连接；步骤 6 的恢复通过全量重载实现，
 // 未来可优化为直接构造 AddUserOperation 实现零断流恢复（需构造 protocol.User）。
 type DeviceEnforcer struct {
-	cfg       DeviceEnforcerConfig
-	provider  DeviceLimiterProvider
-	reloadFn  ReloadFunc
-	logger    *slog.Logger
+	cfg        DeviceEnforcerConfig
+	provider   DeviceLimiterProvider
+	ipProvider IPLimiterProvider // optional: 若设置，则在同一循环中同时执行 IP 限制
+	reloadFn   ReloadFunc
+	logger     *slog.Logger
 
 	mu                sync.Mutex
 	conn              *grpc.ClientConn
@@ -91,6 +92,14 @@ func NewDeviceEnforcer(provider DeviceLimiterProvider, cfg DeviceEnforcerConfig,
 		logger:   logger.With("component", "device-enforcer"),
 		blocked:  make(map[string]bool),
 	}
+}
+
+// SetIPProvider 设置 IP 限制执行器使用的 IP limiter provider。
+// 可选：设置后，执行器将在同一循环中同时检查 IP 限制。
+func (e *DeviceEnforcer) SetIPProvider(ipProvider IPLimiterProvider) {
+	e.mu.Lock()
+	e.ipProvider = ipProvider
+	e.mu.Unlock()
 }
 
 // Start 连接 xray gRPC 并启动设备限制执行循环。
@@ -253,17 +262,35 @@ func (e *DeviceEnforcer) enforceOnce(ctx context.Context) error {
 		}
 		deviceLimiter.SyncLocalDevices(email, ipList)
 
-		// 检查设备限制
+		// 检查设备限制与 IP 限制
 		deviceLimit := e.provider.GetDeviceLimit(email)
-		if deviceLimit <= 0 {
-			continue
-		}
 
 		e.mu.Lock()
 		isBlocked := e.blocked[email]
 		e.mu.Unlock()
 
-		if ipCount > deviceLimit && !isBlocked {
+		// IP 限制检查（独立于设备限制：用户可能仅配置了 ip_limit 而未配置 device_limit）
+		if e.ipProvider != nil {
+			ipLimit := e.ipProvider.GetIPLimit(email)
+			if ipLimit > 0 && ipCount > ipLimit && !isBlocked {
+				e.logger.Info("user exceeds IP limit, blocking",
+					"email", email, "ip_count", ipCount, "ip_limit", ipLimit)
+
+				if err := e.removeUser(ctx, conn, email); err != nil {
+					e.logger.Warn("failed to remove user from inbound (ip limit)",
+						"email", email, "error", err)
+					continue
+				}
+
+				e.mu.Lock()
+				e.blocked[email] = true
+				e.mu.Unlock()
+				isBlocked = true
+			}
+		}
+
+		// 设备限制检查
+		if deviceLimit > 0 && ipCount > deviceLimit && !isBlocked {
 			// 超过限制：通过 HandlerService 移除用户
 			e.logger.Info("user exceeds device limit, blocking",
 				"email", email, "ip_count", ipCount, "limit", deviceLimit)
@@ -278,7 +305,7 @@ func (e *DeviceEnforcer) enforceOnce(ctx context.Context) error {
 			e.blocked[email] = true
 			e.mu.Unlock()
 		} else if ipCount == 0 && isBlocked {
-			// 被拉黑用户的连接已清零：标记为可恢复
+			// 被拉黑用户的连接已清零：标记为可恢复（设备限制或 IP 限制拉黑均适用）
 			blockedCleared = append(blockedCleared, email)
 		}
 	}

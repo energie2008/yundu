@@ -62,7 +62,7 @@ const (
 	emailCodeDailyMax  = 5
 	registerIPPrefix   = "register_ip:" // 单 IP 注册计数，TTL=registerIPTTL
 	registerIPTTL      = time.Hour
-	registerIPMax      = 3
+	registerIPMax      = 10
 )
 
 // getCachedRawToken 从 Redis 获取缓存的 raw subscription token，并验证其在 DB 中仍有效。
@@ -180,7 +180,8 @@ type RegisterResult struct {
 }
 
 func (s *UserService) Register(ctx context.Context, req *model.UserRegisterRequest, ip string) (*RegisterResult, error) {
-	existing, err := s.users.GetByEmail(ctx, req.Email)
+	// 含软删除检查：软删除邮箱仍占用 UNIQUE 约束，若不查会导致 Create 撞约束返回 500
+	existing, err := s.users.GetByEmailAny(ctx, req.Email)
 	if err != nil {
 		return nil, err
 	}
@@ -419,10 +420,10 @@ func (s *UserService) SendEmailCode(ctx context.Context, email, ip string) error
 	if cnt > int64(emailCodeDailyMax) {
 		return ErrEmailCodeDailyLimit
 	}
-	// 已注册邮箱静默跳过（防探测），但仍占用冷却以保持响应节奏一致
-	if u, _ := s.users.GetByEmail(ctx, emailLower); u != nil {
+	// 已注册邮箱（含软删除）返回明确错误，避免"假发送"后注册时撞唯一约束 500
+	if u, _ := s.users.GetByEmailAny(ctx, emailLower); u != nil {
 		s.redisClient.Set(ctx, cdKey, "1", emailCodeCD)
-		return nil
+		return ErrUserAlreadyExists
 	}
 	code := generateEmailCode()
 	if err := s.mailSvc.SendVerifyCode(ctx, emailLower, code); err != nil {

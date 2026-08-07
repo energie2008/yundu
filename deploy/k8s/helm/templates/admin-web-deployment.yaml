@@ -1,0 +1,45 @@
+{{- if .Values.adminWeb.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "yundu.fullname" . }}-admin-web
+  labels:
+    {{- include "yundu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin-web
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.adminWeb.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "yundu.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: admin-web
+  template:
+    metadata:
+      labels:
+        {{- include "yundu.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: admin-web
+    spec:
+      containers:
+        - name: admin-web
+          image: {{ include "yundu.image" (dict "registry" .Values.global.imageRegistry "repository" .Values.adminWeb.image.repository "tag" .Values.adminWeb.image.tag) }}
+          imagePullPolicy: {{ .Values.adminWeb.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.adminWeb.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+{{- end }}

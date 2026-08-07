@@ -557,7 +557,7 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 				buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
 				writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 				buf.WriteString("        proxy_http_version 1.1;\n")
-				buf.WriteString("        proxy_set_header Host $host;\n")
+				buf.WriteString(fmt.Sprintf("        proxy_set_header Host %s;\n", sn))
 				buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
 				buf.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
 				buf.WriteString("        proxy_buffering off;\n")
@@ -572,7 +572,7 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 					buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
 					writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 					buf.WriteString("        proxy_http_version 1.1;\n")
-					buf.WriteString("        proxy_set_header Host $host;\n")
+					buf.WriteString(fmt.Sprintf("        proxy_set_header Host %s;\n", sn))
 					buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
 					buf.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
 					buf.WriteString("        proxy_buffering on;\n")
@@ -588,7 +588,7 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 					buf.WriteString(fmt.Sprintf("        proxy_pass %s://127.0.0.1:%d;\n", proxyScheme, pp.Port))
 					writeProxySSLDirectives(&buf, pp.BackendHTTPS, pp.ServerName)
 					buf.WriteString("        proxy_http_version 1.1;\n")
-					buf.WriteString("        proxy_set_header Host $host;\n")
+					buf.WriteString(fmt.Sprintf("        proxy_set_header Host %s;\n", sn))
 					buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
 					buf.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
 					buf.WriteString("        proxy_buffering off;\n")
@@ -613,7 +613,7 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 				buf.WriteString("        proxy_http_version 1.1;\n")
 				buf.WriteString("        proxy_set_header Upgrade $http_upgrade;\n")
 				buf.WriteString("        proxy_set_header Connection \"upgrade\";\n")
-				buf.WriteString("        proxy_set_header Host $host;\n")
+				buf.WriteString(fmt.Sprintf("        proxy_set_header Host %s;\n", sn))
 				buf.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
 				buf.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
 				buf.WriteString("        proxy_read_timeout 300s;\n")
@@ -634,8 +634,8 @@ func RenderWSVhostConf(entries []*WSVhostEntry, cfg *SnippetConfig, certPath, ke
 // 用于 CF CDN → nginx 8445 → proxy_pass → xray XHTTP inbound 的链路。
 // 与 WSVhostEntry 的区别：不使用 Upgrade/Connection 头，关闭 proxy_buffering 以支持流式传输。
 type XHTTPVhostEntry struct {
-	ServerName   string `json:"server_name"`
-	XHTTPPath    string `json:"xhttp_path"`
+	ServerName string `json:"server_name"`
+	XHTTPPath  string `json:"xhttp_path"`
 	// UpPath/DownPath 用于 XHTTP split 模式（xhttp.mode=split）
 	// split 模式下上行/下行分离为两个 path，nginx 需生成两个 location 块
 	// UpPath 上行（客户端→服务器）：proxy_buffering on（允许缓冲）
@@ -663,12 +663,12 @@ func RenderXHTTPVhostConf(entries []*XHTTPVhostEntry, cfg *SnippetConfig, certPa
 	}
 
 	type pathPort struct {
-		Path        string
-		Port        int
-		UpPath      string
-		DownPath    string
-		BackendHTTPS bool // P4: 标记回源使用 HTTPS（nginx_plus_xray 架构）
-		ServerName  string // P4: 用于 proxy_ssl_name
+		Path         string
+		Port         int
+		UpPath       string
+		DownPath     string
+		BackendHTTPS bool   // P4: 标记回源使用 HTTPS（nginx_plus_xray 架构）
+		ServerName   string // P4: 用于 proxy_ssl_name
 	}
 	type serverGroup struct {
 		Paths    []pathPort

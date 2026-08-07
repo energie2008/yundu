@@ -1,0 +1,15 @@
+apiVersion: v2
+name: yundu
+description: YunDu - Lightweight proxy panel with dual-kernel (sing-box + xray) support
+type: application
+version: 0.1.0
+appVersion: "v0.8.0"
+keywords:
+  - proxy
+  - vpn
+  - sing-box
+  - xray
+  - airport
+home: https://github.com/airport-panel/yundu
+maintainers:
+  - name: YunDu Team

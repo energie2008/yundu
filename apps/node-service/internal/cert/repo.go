@@ -200,8 +200,26 @@ func (r *CertificateRepo) ListExpiringSoon(ctx context.Context, days int) ([]*Ce
 	return certs, rows.Err()
 }
 
+// sanMatch 判断证书 SAN 是否匹配 SNI，支持通配符单层子域（如 *.xinti.na.am 匹配 seed4.xinti.na.am）。
+func sanMatch(certSAN, sni string) bool {
+	a := strings.ToLower(strings.TrimSpace(certSAN))
+	b := strings.ToLower(strings.TrimSpace(sni))
+	if strings.HasPrefix(a, "*.") {
+		suffix := a[2:]
+		if suffix == "" || b == suffix {
+			return false
+		}
+		if !strings.HasSuffix(b, "."+suffix) {
+			return false
+		}
+		left := strings.TrimSuffix(b, "."+suffix)
+		return !strings.Contains(left, ".")
+	}
+	return a == b
+}
+
 // FindActiveBySNI P1-C: 按 SNI 域名查询 tls_certificates 表中 status='active' 的证书。
-// 匹配逻辑：SANs 数组包含 SNI（大小写不敏感），cert_pem 非 NULL。
+// 匹配逻辑：SANs 数组包含 SNI（大小写不敏感）或通配符 SAN 单层命中，cert_pem 非 NULL。
 // 用于 injectCertFromBundle 证书四级回退第3级。
 func (r *CertificateRepo) FindActiveBySNI(ctx context.Context, sni string) (*Certificate, error) {
 	if sni == "" {
@@ -210,16 +228,25 @@ func (r *CertificateRepo) FindActiveBySNI(ctx context.Context, sni string) (*Cer
 	query := fmt.Sprintf(`
 		SELECT %s FROM tls_certificates
 		WHERE status = 'active' AND cert_pem IS NOT NULL
-		AND EXISTS (SELECT 1 FROM unnest(sans) AS s WHERE lower(s) = lower($1))
-		ORDER BY created_at DESC LIMIT 1`, certColumns)
-	c := &Certificate{}
-	if err := scanCertificate(r.pool.QueryRow(ctx, query, sni), c); err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, nil
-		}
+		ORDER BY created_at DESC`, certColumns)
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
 		return nil, err
 	}
-	return c, nil
+	defer rows.Close()
+
+	for rows.Next() {
+		c := &Certificate{}
+		if err := scanCertificate(rows, c); err != nil {
+			continue
+		}
+		for _, san := range c.SANs {
+			if sanMatch(san, sni) {
+				return c, nil
+			}
+		}
+	}
+	return nil, rows.Err()
 }
 
 // CertDeployRepo 处理 cert_deploy_records 数据访问

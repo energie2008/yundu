@@ -1785,10 +1785,8 @@ func (s *PaymentService) ValidateAndApplyCoupon(ctx context.Context, userID uuid
 	if coupon.MaxUses > 0 && coupon.UsedCount >= coupon.MaxUses {
 		return nil, ErrCouponUsedUp
 	}
-	// 一次性券：不可重复使用，全局已用过即拒绝
-	if !coupon.IsRepeatable && coupon.UsedCount > 0 {
-		return nil, ErrCouponNotRepeatable
-	}
+	// 一次性券：改为按"每用户"限用（is_repeatable=false 时每用户 1 次；
+	// limit_use_by_user 显式设置时优先用其值），不再按全局 used_count 拒绝
 	if basePrice < coupon.MinOrderAmount {
 		return nil, ErrCouponMinAmount
 	}

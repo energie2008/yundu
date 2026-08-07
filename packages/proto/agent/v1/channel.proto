@@ -67,6 +67,7 @@ message KernelInfo {
   string version = 2;
   string config_version = 3;   // 当前生效的配置版本号
   bool running = 4;
+  KernelInfo secondary_kernel = 5; // 辅内核状态（双核架构：sing-box主 + xray辅）
 }
 
 // ============================================================================

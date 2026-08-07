@@ -183,10 +183,42 @@ func main() {
 	//   - machine.go      Machine 模式编排器
 	// 仍在 main.go 的核心：Agent struct、认证、recvLoop/handlePanelMessage、
 	//   applyConfig、applyWithHotDiff、syncLimiters、runAgent、gracefulShutdown、NewAgent。
+	// P1-3: Standalone mode - run without panel connection, driven by local config
+	standaloneFlag := flag.Bool("standalone", false, "Run in standalone mode (no panel connection, use local config)")
+	initStandaloneFlag := flag.Bool("init-standalone", false, "Write a sample standalone config to /etc/yundu/standalone.json and exit")
+	standaloneConfigFlag := flag.String("standalone-config", "", "Path to standalone config file (default: /etc/yundu/standalone.json or $YUNDU_STANDALONE_CONFIG)")
 	mode := flag.String("mode", envOr("YUNDU_MODE", "node"),
 		"运行模式: node(默认) | machine(单进程多节点)")
 	showVersion := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
+
+	// P1-3: Handle standalone mode
+	if *initStandaloneFlag {
+		cfgPath := *standaloneConfigFlag
+		if cfgPath == "" {
+			cfgPath = standaloneConfigPath()
+		}
+		if err := writeStandaloneConfigTemplate(cfgPath); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to write standalone config: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("standalone config written to %s\n", cfgPath)
+		os.Exit(0)
+	}
+
+	if *standaloneFlag {
+		cfgPath := *standaloneConfigFlag
+		if cfgPath == "" {
+			cfgPath = standaloneConfigPath()
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if err := runStandalone(ctx, cfgPath); err != nil {
+			fmt.Fprintf(os.Stderr, "standalone mode error: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	if *showVersion {
 		fmt.Printf("yundu-agent %s\n", AgentVersion)
@@ -1460,6 +1492,12 @@ func (a *Agent) maybeStartDeviceEnforcer(ctx context.Context, configMap map[stri
 		APIEndpoint: a.xrayAPIEndpoint(),
 		InboundTags: inboundTags,
 	}, reloadFn, a.logger)
+
+	// P0-1: 若 runtime 执行器支持 IP 限制，则在同一执行循环中同时执行 IP 限制
+	if ipProvider, ok := a.runtimeExec.(executor.IPLimiterProvider); ok {
+		enforcer.SetIPProvider(ipProvider)
+		a.logger.Info("IP limit enforcement enabled")
+	}
 
 	if err := enforcer.Start(ctx); err != nil {
 		a.logger.Warn("failed to start device enforcer, device limit enforcement disabled",

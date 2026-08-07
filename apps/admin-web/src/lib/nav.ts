@@ -82,6 +82,8 @@ export const sidebarGroups: NavGroup[] = [
       { label: '服务器管理', path: '/servers', icon: HardDrive },
       { label: '健康仪表盘', path: '/health-dashboard', icon: Activity },
       { label: '部署管理', path: '/deployments', icon: Rocket },
+      { label: '部署大盘', path: '/deployment-dashboard', icon: Activity },
+      { label: '编译器工作台', path: '/compiler-workbench', icon: Layers },
     ],
   },
   {
@@ -213,7 +215,7 @@ yundu: 'bg-primary',
 }
 
 export function getTabGroup(pathname: string): TabGroup {
-  if (pathname.startsWith('/nodes') || pathname.startsWith('/node-groups') || pathname.startsWith('/machines') || pathname.startsWith('/servers') || pathname.startsWith('/health-dashboard') || pathname.startsWith('/rule-sets') || pathname.startsWith('/route-policies') || pathname.startsWith('/proxy-chains') || pathname.startsWith('/deployments')) return 'nodes'
+  if (pathname.startsWith('/nodes') || pathname.startsWith('/node-groups') || pathname.startsWith('/machines') || pathname.startsWith('/servers') || pathname.startsWith('/health-dashboard') || pathname.startsWith('/rule-sets') || pathname.startsWith('/route-policies') || pathname.startsWith('/proxy-chains') || pathname.startsWith('/deployments') || pathname.startsWith('/deployment-dashboard') || pathname.startsWith('/compiler-workbench')) return 'nodes'
   if (pathname.startsWith('/plans') || pathname.startsWith('/orders') || pathname.startsWith('/payments') || pathname.startsWith('/coupons') || pathname.startsWith('/gift-cards') || pathname.startsWith('/commissions') || pathname.startsWith('/finance/') || pathname.startsWith('/subscribe-templates')) return 'finance'
   if (pathname.startsWith('/tickets') || pathname.startsWith('/announcements') || pathname.startsWith('/knowledge') || pathname.startsWith('/notifications')) return 'support'
   if (pathname.startsWith('/system/') || pathname.startsWith('/mail-templates')) return 'system'

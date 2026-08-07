@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -71,6 +72,7 @@ type CertificateService struct {
 	audit           AuditWriter
 	logger          *slog.Logger
 	acmeRegistry    *ACMERegistry
+	acmeDefaults    ACMEDefaultsStore
 	echGen          ECHGenerator
 	nodeSNIReader   NodeSNIReader
 	bundleSyncStore CertBundleSyncStore // 阶段 C1: ACME 续期后同步到 cert_bundles
@@ -98,6 +100,12 @@ func (s *CertificateService) SetECHGenerator(gen ECHGenerator) {
 // 注入后 TriggerRenew/ObtainCertificate 会调用真实 ACME；未注入时退化为仅置 renew_status=pending。
 func (s *CertificateService) SetACMERegistry(reg *ACMERegistry) {
 	s.acmeRegistry = reg
+}
+
+// SetACMEDefaultsStore 注入面板全局 ACME 默认账户存储。
+// 注入后创建 ACME 证书时自动继承默认账户（DB 优先，环境变量兜底）。
+func (s *CertificateService) SetACMEDefaultsStore(store ACMEDefaultsStore) {
+	s.acmeDefaults = store
 }
 
 // SetNodeSNIReader 注入节点 SNI 扫描器（可选依赖）。
@@ -143,6 +151,43 @@ func (s *CertificateService) CreateCertificate(ctx context.Context, req *CreateC
 	}
 	if existing != nil {
 		return nil, ErrCertAlreadyExists
+	}
+
+	// ACME 证书未显式指定账户时，继承面板全局默认（优先 DB 设置，回退 .env）。
+	// DNS 凭证：面板默认凭证（加密）或 lego 环境变量模式，新域名/新节点无需再提供 token。
+	defaultsCredEnc := ""
+	if req.CertType == "acme" {
+		var defaults *ACMEDefaults
+		if s.acmeDefaults != nil {
+			if d, err := s.acmeDefaults.Load(ctx); err == nil {
+				defaults = d
+			}
+		}
+		if req.ACMEAccountEmail == nil || *req.ACMEAccountEmail == "" {
+			if defaults != nil && defaults.Email != "" {
+				req.ACMEAccountEmail = &defaults.Email
+			} else if v := os.Getenv("ACME_EMAIL"); v != "" {
+				req.ACMEAccountEmail = &v
+			}
+		}
+		if req.ACMEChallengeType == nil || *req.ACMEChallengeType == "" {
+			if defaults != nil && defaults.ChallengeType != "" {
+				req.ACMEChallengeType = &defaults.ChallengeType
+			} else if v := os.Getenv("ACME_CHALLENGE_TYPE"); v != "" {
+				req.ACMEChallengeType = &v
+			}
+		}
+		if req.ACMEDNSProvider == nil || *req.ACMEDNSProvider == "" {
+			if defaults != nil && defaults.DNSProvider != "" {
+				req.ACMEDNSProvider = &defaults.DNSProvider
+			} else if v := os.Getenv("ACME_DNS_PROVIDER"); v != "" {
+				req.ACMEDNSProvider = &v
+			}
+		}
+		if len(req.ACMECredentials) == 0 && defaults != nil && defaults.HasCredentials &&
+			req.ACMEDNSProvider != nil && *req.ACMEDNSProvider == defaults.DNSProvider {
+			defaultsCredEnc = defaults.CredentialsEncrypted
+		}
 	}
 
 	provider := req.Provider
@@ -197,6 +242,11 @@ func (s *CertificateService) CreateCertificate(ctx context.Context, req *CreateC
 			return nil, fmt.Errorf("encrypt dns credentials: %w", err)
 		}
 		cert.ACMECredentialsEncrypted = &encrypted
+	}
+	// 未显式提交凭证时继承面板默认凭证（provider 匹配）
+	if cert.ACMECredentialsEncrypted == nil && defaultsCredEnc != "" {
+		enc := defaultsCredEnc
+		cert.ACMECredentialsEncrypted = &enc
 	}
 
 	normalizeCertDefaults(cert)
@@ -641,25 +691,25 @@ func (s *CertificateService) CreateProfile(ctx context.Context, req *CreateTLSPr
 	}
 
 	profile := &TLSProfile{
-		ID:                          uuid.New(),
-		Code:                        req.Code,
-		Name:                        req.Name,
-		TLSMode:                     tlsMode,
-		ServerName:                  req.ServerName,
-		CertificateID:               req.CertificateID,
-		AllowInsecure:               allowInsecure,
-		UTLSFingerprint:             req.UTLSFingerprint,
-		ALPN:                        alpn,
-		MinVersion:                  minVer,
-		MaxVersion:                  maxVer,
-		ECHEnabled:                  echEnabled,
-		ECHConfigEncrypted:          req.ECHConfigEncrypted,
-		RealityPublicKey:            req.RealityPublicKey,
-		RealityPrivateKeyEncrypted:  req.RealityPrivateKeyEncrypted,
-		RealityShortIDs:             shortIDs,
-		RealitySpiderX:              req.RealitySpiderX,
-		RealityDest:                 req.RealityDest,
-		Notes:                       req.Notes,
+		ID:                         uuid.New(),
+		Code:                       req.Code,
+		Name:                       req.Name,
+		TLSMode:                    tlsMode,
+		ServerName:                 req.ServerName,
+		CertificateID:              req.CertificateID,
+		AllowInsecure:              allowInsecure,
+		UTLSFingerprint:            req.UTLSFingerprint,
+		ALPN:                       alpn,
+		MinVersion:                 minVer,
+		MaxVersion:                 maxVer,
+		ECHEnabled:                 echEnabled,
+		ECHConfigEncrypted:         req.ECHConfigEncrypted,
+		RealityPublicKey:           req.RealityPublicKey,
+		RealityPrivateKeyEncrypted: req.RealityPrivateKeyEncrypted,
+		RealityShortIDs:            shortIDs,
+		RealitySpiderX:             req.RealitySpiderX,
+		RealityDest:                req.RealityDest,
+		Notes:                      req.Notes,
 	}
 
 	if err := s.profileRepo.Create(ctx, profile); err != nil {
@@ -914,6 +964,8 @@ func (s *CertificateService) ObtainCertificate(ctx context.Context, id uuid.UUID
 	if s.audit != nil {
 		s.audit.Audit(ctx, "obtain", "tls_certificate", nil, cert)
 	}
+	// 首次签发成功后同步 PEM 到 cert_bundles，节点渲染即可通过 SAN 匹配直接使用真实证书。
+	s.syncRenewalToCertBundles(ctx, cert)
 	return cert, nil
 }
 
@@ -1043,6 +1095,11 @@ func (s *CertificateService) batchSyncAllSANs(ctx context.Context) {
 			return
 		}
 		for _, c := range certs {
+			// ACME 证书的 SAN 由管理员显式维护，自动批量任务不合并节点 SNI，
+			// 避免伪装域名进入 ACME 证书导致 DNS-01 验证/续期失败。
+			if c.CertType == "acme" {
+				continue
+			}
 			if _, _, err := s.SyncSANFromNodes(ctx, c.ID, nil); err != nil {
 				if s.logger != nil {
 					s.logger.Warn("P6: batch SAN sync cert failed",

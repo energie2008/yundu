@@ -175,6 +175,15 @@ export default function TLSCertificates() {
   const [detailCert, setDetailCert] = useState<TLSCertificate | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [renewingId, setRenewingId] = useState<string | null>(null)
+  const [acmeDefaults, setAcmeDefaults] = useState({
+    email: '',
+    dir_url: 'https://acme-v02.api.letsencrypt.org/directory',
+    challenge_type: 'dns-01',
+    dns_provider: 'cloudflare',
+    has_credentials: false,
+  })
+  const [acmeToken, setAcmeToken] = useState('')
+  const [savingDefaults, setSavingDefaults] = useState(false)
 
   // TLS Profile
   const [profilesLoading, setProfilesLoading] = useState(false)
@@ -187,6 +196,47 @@ export default function TLSCertificates() {
   // 部署记录
   const [recordsLoading, setRecordsLoading] = useState(false)
   const [records, setRecords] = useState<CertDeployRecord[]>([])
+
+  const loadACMEDefaults = async () => {
+    try {
+      const data = await api.get(EP.TLS_CERTIFICATE_DEFAULTS)
+      if (data && typeof data === 'object') {
+        setAcmeDefaults({
+          email: (data as { email?: string }).email || '',
+          dir_url: (data as { dir_url?: string }).dir_url || 'https://acme-v02.api.letsencrypt.org/directory',
+          challenge_type: (data as { challenge_type?: string }).challenge_type || 'dns-01',
+          dns_provider: (data as { dns_provider?: string }).dns_provider || 'cloudflare',
+          has_credentials: !!((data as { has_credentials?: boolean }).has_credentials),
+        })
+      }
+    } catch {
+      // 默认账户接口不存在或失败时静默保留当前值
+    }
+  }
+
+  const saveACMEDefaults = async () => {
+    setSavingDefaults(true)
+    try {
+      const payload: Record<string, unknown> = {
+        email: acmeDefaults.email,
+        dir_url: acmeDefaults.dir_url,
+        challenge_type: acmeDefaults.challenge_type,
+        dns_provider: acmeDefaults.dns_provider,
+      }
+      if (acmeToken.trim()) {
+        payload.credentials = { api_token: acmeToken.trim() }
+      }
+      await api.put(EP.TLS_CERTIFICATE_DEFAULTS, payload)
+      setAcmeToken('')
+      setAcmeDefaults((prev) => ({ ...prev, has_credentials: !!acmeToken.trim() || prev.has_credentials }))
+      toast({ title: '已保存', description: '默认 ACME 账户已更新，新证书自动使用该账户', variant: 'success' })
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : '保存失败'
+      toast({ title: '保存失败', description: msg, variant: 'destructive' })
+    } finally {
+      setSavingDefaults(false)
+    }
+  }
 
   const loadCerts = async () => {
     setCertsLoading(true)
@@ -250,6 +300,7 @@ export default function TLSCertificates() {
 
   useEffect(() => {
     loadCerts()
+    loadACMEDefaults()
   }, [])
 
   const onTabChange = (value: string) => {
@@ -284,9 +335,11 @@ export default function TLSCertificates() {
     try {
       const domainsArr = certForm.domains.split(',').map((s) => s.trim()).filter(Boolean)
       const payload: Record<string, unknown> = {
+        code: `cert-${Date.now()}`,
         name: certForm.name,
-        type: certForm.type,
-        domains: domainsArr,
+        cert_type: certForm.type,
+        common_name: domainsArr[0] || '',
+        sans: domainsArr,
       }
       if (certForm.type === 'upload' || certForm.type === 'self_signed') {
         payload.cert_pem = certForm.cert_pem
@@ -296,8 +349,15 @@ export default function TLSCertificates() {
         await api.patch(EP.TLS_CERTIFICATE(certForm.id), payload)
         toast({ title: '更新成功', description: `证书 ${certForm.name} 已更新`, variant: 'success' })
       } else {
-        await api.post(EP.TLS_CERTIFICATES, payload)
+        const created = await api.post<TLSCertificate>(EP.TLS_CERTIFICATES, payload)
         toast({ title: '创建成功', description: `证书 ${certForm.name} 已添加`, variant: 'success' })
+        if (certForm.type === 'acme' && created?.id) {
+          toast({ title: '证书已创建，正在自动申请签发...', variant: 'success' })
+          api.post(EP.TLS_CERTIFICATE_OBTAIN(created.id)).catch((e) => {
+            const msg = e instanceof ApiError ? e.message : '签发失败'
+            toast({ title: '签发失败', description: msg, variant: 'destructive' })
+          })
+        }
       }
       setCertDialogOpen(false)
       loadCerts()
@@ -323,6 +383,20 @@ export default function TLSCertificates() {
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : '续期失败'
       toast({ title: '续期失败', description: msg, variant: 'destructive' })
+    } finally {
+      setRenewingId(null)
+    }
+  }
+
+  const obtainCert = async (c: TLSCertificate) => {
+    setRenewingId(c.id)
+    try {
+      await api.post(EP.TLS_CERTIFICATE_OBTAIN(c.id))
+      toast({ title: '签发已触发', description: `证书 ${c.name} 正在申请（DNS-01）`, variant: 'success' })
+      loadCerts()
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : '签发失败'
+      toast({ title: '签发失败', description: msg, variant: 'destructive' })
     } finally {
       setRenewingId(null)
     }
@@ -422,6 +496,55 @@ export default function TLSCertificates() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-zinc-100">TLS 证书中心</h2>
       </div>
+
+      <Card className="border-zinc-800 bg-zinc-900/40">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium text-zinc-200">默认 ACME 账户</div>
+              <div className="text-xs text-zinc-500">面板统一配置一次，新域名/新节点无需再提供 Token；留空时回退 .env 配置</div>
+            </div>
+            <Button onClick={saveACMEDefaults} disabled={savingDefaults} className="bg-indigo-600 hover:bg-indigo-500 h-9">
+              <RefreshCw className={`w-4 h-4 mr-1.5 ${savingDefaults ? 'animate-spin' : ''}`} />
+              {savingDefaults ? '保存中...' : '保存'}
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-zinc-400">ACME 邮箱</label>
+              <Input value={acmeDefaults.email} onChange={(e) => setAcmeDefaults({ ...acmeDefaults, email: e.target.value })} placeholder="admin@example.com" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-zinc-400">ACME 目录 URL</label>
+              <Input value={acmeDefaults.dir_url} onChange={(e) => setAcmeDefaults({ ...acmeDefaults, dir_url: e.target.value })} placeholder="https://acme-v02.api.letsencrypt.org/directory" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9 font-mono text-xs" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-zinc-400">验证方式</label>
+              <select value={acmeDefaults.challenge_type} onChange={(e) => setAcmeDefaults({ ...acmeDefaults, challenge_type: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 h-9 rounded-md px-2 text-sm">
+                <option value="dns-01">DNS-01（推荐，无需公网 80）</option>
+                <option value="http-01">HTTP-01（需要公网 80）</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-zinc-400">DNS Provider</label>
+              <select value={acmeDefaults.dns_provider} onChange={(e) => setAcmeDefaults({ ...acmeDefaults, dns_provider: e.target.value })} className="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 h-9 rounded-md px-2 text-sm">
+                <option value="cloudflare">Cloudflare</option>
+                <option value="alidns">阿里云 DNS</option>
+                <option value="dnspod">腾讯云 DNSPod</option>
+                <option value="gandi">Gandi</option>
+                <option value="namesilo">NameSilo</option>
+              </select>
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-xs text-zinc-400">DNS 凭证 Token（Cloudflare 为 API Token；留空保留已有，不修改）</label>
+              <div className="flex items-center gap-2">
+                <Input type="password" value={acmeToken} onChange={(e) => setAcmeToken(e.target.value)} placeholder={acmeDefaults.has_credentials ? '已配置凭证（输入新值覆盖）' : '粘贴 API Token'} className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9 font-mono text-xs flex-1" />
+                {acmeDefaults.has_credentials && <Badge variant="secondary" className="bg-emerald-950/50 text-emerald-300 border-emerald-800/50">已配置</Badge>}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Tabs value={tab} onValueChange={onTabChange}>
         <TabsList>
@@ -707,6 +830,11 @@ export default function TLSCertificates() {
               />
               {certErrors.domains && <p className="text-xs text-red-400">{certErrors.domains}</p>}
             </div>
+            {certForm.type === 'acme' && (
+              <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-900/50">
+                <p className="text-xs text-emerald-300">创建后将使用面板全局 ACME 账户（ACME_EMAIL + DNS 凭证）自动签发，新域名/新节点无需再提供 Token。</p>
+              </div>
+            )}
             {(certForm.type === 'upload' || certForm.type === 'self_signed') && (
               <>
                 <div className="space-y-1.5">
@@ -812,6 +940,16 @@ export default function TLSCertificates() {
                 )}
               </div>
               <DialogFooter>
+                {detailCert.type === 'acme' && (
+                  <Button
+                    className="bg-emerald-600 hover:bg-emerald-500"
+                    disabled={renewingId === detailCert.id}
+                    onClick={() => obtainCert(detailCert)}
+                  >
+                    <RefreshCw className={`w-4 h-4 mr-1.5 ${renewingId === detailCert.id ? 'animate-spin' : ''}`} />
+                    {renewingId === detailCert.id ? '申请中...' : '申请签发'}
+                  </Button>
+                )}
                 <Button
                   className="bg-indigo-600 hover:bg-indigo-500"
                   disabled={renewingId === detailCert.id}

@@ -2859,6 +2859,193 @@ func buildTLSConfig(n *model.Node) *nodespec.TLSConfig {
 	return tls
 }
 
+// CertSourceInfo 描述节点最终证书来源（只读判定，不写入节点配置）。
+type CertSourceInfo struct {
+	Source      string    // none / embedded / cert_bundle_id / cert_bundle_san / tls_certificates / self_signed
+	Provider    string    // cert_bundle 的 provider（self-signed / file / acme / content / cf-origin）
+	BundleID    uuid.UUID // 命中 cert_bundles 时的包 ID
+	Fingerprint string    // 证书 SHA256 指纹
+	SAN         string    // 判定使用的 SNI/域名
+}
+
+// nodeCertSNI 提取节点证书判定使用的 SNI（与 injectCertFromBundle 回退顺序一致）。
+func nodeCertSNI(n *model.Node) string {
+	if n == nil {
+		return ""
+	}
+	sni := ""
+	if n.SNI != nil {
+		sni = strings.TrimSpace(*n.SNI)
+	}
+	if sni == "" {
+		if sn, ok := n.ConfigJSON["sni"].(string); ok {
+			sni = strings.TrimSpace(sn)
+		}
+	}
+	if sni == "" {
+		if ts, ok := n.ConfigJSON["tls_settings"].(map[string]interface{}); ok {
+			if sn, ok := ts["server_name"].(string); ok && sn != "" {
+				sni = strings.TrimSpace(sn)
+			} else if sn, ok := ts["sni"].(string); ok && sn != "" {
+				sni = strings.TrimSpace(sn)
+			}
+		}
+	}
+	if sni == "" {
+		if cdnAddr, ok := n.ConfigJSON["cdn_address"].(string); ok && cdnAddr != "" {
+			sni = strings.TrimSpace(cdnAddr)
+		}
+	}
+	return sni
+}
+
+// certSANMatch 判断证书 SAN 是否匹配节点 SNI，支持通配符单层子域
+// （如 *.xinti.na.am 匹配 seed4.xinti.na.am，不匹配 a.b.xinti.na.am）。
+func certSANMatch(certSAN, sni string) bool {
+	a := strings.ToLower(strings.TrimSpace(certSAN))
+	b := strings.ToLower(strings.TrimSpace(sni))
+	if strings.HasPrefix(a, "*.") {
+		suffix := a[2:]
+		if suffix == "" || b == suffix {
+			return false
+		}
+		if !strings.HasSuffix(b, "."+suffix) {
+			return false
+		}
+		left := strings.TrimSuffix(b, "."+suffix)
+		return !strings.Contains(left, ".")
+	}
+	return a == b
+}
+
+// ResolveNodeCertSource 只读判定节点最终证书来源，复用四级回退顺序：
+// cert_bundle_id 精确 → cert_bundles SAN 匹配 → tls_certificates SNI 匹配 → 自签兜底。
+// 不修改 node.ConfigJSON，供保存前一致性校验与前端展示使用。
+func (s *DeploymentService) ResolveNodeCertSource(ctx context.Context, n *model.Node) *CertSourceInfo {
+	if n == nil || n.ConfigJSON == nil {
+		return nil
+	}
+	tc := ClassifyTermination(n)
+	if !tc.NeedsCertBundle() || getSecurityType(n) != "tls" {
+		return &CertSourceInfo{Source: "none"}
+	}
+	if pickString(n.ConfigJSON, "cert_pem", "tls_settings", "tls") != "" &&
+		pickString(n.ConfigJSON, "key_pem", "tls_settings", "tls") != "" {
+		return &CertSourceInfo{Source: "embedded"}
+	}
+	sni := nodeCertSNI(n)
+	if sni == "" {
+		return &CertSourceInfo{Source: "none"}
+	}
+
+	if s.capRepo != nil {
+		if cbIDStr, ok := getStringFromNodeConfig(n, "cert_bundle_id"); ok && cbIDStr != "" {
+			if cbID, err := uuid.Parse(cbIDStr); err == nil {
+				cb, err := s.capRepo.GetCertBundle(ctx, cbID)
+				if err == nil && cb != nil && cb.CertPEM != "" && cb.KeyPEM != "" {
+					return &CertSourceInfo{
+						Source:      "cert_bundle_id",
+						Provider:    cb.Provider,
+						BundleID:    cb.ID,
+						Fingerprint: crypto.CertSHA256Fingerprint(cb.CertPEM),
+						SAN:         sni,
+					}
+				}
+			}
+		}
+		bundles, err := s.capRepo.ListCertBundles(ctx, "")
+		if err == nil && len(bundles) > 0 {
+			// 精确 SAN 优先，通配符 SAN 兜底，避免通配符新包覆盖已有精确证书
+			var match *repo.CertBundle
+			for _, cb := range bundles {
+				if cb.CertPEM == "" || cb.KeyPEM == "" {
+					continue
+				}
+				for _, san := range cb.SAN {
+					if strings.EqualFold(san, sni) {
+						match = cb
+						break
+					}
+				}
+				if match != nil {
+					break
+				}
+			}
+			if match == nil {
+				for _, cb := range bundles {
+					if cb.CertPEM == "" || cb.KeyPEM == "" {
+						continue
+					}
+					for _, san := range cb.SAN {
+						if certSANMatch(san, sni) {
+							match = cb
+							break
+						}
+					}
+					if match != nil {
+						break
+					}
+				}
+			}
+			if match != nil {
+				return &CertSourceInfo{
+					Source:      "cert_bundle_san",
+					Provider:    match.Provider,
+					BundleID:    match.ID,
+					Fingerprint: crypto.CertSHA256Fingerprint(match.CertPEM),
+					SAN:         sni,
+				}
+			}
+		}
+	}
+	if s.tlsCertReader != nil {
+		if certPEM, _, ok := s.tlsCertReader.FindCertPEMBySNI(ctx, sni); ok && certPEM != "" {
+			return &CertSourceInfo{
+				Source:      "tls_certificates",
+				Fingerprint: crypto.CertSHA256Fingerprint(certPEM),
+				SAN:         sni,
+			}
+		}
+	}
+	if certPEM, _, err := crypto.GenerateSelfSignedCertPEM(sni); err == nil {
+		return &CertSourceInfo{
+			Source:      "self_signed",
+			Provider:    "self-signed",
+			Fingerprint: crypto.CertSHA256Fingerprint(certPEM),
+			SAN:         sni,
+		}
+	}
+	return nil
+}
+
+// CertConsistencyWarnings 保存前证书一致性校验（仅告警，不阻断）。
+// 最终证书来源为自签（含持久化自签包），且未开启 allow_insecure、无 pin_sha256 时提示。
+func (s *DeploymentService) CertConsistencyWarnings(ctx context.Context, n *model.Node) []string {
+	info := s.ResolveNodeCertSource(ctx, n)
+	if info == nil {
+		return nil
+	}
+	isSelfSigned := info.Source == "self_signed" || info.Provider == "self-signed" || info.Provider == "self"
+	if !isSelfSigned {
+		return nil
+	}
+	allowInsecure := pickBool(n.ConfigJSON, "allow_insecure", "tls_settings", "tls")
+	pin := pickString(n.ConfigJSON, "pin_sha256", "tls_settings", "tls")
+	if pin == "" {
+		pin = pickString(n.ConfigJSON, "pinned_peer_cert_sha256", "tls_settings", "tls")
+	}
+	if allowInsecure || pin != "" {
+		return nil
+	}
+	fp := info.Fingerprint
+	if len(fp) > 12 {
+		fp = fp[:12]
+	}
+	return []string{fmt.Sprintf(
+		"证书为自签兜底（SNI=%s，指纹 %s...），客户端将校验失败：请勾选 allow_insecure 或配置 pin_sha256",
+		info.SAN, fp)}
+}
+
 // injectCertFromBundle B11: 从 cert_bundles 表查询证书 PEM 并注入到 node.ConfigJSON。
 // buildTLSConfig 是纯函数无 DB 访问，因此在本函数中预先把 PEM 写入 ConfigJSON。
 // 当 config_json 已有 cert_pem/key_pem 时跳过；仅对 TLS 安全类型生效。
@@ -2938,50 +3125,76 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 			if cbID, err := uuid.Parse(cbIDStr); err == nil {
 				cb, err := s.capRepo.GetCertBundle(ctx, cbID)
 				if err == nil && cb != nil && cb.CertPEM != "" && cb.KeyPEM != "" {
-				if n.ConfigJSON == nil {
-					n.ConfigJSON = make(map[string]interface{})
+					if n.ConfigJSON == nil {
+						n.ConfigJSON = make(map[string]interface{})
+					}
+					n.ConfigJSON["cert_pem"] = cb.CertPEM
+					n.ConfigJSON["key_pem"] = cb.KeyPEM
+					// P1-D: 证书来源标记（面板可观测性，stripMetaFields 会剥离此字段不进入内核配置）
+					n.ConfigJSON["_cert_source"] = "cert_bundle_id"
+					// P2-3: 成功注入精确匹配证书，Info 级别日志
+					if s.logger != nil {
+						s.logger.Info("injectCertFromBundle: injected cert via cert_bundle_id",
+							"node_code", n.Code, "sni", sni,
+							"cert_bundle_id", cbIDStr, "termination_class", tc.String(),
+							"cert_source", "cert_bundle_id")
+					}
+					return
 				}
-				n.ConfigJSON["cert_pem"] = cb.CertPEM
-				n.ConfigJSON["key_pem"] = cb.KeyPEM
-				// P1-D: 证书来源标记（面板可观测性，stripMetaFields 会剥离此字段不进入内核配置）
-				n.ConfigJSON["_cert_source"] = "cert_bundle_id"
-				// P2-3: 成功注入精确匹配证书，Info 级别日志
-				if s.logger != nil {
-					s.logger.Info("injectCertFromBundle: injected cert via cert_bundle_id",
-						"node_code", n.Code, "sni", sni,
-						"cert_bundle_id", cbIDStr, "termination_class", tc.String(),
-						"cert_source", "cert_bundle_id")
-				}
-				return
-			}
 			}
 		}
 		// 回退：按 SNI 域名匹配 cert_bundles.SAN
 		bundles, err := s.capRepo.ListCertBundles(ctx, "")
 		if err == nil && len(bundles) > 0 {
+			// 精确 SAN 优先，通配符 SAN 兜底
+			var match *repo.CertBundle
+			var matchedSAN string
 			for _, cb := range bundles {
 				if cb.CertPEM == "" || cb.KeyPEM == "" {
 					continue
 				}
 				for _, san := range cb.SAN {
 					if strings.EqualFold(san, sni) {
-					if n.ConfigJSON == nil {
-						n.ConfigJSON = make(map[string]interface{})
+						match, matchedSAN = cb, san
+						break
 					}
-					n.ConfigJSON["cert_pem"] = cb.CertPEM
-					n.ConfigJSON["key_pem"] = cb.KeyPEM
-					// P1-D: 证书来源标记（SAN 模糊回退）
-					n.ConfigJSON["_cert_source"] = "cert_bundle_san"
-					// P2-3: SAN 匹配回退注入，Info 级别日志
-					if s.logger != nil {
-						s.logger.Info("injectCertFromBundle: injected cert via SAN fallback match",
-							"node_code", n.Code, "sni", sni,
-							"matched_san", san, "termination_class", tc.String(),
-							"cert_source", "cert_bundle_san")
+				}
+				if match != nil {
+					break
+				}
+			}
+			if match == nil {
+				for _, cb := range bundles {
+					if cb.CertPEM == "" || cb.KeyPEM == "" {
+						continue
 					}
-					return
+					for _, san := range cb.SAN {
+						if certSANMatch(san, sni) {
+							match, matchedSAN = cb, san
+							break
+						}
+					}
+					if match != nil {
+						break
+					}
 				}
+			}
+			if match != nil {
+				if n.ConfigJSON == nil {
+					n.ConfigJSON = make(map[string]interface{})
 				}
+				n.ConfigJSON["cert_pem"] = match.CertPEM
+				n.ConfigJSON["key_pem"] = match.KeyPEM
+				// P1-D: 证书来源标记（SAN 模糊回退）
+				n.ConfigJSON["_cert_source"] = "cert_bundle_san"
+				// P2-3: SAN 匹配回退注入，Info 级别日志
+				if s.logger != nil {
+					s.logger.Info("injectCertFromBundle: injected cert via SAN fallback match",
+						"node_code", n.Code, "sni", sni,
+						"matched_san", matchedSAN, "termination_class", tc.String(),
+						"cert_source", "cert_bundle_san")
+				}
+				return
 			}
 		}
 	}
@@ -3012,7 +3225,51 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 	// 自动生成 ECDSA P-256 自签名证书，确保节点首次创建即可工作。
 	// 正式 ACME 证书签发后可通过 cert_bundle_id 更新覆盖。
 	// P2-3: 自签兜底保持 Warn 级别（提醒运维及时替换为正式证书）
-	certPEM, keyPEM, err := crypto.GenerateSelfSignedCertPEM(sni)
+	// P-证书策略: 自签证书持久化到 cert_bundles（provider=self-signed），
+	// 避免进程重启后重新生成导致指纹漂移、客户端 pin 失效。
+	var certPEM, keyPEM string
+	reusedSelfSigned := false
+	if s.capRepo != nil {
+		if bundles, err := s.capRepo.ListCertBundles(ctx, "self-signed"); err == nil {
+			for _, cb := range bundles {
+				if cb.CertPEM == "" || cb.KeyPEM == "" {
+					continue
+				}
+				matched := false
+				for _, san := range cb.SAN {
+					if strings.EqualFold(san, sni) {
+						certPEM, keyPEM = cb.CertPEM, cb.KeyPEM
+						reusedSelfSigned = true
+						matched = true
+						break
+					}
+				}
+				if matched {
+					break
+				}
+			}
+		}
+	}
+	var err error
+	if !reusedSelfSigned {
+		certPEM, keyPEM, err = crypto.GenerateSelfSignedCertPEM(sni)
+		if err == nil && s.capRepo != nil {
+			notAfter := time.Now().Add(365 * 24 * 10 * time.Hour)
+			if cerr := s.capRepo.CreateCertBundle(ctx, &repo.CertBundle{
+				ID:       uuid.New(),
+				Provider: "self-signed",
+				Mode:     "tls",
+				CertPEM:  certPEM,
+				KeyPEM:   keyPEM,
+				SAN:      []string{sni},
+				NotAfter: &notAfter,
+				Version:  1,
+			}); cerr != nil {
+				s.logger.Warn("self-signed cert persistence failed (non-fatal)",
+					"node_code", n.Code, "sni", sni, "error", cerr)
+			}
+		}
+	}
 	if err == nil {
 		if n.ConfigJSON == nil {
 			n.ConfigJSON = make(map[string]interface{})
@@ -3020,7 +3277,11 @@ func (s *DeploymentService) injectCertFromBundle(ctx context.Context, n *model.N
 		n.ConfigJSON["cert_pem"] = certPEM
 		n.ConfigJSON["key_pem"] = keyPEM
 		// P1-D: 证书来源标记（自签兜底）
-		n.ConfigJSON["_cert_source"] = "self_signed"
+		certSource := "self_signed"
+		if reusedSelfSigned {
+			certSource = "self_signed_persisted"
+		}
+		n.ConfigJSON["_cert_source"] = certSource
 		// P1-D: 自签兜底增加 SHA256 指纹输出和高敏感告警
 		fingerprint := crypto.CertSHA256Fingerprint(certPEM)
 		if s.logger != nil {

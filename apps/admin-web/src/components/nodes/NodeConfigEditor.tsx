@@ -957,7 +957,14 @@ function AdvancedSettingsDialog({ open, onOpenChange, config, onConfigChange }: 
                 </select>
               </div>
               <div className="space-y-2"><Label className="text-zinc-300 text-sm">证书域名 (SNI)</Label>
-                <Input value={config.tls.server_name} onChange={(e) => uTLS('server_name', e.target.value)} placeholder="example.com" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9" />
+                <Input value={config.tls.server_name} onChange={(e) => uTLS('server_name', e.target.value)} placeholder="example.com" list="yundu-sni-candidates" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9" />
+                <datalist id="yundu-sni-candidates">
+                  <option value="cn-hnzz-cm-01-01.bilivideo.com" />
+                  <option value="cn-beijing.cdn.aliyuncs.com" />
+                  <option value="dl.google.com" />
+                  <option value="www.primevideo.com" />
+                </datalist>
+                <p className="text-[10px] text-zinc-500">直连 TLS 节点可用伪装 CDN 域名；不要使用机场自有域名</p>
               </div>
               {config.tls.cert_mode === 'file' && (<>
                 <div className="space-y-2"><Label className="text-zinc-300 text-sm">证书文件路径 (Full Chain)</Label><Input value={config.tls.cert_file} onChange={(e) => uTLS('cert_file', e.target.value)} placeholder="/etc/ssl/certs/example.com.pem" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-9 font-mono text-xs" /></div>

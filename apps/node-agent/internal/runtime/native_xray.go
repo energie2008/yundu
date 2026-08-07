@@ -38,6 +38,13 @@ const (
 	grpcDialTimeout = 3 * time.Second
 )
 
+// SpeedEnforcer 提供 xray 限速 enforcement 所需的查询接口。
+// MultiRuntimePlugin 实现此接口，注入到 NativeXray 用于 enforcement loop。
+type SpeedEnforcer interface {
+	// GetXraySpeedLimit 返回指定用户的限速值（Mbps，0 = 不限速）
+	GetXraySpeedLimit(userID string) int
+}
+
 // NativeXray 基于 xray-core Go 库的原生 Xray 运行时。
 //
 // 与 exec.Command 子进程模式相比：
@@ -63,6 +70,14 @@ type NativeXray struct {
 	// 使用 Reset=false 避免上报失败时流量丢失：xray 计数器不清零，下次查询仍可读到完整累计值。
 	lastStatsValues map[string]int64
 	lastStatsMu     sync.Mutex
+
+	// SpeedEnforcer: 限速执行回调（由 MultiRuntimePlugin 注入）
+	// 当用户超速时调用，触发 AlterInbound 移除用户
+	speedEnforcer       SpeedEnforcer
+	speedEnforcerLimits map[string]int // email → Mbps
+	speedEnforcerMu     sync.RWMutex
+	// speedEnforcerStop 停止限速 enforcement loop
+	speedEnforcerStop chan struct{}
 }
 
 // NewNativeXray 创建 NativeXray 实例。
@@ -82,6 +97,176 @@ func NewNativeXray(logger *slog.Logger, apiEndpoint string) *NativeXray {
 		apiEndpoint:  apiEndpoint,
 		assignedPort: port,
 	}
+}
+
+// SetSpeedEnforcer 设置限速执行器并启动 enforcement loop。
+// enforcer 提供 per-user 限速值查询；limits 为初始限速映射。
+func (x *NativeXray) SetSpeedEnforcer(enforcer SpeedEnforcer, limits map[string]int) {
+	x.speedEnforcerMu.Lock()
+	x.speedEnforcer = enforcer
+	if limits != nil {
+		x.speedEnforcerLimits = make(map[string]int, len(limits))
+		for k, v := range limits {
+			x.speedEnforcerLimits[k] = v
+		}
+	}
+	x.speedEnforcerMu.Unlock()
+
+	// 启动 enforcement loop（如果尚未启动）
+	x.startSpeedEnforcement()
+}
+
+// startSpeedEnforcement 启动限速 enforcement 后台循环。
+// 每 3 秒查询一次 xray StatsService，计算 per-user 瞬时速率，
+// 超过限速值的用户通过 AlterInbound 移除（下次重连时会重新加入）。
+func (x *NativeXray) startSpeedEnforcement() {
+	x.mu.Lock()
+	if x.speedEnforcerStop != nil {
+		x.mu.Unlock()
+		return // already running
+	}
+	x.speedEnforcerStop = make(chan struct{})
+	stopCh := x.speedEnforcerStop
+	x.mu.Unlock()
+
+	go func() {
+		x.logger.Info("xray speed enforcement loop started")
+		// 速率计算需要两次采样，存储上次采样值
+		lastStats := make(map[string]int64) // email → last total bytes (up+down)
+		lastTime := time.Now()
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				x.logger.Info("xray speed enforcement loop stopped")
+				return
+			case <-ticker.C:
+				x.enforceSpeedLimits(lastStats, &lastTime)
+			}
+		}
+	}()
+}
+
+// stopSpeedEnforcement 停止限速 enforcement 循环（调用方不持有 x.mu）。
+func (x *NativeXray) stopSpeedEnforcement() {
+	x.mu.Lock()
+	x.stopSpeedEnforcementLocked()
+	x.mu.Unlock()
+}
+
+// stopSpeedEnforcementLocked 停止限速 enforcement 循环（调用方已持有 x.mu）。
+// 用于 stopLocked，避免重复加锁导致死锁。
+func (x *NativeXray) stopSpeedEnforcementLocked() {
+	if x.speedEnforcerStop != nil {
+		close(x.speedEnforcerStop)
+		x.speedEnforcerStop = nil
+	}
+}
+
+// enforceSpeedLimits 查询 xray 统计，计算瞬时速率，移除超速用户。
+func (x *NativeXray) enforceSpeedLimits(lastStats map[string]int64, lastTime *time.Time) {
+	x.speedEnforcerMu.RLock()
+	enforcer := x.speedEnforcer
+	x.speedEnforcerMu.RUnlock()
+	if enforcer == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 查询当前 per-user 流量（不 reset，用增量计算速率）
+	currentStats, err := x.GetTrafficStatsNoReset(ctx)
+	if err != nil {
+		x.logger.Debug("enforce: failed to query stats", "error", err)
+		return
+	}
+
+	now := time.Now()
+	elapsed := now.Sub(*lastTime).Seconds()
+	if elapsed < 1 {
+		return // 间隔太短，跳过
+	}
+
+	for email, stat := range currentStats {
+		totalBytes := stat.Upload + stat.Download
+		last, ok := lastStats[email]
+		if !ok {
+			lastStats[email] = totalBytes
+			continue
+		}
+
+		deltaBytes := totalBytes - last
+		if deltaBytes < 0 {
+			deltaBytes = 0 // 计数器重置
+		}
+		lastStats[email] = totalBytes
+
+		// 计算速率（Mbps）
+		rateMbps := float64(deltaBytes*8) / (elapsed * 1e6)
+
+		// 查询用户限速
+		limitMbps := enforcer.GetXraySpeedLimit(email)
+		if limitMbps <= 0 {
+			continue // 不限速
+		}
+
+		// 超速检测：允许 10% 突发余量
+		if rateMbps > float64(limitMbps)*1.1 {
+			x.logger.Info("user exceeds speed limit, removing",
+				"email", email, "rate_mbps", rateMbps, "limit_mbps", limitMbps)
+			// 通过 AlterInbound 移除用户（下个周期会重新加入）
+			if err := x.removeUserByEmail(ctx, email); err != nil {
+				x.logger.Warn("failed to remove exceeding user",
+					"email", email, "error", err)
+			}
+		}
+	}
+	*lastTime = now
+}
+
+// removeUserByEmail 通过 gRPC HandlerService 移除指定 email 的用户。
+// 遍历所有非 api inbound 执行 RemoveUserOperation（xray inbound tag 形如 "in-{code}"，无固定值）。
+func (x *NativeXray) removeUserByEmail(ctx context.Context, email string) error {
+	x.mu.RLock()
+	conn := x.grpcConn
+	configBytes := x.configBytes
+	x.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("xray gRPC not connected")
+	}
+
+	// 解析配置获取所有非 api inbound tag
+	inbounds, err := parseXrayInbounds(configBytes)
+	if err != nil {
+		return fmt.Errorf("parse inbounds: %w", err)
+	}
+
+	handlerClient := proxymanCmd.NewHandlerServiceClient(conn)
+	var lastErr error
+	removed := false
+	for _, ib := range inbounds {
+		tag, _ := ib["tag"].(string)
+		if tag == "api" || tag == "" {
+			continue
+		}
+		removeOp := &proxymanCmd.RemoveUserOperation{Email: email}
+		_, err := handlerClient.AlterInbound(ctx, &proxymanCmd.AlterInboundRequest{
+			Tag:       tag,
+			Operation: serial.ToTypedMessage(removeOp),
+		})
+		if err != nil {
+			// 用户不存在于该 inbound 不算错误，记录后继续
+			lastErr = err
+			continue
+		}
+		removed = true
+	}
+	if !removed && lastErr != nil {
+		return lastErr
+	}
+	return nil
 }
 
 // Start 从内存字节流启动 Xray，不需要落盘到 config.json。
@@ -186,6 +371,7 @@ func (x *NativeXray) Stop(ctx context.Context) error {
 }
 
 func (x *NativeXray) stopLocked() error {
+	x.stopSpeedEnforcementLocked() // P0: 停止限速 enforcement loop
 	if x.grpcConn != nil {
 		x.grpcConn.Close()
 		x.grpcConn = nil
@@ -599,6 +785,59 @@ func buildXrayClient(protocol string, u User) map[string]interface{} {
 	return client
 }
 
+// drainExistingConns waits for active connections to drain before full reload.
+// Queries xray StatsService for active connection count; returns when count reaches 0 or timeout.
+//
+// P1-1: Connection-level drain minimizes connection interruption during full config reloads.
+// fullReload is used for non-user-change scenarios (larger config changes); AlterInbound
+// already handles user add/remove zero-disruption. This drain phase allows active
+// connections to naturally close before the xray instance is stopped.
+//
+// Note: This method must be called WITHOUT holding x.mu, because getActiveConnCount
+// acquires x.mu.RLock() to safely read x.grpcConn.
+func (x *NativeXray) drainExistingConns(ctx context.Context, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		activeConns := x.getActiveConnCount()
+		if activeConns == 0 {
+			x.logger.Info("drain completed, all connections closed")
+			return
+		}
+		x.logger.Debug("waiting for connections to drain", "active_conns", activeConns)
+		select {
+		case <-ctx.Done():
+			x.logger.Info("drain cancelled by context", "active_conns", activeConns)
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	x.logger.Info("drain timeout, force stopping", "active_conns", x.getActiveConnCount())
+}
+
+// getActiveConnCount queries xray StatsService for the total active connection count.
+// Returns 0 if gRPC is not connected or query fails (fail-open: don't block reload on query errors).
+//
+// Uses GetAllOnlineUsers which returns the list of currently online users (users with
+// at least one active IP session). The count of online users serves as a proxy for
+// active connections — when it reaches 0, all user sessions have closed.
+func (x *NativeXray) getActiveConnCount() int {
+	x.mu.RLock()
+	conn := x.grpcConn
+	x.mu.RUnlock()
+	if conn == nil {
+		return 0 // gRPC not connected, don't block
+	}
+	statsClient := statsCmd.NewStatsServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	// Query online users — each online user represents at least one active session
+	resp, err := statsClient.GetAllOnlineUsers(ctx, &statsCmd.GetAllOnlineUsersRequest{})
+	if err != nil {
+		return 0 // query failed, don't block
+	}
+	return len(resp.GetUsers())
+}
+
 // fullReload 全量内存重载：停止旧实例，用新配置启动新实例。
 // 如果 newConfigBytes 为 nil，使用缓存的 configBytes。
 func (x *NativeXray) fullReload(ctx context.Context, newConfigBytes []byte) error {
@@ -611,6 +850,15 @@ func (x *NativeXray) fullReload(ctx context.Context, newConfigBytes []byte) erro
 	}
 	if len(cfgBytes) == 0 {
 		return fmt.Errorf("native-xray: no config available for full reload")
+	}
+
+	// P1-1: Connection-level drain - wait for active connections to close before stopping.
+	// This minimizes connection interruption during full config reloads (non-user-change scenarios).
+	// AlterInbound already handles user add/remove zero-disruption; fullReload is for larger config changes.
+	if x.instance != nil {
+		x.mu.Unlock() // release lock during drain to allow StatsService queries
+		x.drainExistingConns(ctx, 5*time.Second)
+		x.mu.Lock()
 	}
 
 	x.stopLocked()

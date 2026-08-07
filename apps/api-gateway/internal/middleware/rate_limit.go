@@ -19,7 +19,7 @@ import (
 const (
 	loginLimit     = 5
 	loginWindow    = 1 * time.Minute
-	registerLimit  = 3
+	registerLimit  = 10
 	registerWindow = 1 * time.Hour
 	apiLimit       = 10
 	apiWindow      = 1 * time.Second

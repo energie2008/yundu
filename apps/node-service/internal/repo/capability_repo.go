@@ -58,13 +58,13 @@ func (r *CapabilityRepo) CheckSupport(ctx context.Context, kernel, protocol, tra
 	queries := []struct {
 		feature, protocol, transport string
 	}{
-		{feature, protocol, transport},        // 精确匹配
-		{"*", protocol, transport},             // 通配 feature
-		{feature, protocol, "*"},               // 通配 transport
-		{"*", protocol, "*"},                   // 通配 feature+transport
-		{feature, "*", transport},              // 通配 protocol
-		{"*", "*", transport},                  // 通配 protocol+feature
-		{"*", "*", "*"},                        // 全通配
+		{feature, protocol, transport}, // 精确匹配
+		{"*", protocol, transport},     // 通配 feature
+		{feature, protocol, "*"},       // 通配 transport
+		{"*", protocol, "*"},           // 通配 feature+transport
+		{feature, "*", transport},      // 通配 protocol
+		{"*", "*", transport},          // 通配 protocol+feature
+		{"*", "*", "*"},                // 全通配
 	}
 
 	for _, q := range queries {
@@ -251,7 +251,9 @@ func (r *CapabilityRepo) FindCertBundlesByDomain(ctx context.Context, domain str
 // FindCertBundleIDsByDomain 阶段 C1: 按 SAN 域名查找证书包 ID 列表。
 // 满足 cert.CertBundleSyncStore 接口（返回轻量 ID 列表，避免跨包类型依赖）。
 func (r *CapabilityRepo) FindCertBundleIDsByDomain(ctx context.Context, domain string) ([]uuid.UUID, error) {
-	query := `SELECT id FROM cert_bundles WHERE $1 = ANY(san::text[])`
+	query := `SELECT id FROM cert_bundles WHERE EXISTS (
+		SELECT 1 FROM jsonb_array_elements_text(san) AS s WHERE lower(s) = lower($1)
+	)`
 	rows, err := r.pool.Query(ctx, query, domain)
 	if err != nil {
 		return nil, err
