@@ -11,6 +11,7 @@ import {
   ArrowUp,
   ArrowDown,
   Filter,
+  Info,
   Route as RouteIcon,
   ListPlus,
   Layers,
@@ -850,6 +851,34 @@ export default function RoutePolicies() {
           </Button>
         </div>
       </div>
+
+      {/* 两层分流模型说明（节点侧） */}
+      <Card className="bg-zinc-900 border-amber-800/40">
+        <CardContent className="p-4">
+          <div className="flex gap-3">
+            <Info className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="space-y-2 text-xs text-zinc-300 min-w-0">
+              <p className="font-semibold text-amber-300">两层分流模型 · 这里是节点侧（路由策略）</p>
+              <p>
+                本页策略渲染进节点的 sing-box / xray <code className="text-zinc-200 bg-zinc-800 px-1 rounded">route.rules</code>，决定节点收到代理流量后转给谁（proxy / direct / block / warp-pool / 自定义 tag）。
+              </p>
+              <pre className="text-[11px] leading-5 text-zinc-400 bg-zinc-950 border border-zinc-800 rounded p-2 overflow-x-auto">{`用户流量 → [客户端·订阅模板] ──direct──► 直连目标（绕过节点）
+                          └─proxy──► [节点·路由策略] ─► proxy / direct / block / warp`}</pre>
+              <div className="space-y-1">
+                <p className="text-amber-400 font-medium">⚠️ 协调约束</p>
+                <ul className="list-disc pl-4 space-y-0.5 text-zinc-400">
+                  <li>仅作用于"客户端已经发给本节点"的流量；客户端订阅模板里 <code className="text-zinc-300">direct</code> 的流量不会到节点，本页规则对它无效。</li>
+                  <li>WARP 解锁类规则要确保对应域名在订阅模板里走 proxy（而非 direct），否则解锁规则被架空。</li>
+                  <li>配合 WARP 兜底时使用<b className="text-zinc-300">无兜底的自定义策略</b>："其余→proxy"兜底会覆盖 WARP 兜底。</li>
+                </ul>
+              </div>
+              <p className="text-zinc-500">
+                渲染目标：节点的 sing-box / xray 服务端配置（非用户客户端）；策略通过「节点绑定」按节点生效。
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* 筛选 */}
       <Card className="bg-zinc-900 border-zinc-800">

@@ -6,6 +6,7 @@ import {
   RefreshCw,
   RotateCw,
   Eye,
+  Info,
   Star,
   Save,
 } from 'lucide-react'
@@ -279,6 +280,34 @@ export default function SubscriptionTemplates() {
           </Button>
         </div>
       </div>
+
+      {/* 两层分流模型说明（客户端侧） */}
+      <Card className="bg-zinc-900 border-amber-800/40">
+        <CardContent className="p-4">
+          <div className="flex gap-3">
+            <Info className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="space-y-2 text-xs text-zinc-300 min-w-0">
+              <p className="font-semibold text-amber-300">两层分流模型 · 这里是客户端侧（订阅模板）</p>
+              <p>
+                本页模板的 <code className="text-zinc-200 bg-zinc-800 px-1 rounded">route.rules</code> 会随订阅下发给用户客户端，由客户端在本地决定"直连 / 走代理 / 拦截"。
+              </p>
+              <pre className="text-[11px] leading-5 text-zinc-400 bg-zinc-950 border border-zinc-800 rounded p-2 overflow-x-auto">{`用户流量 → [客户端·订阅模板] ──direct──► 直连目标（绕过节点）
+                          └─proxy──► [节点·路由策略] ─► proxy / direct / block / warp`}</pre>
+              <div className="space-y-1">
+                <p className="text-amber-400 font-medium">⚠️ 协调约束</p>
+                <ul className="list-disc pl-4 space-y-0.5 text-zinc-400">
+                  <li>客户端判定为 <code className="text-zinc-300">direct</code> 的流量会绕过节点，节点侧的 WARP 解锁 / 阻断规则对它<b className="text-zinc-300">不生效</b>。</li>
+                  <li>需要节点 WARP 解锁的域名（如流媒体）在此处不要设为 direct，否则解锁规则被架空。</li>
+                  <li>广告拦截两处重复无害；"其余→代理"兜底适合放这里。</li>
+                </ul>
+              </div>
+              <p className="text-zinc-500">
+                生效范围：仅 <code className="text-zinc-400">clash</code> / <code className="text-zinc-400">clashmeta</code> / <code className="text-zinc-400">singbox</code> 模板被后端加载（singbox 同时覆盖 Karing / Hiddify）；Shadowrocket / V2RayN 等使用 base64 URI，无需模板。
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="bg-zinc-900 border-zinc-800">
         <CardContent className="p-3">
