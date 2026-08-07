@@ -28,6 +28,9 @@ const SAMPLE_SPEC = `{
   "port": 443,
   "address": "cdn.example.com",
   "server_port": 8445,
+  "credentials": {
+    "uuid": "00000000-0000-0000-0000-000000000001"
+  },
   "speed_limit_mbps": 100,
   "device_limit": 3
 }`
@@ -104,8 +107,8 @@ export default function CompilerWorkbench() {
       if (data?.xray_config) {
         setXrayConfig(JSON.stringify(data.xray_config, null, 2))
       }
-      if (data?.sing_box_config) {
-        setSingboxConfig(JSON.stringify(data.sing_box_config, null, 2))
+      if (data?.singbox_config) {
+        setSingboxConfig(JSON.stringify(data.singbox_config, null, 2))
       }
       if (data?.errors) {
         setValidation(data.errors)
