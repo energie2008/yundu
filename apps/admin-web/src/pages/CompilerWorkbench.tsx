@@ -21,12 +21,10 @@ interface ValidationIssue {
 const SAMPLE_SPEC = `{
   "name": "vless-cdn-node",
   "protocol": "vless",
-  "transport": "xhttp",
-  "exposure_mode": "cdn",
+  "transport": { "type": "xhttp" },
+  "security": "none",
   "port": 443,
   "server_port": 8445,
-  "uuid": "abc-123-456",
-  "sni": "cdn.example.com",
   "speed_limit_mbps": 100,
   "device_limit": 3
 }`
@@ -94,20 +92,20 @@ export default function CompilerWorkbench() {
     setSingboxConfig('')
     try {
       const parsed = JSON.parse(spec)
-      // Use the validate endpoint which triggers dry-run rendering
+      // 后端 NodeValidationRequest 接受 raw_yaml 或 spec（单个 NodeSpec 对象）。
+      // 后端 DualKernelValidator 总是双核都渲染校验，前端 kernel 选择仅用于本地展示过滤。
       const resp = await api.post(EP.NODE_VALIDATE, {
-        nodes: [parsed],
-        kernels: kernel === 'both' ? ['xray', 'sing_box'] : [kernel],
+        spec: parsed,
       })
       const data = (resp as any)?.data || resp
       if (data?.xray_config) {
         setXrayConfig(JSON.stringify(data.xray_config, null, 2))
       }
-      if (data?.singbox_config) {
-        setSingboxConfig(JSON.stringify(data.singbox_config, null, 2))
+      if (data?.sing_box_config) {
+        setSingboxConfig(JSON.stringify(data.sing_box_config, null, 2))
       }
-      if (data?.issues) {
-        setValidation(data.issues)
+      if (data?.errors) {
+        setValidation(data.errors)
       }
       toast({ title: '渲染完成' })
     } catch (err) {
@@ -130,13 +128,13 @@ export default function CompilerWorkbench() {
     setValidating(true)
     try {
       const parsed = JSON.parse(spec)
+      // 后端 ValidateNode 默认就包含 dry-run 渲染校验，无需额外 dry_run 标志
       const resp = await api.post(EP.NODE_VALIDATE, {
-        nodes: [parsed],
-        dry_run: true,
+        spec: parsed,
       })
       const data = (resp as any)?.data || resp
-      setValidation(data?.issues || [])
-      toast({ title: '验证完成', description: `${data?.issues?.length || 0} 个问题` })
+      setValidation(data?.errors || [])
+      toast({ title: '验证完成', description: `${data?.errors?.length || 0} 个问题` })
     } catch (err) {
       if (err instanceof ApiError) {
         toast({ title: '验证失败', description: err.message, variant: 'destructive' })
