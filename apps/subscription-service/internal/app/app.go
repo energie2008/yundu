@@ -49,6 +49,8 @@ func Run() {
 	accessLogRepo := repo.NewAccessLogRepo(pool)
 	shortCodeRepo := repo.NewShortCodeRepo(pool)
 	subscribeTemplateRepo := repo.NewSubscribeTemplateRepo(pool)
+	// 订阅设置仓库（system_settings.subscribe 组，60s 缓存）
+	subscribeSettingsRepo := repo.NewSubscribeSettingsRepo(pool)
 
 	nodeProvider := node.NewDBNodeProvider(pool)
 	// P0-3: 缓存 TTL 从 60s 降至 10s，减少节点新建/更新后的可见延迟
@@ -95,6 +97,8 @@ func Run() {
 	}
 	// 注入订阅模板服务，渲染时按客户端类型从数据库加载基础模板
 	subscriptionService.SetTemplateService(subscribeTemplateSvc)
+	// 注入订阅设置仓库（subscribe_key/show_method/is_rand_sub）
+	subscriptionService.SetSettingsRepo(subscribeSettingsRepo)
 	adminTemplateHandler := handler.NewAdminTemplateHandler(subscribeTemplateSvc)
 
 	authMiddleware := middleware.NewAuthMiddleware(jwtManager)
@@ -153,6 +157,17 @@ func Run() {
 		publicSub.GET("/:token/qrcode", subscriptionHandler.GetSubscriptionQR)
 	}
 
+	// xboard 兼容路径：/api/v1/client/subscribe/:token
+	// subscribe_path 设置控制 user-web 生成哪个 URL；两条路由始终注册，改路径无需重启服务
+	clientSub := engine.Group("/api/v1/client/subscribe")
+	clientSub.Use(rateLimitMiddleware.SubscriptionRateLimit())
+	{
+		clientSub.GET("/:token", subscriptionHandler.GetSubscription)
+		clientSub.HEAD("/:token", subscriptionHandler.GetSubscription)
+		clientSub.GET("/:token/info", subscriptionHandler.GetSubscriptionInfo)
+		clientSub.HEAD("/:token/info", subscriptionHandler.GetSubscriptionInfo)
+	}
+
 	publicShort := engine.Group("/s")
 	publicShort.Use(rateLimitMiddleware.SubscriptionRateLimit())
 	{
@@ -185,6 +200,10 @@ func Run() {
 	eventBus.Subscribe(events.TopicConfigChanged, func(evt events.Event) {
 		logger.Info("received node config changed event, invalidating all subscription cache", "topic", evt.Topic)
 		subscriptionService.InvalidateUserCache()
+		// 同时刷新订阅设置缓存（subscribe_key/show_method/is_rand_sub 等可能在 admin 改设置后触发）
+		if _, err := subscribeSettingsRepo.Reload(context.Background()); err != nil {
+			logger.Warn("failed to reload subscribe settings on config changed event", "error", err)
+		}
 	})
 
 	// P0-3: 内部缓存失效端点（供 node-service 在节点创建/更新后直接调用，不依赖 Redis）

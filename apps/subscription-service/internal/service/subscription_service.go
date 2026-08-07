@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
+	cryptrand "crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	mrand "math/rand"
 	"regexp"
 	"time"
 
@@ -39,6 +40,10 @@ type SubscriptionResult struct {
 	UserInfo    string
 	NodeCount   int
 	Degraded    bool
+	// SubscribeKey 透传 subscribe 设置中的密钥给 handler，
+	// handler 据此对 UserInfo 做 HMAC-SHA256 签名并回 X-Subscribe-Signature 头。
+	// 空字符串表示不签名（向后兼容，subscribe_key 未配置时）。
+	SubscribeKey string
 }
 
 type SubscriptionService struct {
@@ -54,6 +59,7 @@ type SubscriptionService struct {
 	nodeRenderer   *renderer.NodeRenderer
 	lbService      *lb.LBService
 	templateSvc    *TemplateService // 按名称索引的订阅模板服务（clash/clashmeta/singbox）
+	settingsRepo   *repo.SubscribeSettingsRepo
 }
 
 func NewSubscriptionService(
@@ -94,13 +100,69 @@ func (s *SubscriptionService) SetTemplateService(ts *TemplateService) {
 	s.templateSvc = ts
 }
 
+// SetSettingsRepo 注入订阅设置仓库（system_settings.subscribe 组）。
+// 用于读取 subscribe_key（HMAC 签名）、show_method（userinfo 显示方式）、is_rand_sub（随机抽样节点）。
+// 未注入时使用默认值（show_method=1，不签名，不抽样），保证向后兼容。
+func (s *SubscriptionService) SetSettingsRepo(r *repo.SubscribeSettingsRepo) {
+	s.settingsRepo = r
+}
+
+// loadSubscribeSettings 读取订阅设置（60s 缓存）。
+// settingsRepo 未注入或读取失败时返回默认值，不阻断订阅。
+func (s *SubscriptionService) loadSubscribeSettings(ctx context.Context) *repo.SubscribeSettings {
+	if s.settingsRepo == nil {
+		return &repo.SubscribeSettings{ShowMethod: 1, SubscribePath: "/sub"}
+	}
+	if st, err := s.settingsRepo.Load(ctx); err == nil && st != nil {
+		return st
+	}
+	return &repo.SubscribeSettings{ShowMethod: 1, SubscribePath: "/sub"}
+}
+
+// sampleRandomNodes 按 is_rand_sub 设置随机抽样节点。
+// 语义对齐 V2Panel：在 [start,end) 内取随机 count，再从 nodes 随机抽 count 个。
+// start<=0 时按 0 处理；end<=start 时返回空切片；count>len(nodes) 时返回全部（随机顺序）。
+func sampleRandomNodes(nodes []*model.NodeInfo, start, end int) []*model.NodeInfo {
+	if len(nodes) == 0 {
+		return nodes
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end <= start {
+		return []*model.NodeInfo{}
+	}
+	// 随机 count ∈ [start, end)
+	count := start + mrand.Intn(end-start)
+	if count > len(nodes) {
+		count = len(nodes)
+	}
+	if count <= 0 {
+		return []*model.NodeInfo{}
+	}
+	// Fisher-Yates 部分洗牌：前 count 个即为随机抽样结果
+	idx := make([]int, len(nodes))
+	for i := range idx {
+		idx[i] = i
+	}
+	for i := 0; i < count; i++ {
+		j := i + mrand.Intn(len(idx)-i)
+		idx[i], idx[j] = idx[j], idx[i]
+	}
+	out := make([]*model.NodeInfo, 0, count)
+	for i := 0; i < count; i++ {
+		out = append(out, nodes[idx[i]])
+	}
+	return out
+}
+
 func (s *SubscriptionService) InvalidateUserCache() {
 	s.cache.Clear()
 }
 
 func generateTokenValue() (string, error) {
 	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := cryptrand.Read(b); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
@@ -376,10 +438,13 @@ func (s *SubscriptionService) GetSubscription(ctx context.Context, tokenValue st
 
 	if cached, ok := s.cache.Get(tokenValue, string(ct)); ok {
 		s.writeAccessLogAsync(ctx, tokenValue, ct, clientIP, userAgent, httpStatusOK, "", 0, true)
+		// 缓存命中也要加载 settings 透传 SubscribeKey（签名头不缓存，因 key 可变更）
+		subSettings := s.loadSubscribeSettings(ctx)
 		return &SubscriptionResult{
-			Content:     cached.Content,
-			ContentType: cached.ContentType,
-			UserInfo:    cached.UserInfo,
+			Content:      cached.Content,
+			ContentType:  cached.ContentType,
+			UserInfo:     cached.UserInfo,
+			SubscribeKey: subSettings.SubscribeKey,
 		}, nil
 	}
 
@@ -434,6 +499,14 @@ func (s *SubscriptionService) GetSubscription(ctx context.Context, tokenValue st
 	// SS2022 通过 serverKey:userKey 派生（serverKey 来自 node.created_at，userKey 来自 user.uuid）
 	s.injectUserCredentials(ctx, nodes, token.UserID)
 
+	// 加载订阅设置（subscribe 组，60s 缓存）
+	subSettings := s.loadSubscribeSettings(ctx)
+
+	// is_rand_sub：随机抽样节点（对齐 V2Panel 语义，[start,end) 内随机 count 再抽样）
+	if subSettings.IsRandSub {
+		nodes = sampleRandomNodes(nodes, subSettings.RandSubStart, subSettings.RandSubEnd)
+	}
+
 	r := renderer.NewSubscriptionRenderer(ct)
 
 	// 从数据库加载对应客户端类型的订阅模板（clash/clashmeta/singbox），
@@ -466,9 +539,18 @@ func (s *SubscriptionService) GetSubscription(ctx context.Context, tokenValue st
 		return s.buildEmptyResponse(ct), nil
 	}
 
-	userInfo := fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", info.Upload, info.Download, info.Total, expireTs)
-	if info.Total == 0 {
-		userInfo = fmt.Sprintf("upload=%d; download=%d; total=0; expire=%d", info.Upload, info.Download, expireTs)
+	// show_method：0=不下发 Subscription-Userinfo 头；1/2=完整（upload/download/total/expire）
+	// 2 预留扩展位，当前与 1 行为一致，避免下发半截 userinfo 让客户端误判无限流量
+	var userInfo string
+	switch subSettings.ShowMethod {
+	case 0:
+		userInfo = "" // 不下发
+	default:
+		if info.Total == 0 {
+			userInfo = fmt.Sprintf("upload=%d; download=%d; total=0; expire=%d", info.Upload, info.Download, expireTs)
+		} else {
+			userInfo = fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", info.Upload, info.Download, info.Total, expireTs)
+		}
 	}
 
 	s.cache.Set(tokenValue, string(ct), content, r.ContentType(), userInfo)
@@ -476,10 +558,11 @@ func (s *SubscriptionService) GetSubscription(ctx context.Context, tokenValue st
 	s.writeAccessLogAsync(ctx, tokenValue, ct, clientIP, userAgent, httpStatusOK, "", len(nodes), false)
 
 	return &SubscriptionResult{
-		Content:     content,
-		ContentType: r.ContentType(),
-		UserInfo:    userInfo,
-		NodeCount:   len(nodes),
+		Content:      content,
+		ContentType:  r.ContentType(),
+		UserInfo:     userInfo,
+		NodeCount:    len(nodes),
+		SubscribeKey: subSettings.SubscribeKey,
 	}, nil
 }
 

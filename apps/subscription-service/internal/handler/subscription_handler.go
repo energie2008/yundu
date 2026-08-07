@@ -2,6 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/url"
 	"os"
@@ -94,7 +97,18 @@ func (h *SubscriptionHandler) writeSubscription(c *gin.Context, result *service.
 	}
 
 	c.Header("Content-Type", contentType)
-	c.Header("Subscription-Userinfo", userInfo)
+	// show_method=0 时 result.UserInfo 为空 → 跳过 Subscription-Userinfo 头（仅显示节点）
+	if userInfo != "" {
+		c.Header("Subscription-Userinfo", userInfo)
+		// subscribe_key 存在时追加 HMAC-SHA256 签名头（X-Subscribe-Signature: sha256=<hex>）
+		// 便于反代/客户端验签订阅响应未被篡改；key 空时不下发，向后兼容
+		if result.SubscribeKey != "" {
+			mac := hmac.New(sha256.New, []byte(result.SubscribeKey))
+			mac.Write([]byte(userInfo))
+			sig := hex.EncodeToString(mac.Sum(nil))
+			c.Header("X-Subscribe-Signature", "sha256="+sig)
+		}
+	}
 	// Profile-Update-Interval: 客户端订阅更新间隔（小时），所有客户端统一为 6 小时
 	c.Header("Profile-Update-Interval", "6")
 	// Content-Disposition: 所有订阅响应都附带附件文件名，便于客户端保存

@@ -63,3 +63,35 @@ func (h *SettingHandler) UpdateSetting(c *gin.Context) {
 
 	server.OK(c, setting)
 }
+
+// GetPublicConfig 返回 user-web 公开可见的配置子集（无需鉴权）。
+// 仅返回 subscribe_domain / subscribe_path / app_name / frontend_url / app_description，
+// 绝不泄露敏感设置（subscribe_key、smtp_*、支付密钥等）。
+// 用途：user-web 启动时 GET /api/v1/guest/config 动态获取订阅域名，
+// 避免在 endpoints.ts 硬编码 SUB_BASE，使 admin 改 subscribe_domain 后 user-web 自动跟随。
+func (h *SettingHandler) GetPublicConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	out := map[string]interface{}{}
+
+	// general 组：app_name / frontend_url / app_description
+	if general, err := h.settingService.GetSettings(ctx, "general"); err == nil {
+		for _, s := range general {
+			switch s.SettingKey {
+			case "app_name", "frontend_url", "app_description":
+				out[s.SettingKey] = s.Value
+			}
+		}
+	}
+
+	// subscribe 组：仅 subscribe_domain / subscribe_path（白名单，绝不返回 subscribe_key）
+	if sub, err := h.settingService.GetSettings(ctx, "subscribe"); err == nil {
+		for _, s := range sub {
+			switch s.SettingKey {
+			case "subscribe_domain", "subscribe_path":
+				out[s.SettingKey] = s.Value
+			}
+		}
+	}
+
+	server.OK(c, out)
+}

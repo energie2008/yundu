@@ -475,10 +475,10 @@ export default function Settings() {
             </TabsContent>
 
             <TabsContent value="subscribe" className="p-4 space-y-5 mt-0">
-              <div className="rounded-lg border border-amber-800/50 bg-amber-950/20 p-3">
-                <p className="text-xs text-amber-400">
-                  ⚠️ 订阅设置中部分功能尚未在后端实现（订阅路径/域名/密钥/显示方式/随机订阅）。
-                  「订阅地址」已生效（用于邮件模板），其余配置项将在后续版本中对接 subscription-service。
+              <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-3">
+                <p className="text-xs text-emerald-400">
+                  ✅ 订阅设置已全部生效：订阅路径/域名/密钥/显示方式/随机订阅均由 subscription-service 实时读取（60s 缓存，设置变更事件主动刷新）。
+                  修改「订阅域名」后 user-web 下次加载自动跟随（无需重新构建前端），适用于被墙后快速更换订阅域名。
                 </p>
               </div>
 

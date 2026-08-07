@@ -104,6 +104,9 @@ func Run() {
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	r.Any("/sub/*action", subscriptionProxy)
+	// xboard 兼容订阅路径：subscribe_path 设置可能让 user-web 生成 /api/v1/client/subscribe/:token
+	// 转发到 subscription-service（它已注册同名路由）
+	r.Any("/api/v1/client/subscribe/*action", subscriptionProxy)
 
 	// 支付网关异步回调：独立验签保护，不参与登录/注册限流
 	notifyAPI := r.Group("/api/v1")

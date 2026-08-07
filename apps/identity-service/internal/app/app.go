@@ -166,6 +166,9 @@ func Run() {
 			coupons.POST("/validate", couponValidateHandler.Validate)
 		}
 
+		// 公开配置（user-web 启动时获取 subscribe_domain / subscribe_path 等，无需鉴权）
+		api.GET("/guest/config", settingHandler.GetPublicConfig)
+
 		// 用户认证接口（公开）
 		userAuth := api.Group("/user/auth")
 		{

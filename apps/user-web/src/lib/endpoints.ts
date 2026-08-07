@@ -55,18 +55,37 @@ export const EP = {
   SUB_STATS: '/api/v1/user/subscription/stats',
 } as const
 
-// 订阅服务基础地址：必须固定为订阅服务域名（API 网关域名），
-// 不能用 window.location.origin（user-web 域名与订阅服务域名不同，且 dev/生产 环境会变化导致订阅地址不稳定）
-// 优先级：VITE_SUB_BASE 环境变量 > 硬编码默认值
-export const SUB_BASE = import.meta.env.VITE_SUB_BASE || 'https://ad.tiktokplay.na.am'
+// 订阅服务基础地址：优先使用后端 /guest/config 返回的 subscribe_domain，
+// 其次 VITE_SUB_BASE 环境变量，最后硬编码默认值。
+// admin 改 subscribe_domain 后 user-web 启动时自动跟随，无需重新构建前端。
+// 核心场景：user-web 域名被墙时，admin 改 subscribe_domain 指向新域名，用户重开 user-web 即见新订阅地址。
+let subBase = import.meta.env.VITE_SUB_BASE || 'https://ad.tiktokplay.na.am'
+let subscribePath = '/sub' // 订阅路径前缀，默认 /sub（与 subscription-service 始终注册的双路由一致）
+
+// SUB_BASE 保留为只读快照导出，兼容历史引用（不随 setSubConfig 变化）
+export const SUB_BASE = subBase
+
+// setSubConfig 由 App 启动时调用 /api/v1/guest/config 后注入，
+// 让订阅地址动态跟随 admin 设置的 subscribe_domain / subscribe_path。
+export function setSubConfig(domain?: string | null, path?: string | null) {
+  if (domain && domain.trim()) {
+    subBase = domain.trim().replace(/\/+$/, '') // 去尾部斜杠
+  }
+  if (path && path.trim()) {
+    // 规范化：确保以 / 开头，去尾部斜杠
+    let p = path.trim().replace(/\/+$/, '')
+    if (!p.startsWith('/')) p = '/' + p
+    subscribePath = p
+  }
+}
 
 export function getSubscriptionUrl(token: string, client?: string): string {
-  const base = `${SUB_BASE}/sub/${token}`
+  const base = `${subBase}${subscribePath}/${token}`
   return client ? `${base}?client=${encodeURIComponent(client)}` : base
 }
 
 export function getShortUrl(shortCode: string): string {
-  return `${SUB_BASE}/s/${shortCode}`
+  return `${subBase}/s/${shortCode}`
 }
 
 export type DetectedClient = {

@@ -25,6 +25,7 @@ import VerifyEmail from './pages/VerifyEmail';
 import OrderDetail from './pages/OrderDetail';
 import { Layout } from './components/Layout';
 import { ToastProvider } from './lib/toast';
+import { setSubConfig } from './lib/endpoints';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -46,6 +47,19 @@ function AuthInit() {
       fetchMe();
     }
   }, [isAuthenticated, fetchMe]);
+
+  // 启动加载公开配置（subscribe_domain / subscribe_path），动态注入订阅地址。
+  // 失败时静默回退到 endpoints.ts 默认 SUB_BASE，不阻断页面渲染。
+  useEffect(() => {
+    fetch('/api/v1/guest/config')
+      .then(r => (r.ok ? r.json() : null))
+      .then(res => {
+        if (res?.data) {
+          setSubConfig(res.data.subscribe_domain, res.data.subscribe_path)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   return null;
 }
