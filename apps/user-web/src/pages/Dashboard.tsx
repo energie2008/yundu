@@ -15,6 +15,10 @@ import { useState, useMemo } from 'react';
 
 // Platform client icon/name mapping
 const CLIENT_GROUPS: Record<string, { id: string; name: string; icon: string }[]> = {
+  iOS: [
+    { id: 'shadowrocket', name: 'Shadowrocket', icon: '🚀' },
+    { id: 'singbox', name: 'Singbox', icon: '🛡️' },
+  ],
   Windows: [
     { id: 'clash', name: 'Clash', icon: '⬢' },
     { id: 'singbox', name: 'Singbox', icon: '🛡️' },
@@ -26,10 +30,6 @@ const CLIENT_GROUPS: Record<string, { id: string; name: string; icon: string }[]
   ],
   Android: [
     { id: 'clashforandroid', name: 'ClashForAndroid', icon: '⬢' },
-    { id: 'singbox', name: 'Singbox', icon: '🛡️' },
-  ],
-  iOS: [
-    { id: 'shadowrocket', name: 'Shadowrocket', icon: '🚀' },
     { id: 'singbox', name: 'Singbox', icon: '🛡️' },
   ],
 };
@@ -357,7 +357,8 @@ export function Dashboard() {
   const [showAddress, setShowAddress] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importTab, setImportTab] = useState<'copy' | 'qrcode'>('copy');
-  const [clientPlatform, setClientPlatform] = useState<keyof typeof CLIENT_GROUPS>('Windows');
+  const [clientPlatform, setClientPlatform] = useState<keyof typeof CLIENT_GROUPS>('iOS');
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   const subQuery = useQuery<SubscriptionResponse>({
     queryKey: ['subscription'],
@@ -419,6 +420,15 @@ export function Dashboard() {
   const trafficLogs = trafficLogsQuery.data || [];
 
   const subscriptionUrl = activeToken?.token ? getSubscriptionUrl(activeToken.token) : '';
+
+  const handleCopyUrl = async () => {
+    if (!subscriptionUrl) return;
+    try {
+      await navigator.clipboard.writeText(subscriptionUrl);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2000);
+    } catch {}
+  };
 
   const handleResetToken = () => {
     if (confirm(t('确定要重置订阅链接吗？重置后旧链接将失效。'))) {
@@ -569,14 +579,14 @@ export function Dashboard() {
                         {/* Copy / QRCode tabs */}
                         <div className="grid grid-cols-2 gap-2 mb-4">
                           <button
-                            onClick={() => setImportTab('copy')}
+                            onClick={() => { setImportTab('copy'); handleCopyUrl(); }}
                             className="py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-colors"
                             style={{
                               background: importTab === 'copy' ? 'rgba(217,119,87,0.08)' : 'var(--muted)',
                               color: importTab === 'copy' ? 'var(--primary)' : 'var(--muted-foreground)',
                             }}
                           >
-                            <span>📋</span> 复制
+                            <span>📋</span> {copiedUrl ? '✓ 已复制' : '复制'}
                           </button>
                           <button
                             onClick={() => setImportTab('qrcode')}
@@ -612,7 +622,7 @@ export function Dashboard() {
                                 className="transition-colors text-xs"
                                 style={{ color: clientPlatform === p ? 'var(--primary)' : 'var(--muted-foreground)' }}
                               >
-                                {p === 'Windows' ? 'Windows' : p === 'macOS' ? 'macOS' : p === 'Android' ? 'Android' : '其他平台'}
+                                {p}
                               </button>
                             ))}
                           </div>
