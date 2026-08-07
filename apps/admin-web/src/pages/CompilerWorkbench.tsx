@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import {
   Card, CardContent, CardHeader, CardTitle,
-  Badge, Button, Textarea, Select,
+  Badge, Button, Textarea,
   Separator, useToast
 } from '@airport/ui'
 import { api, ApiError } from '@/lib/api'
@@ -19,11 +19,14 @@ interface ValidationIssue {
 }
 
 const SAMPLE_SPEC = `{
-  "name": "vless-cdn-node",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "code": "P01",
+  "name": "vless-tcp-node",
   "protocol": "vless",
-  "transport": { "type": "xhttp" },
+  "transport": { "type": "tcp" },
   "security": "none",
   "port": 443,
+  "address": "cdn.example.com",
   "server_port": 8445,
   "speed_limit_mbps": 100,
   "device_limit": 3
@@ -165,11 +168,15 @@ export default function CompilerWorkbench() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={kernel} onChange={(e) => setKernel(e.target.value)} className="w-32">
+          <select
+            value={kernel}
+            onChange={(e) => setKernel(e.target.value)}
+            className="h-9 w-32 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+          >
             <option value="both">双内核</option>
             <option value="xray">仅 Xray</option>
             <option value="sing_box">仅 Sing-box</option>
-          </Select>
+          </select>
           <Button variant="outline" size="sm" onClick={handleValidate} disabled={validating}>
             <CheckCircle2 className="w-4 h-4 mr-2" />
             {validating ? '验证中...' : '验证'}
@@ -221,7 +228,7 @@ export default function CompilerWorkbench() {
               <label className="text-xs text-muted-foreground">传输方式</label>
               <div className="mt-1">
                 {(() => {
-                  try { return <Badge variant="outline">{JSON.parse(spec).transport || '-'}</Badge> }
+                  try { return <Badge variant="outline">{(JSON.parse(spec).transport?.type) || JSON.parse(spec).transport || '-'}</Badge> }
                   catch { return <Badge variant="outline">-</Badge> }
                 })()}
               </div>
