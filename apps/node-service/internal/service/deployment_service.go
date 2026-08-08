@@ -1244,8 +1244,8 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 		_ = s.deploymentRepo.CreateConfigVersion(ctx, cv)
 		// P3-1: 构建加密 Payload Manifest 并持久化（兼容期双写，失败不阻断明文配置下发）
 		s.tryCreatePayload(ctx, cv, runtimeType)
-		// B-收口：状态流转（lpv→pending→push→pushed/failed）收口到 dispatchAndPush
-		s.dispatchAndPush(ctx, runtimeID, allNodes, cv)
+		// B-收口：新版本创建后的下发决策统一收口（双内核架构下辅内核 xray 版本不独立推送）
+		s.finishRuntimeConfigDispatch(ctx, rt, runtimeID, allNodes, cv)
 		return cv, nil
 	}
 
@@ -1270,8 +1270,8 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 		_ = s.deploymentRepo.CreateConfigVersion(ctx, newCv)
 		// P3-1: 构建加密 Payload Manifest 并持久化（兼容期双写，失败不阻断明文配置下发）
 		s.tryCreatePayload(ctx, newCv, runtimeType)
-		// B-收口：状态流转（lpv→pending→push→pushed/failed）收口到 dispatchAndPush
-		s.dispatchAndPush(ctx, runtimeID, allNodes, newCv)
+		// B-收口：新版本创建后的下发决策统一收口（双内核架构下辅内核 xray 版本不独立推送）
+		s.finishRuntimeConfigDispatch(ctx, rt, runtimeID, allNodes, newCv)
 		return newCv, nil
 	}
 
@@ -1325,6 +1325,82 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 	return cv, nil
 }
 
+// isAuxiliaryXrayRuntime 判断指定 runtime 是否为双内核架构下的辅内核 xray runtime。
+// 双内核服务器（P2 翻转）上同时存在 sing-box（主内核）与 xray（辅内核）两个 runtime；
+// 辅内核 xray 的配置必须通过 _xray_config 嵌入 sing-box 主配置下发，绝不能以独立配置推给 agent
+// （agent 主内核为 sing-box，收到 xray 形态配置会触发 sing-box 校验失败，如 unknown field "api"）。
+func (s *DeploymentService) isAuxiliaryXrayRuntime(ctx context.Context, rt *model.Runtime) bool {
+	if rt == nil || !isXrayRuntime(rt.RuntimeType) {
+		return false
+	}
+	runtimes, err := s.runtimeRepo.ListByServer(ctx, rt.ServerID)
+	if err != nil {
+		s.logger.Warn("isAuxiliaryXrayRuntime: ListByServer failed", "server_id", rt.ServerID, "error", err)
+		return false
+	}
+	for _, r := range runtimes {
+		if r == nil || r.ID == rt.ID {
+			continue
+		}
+		if normalizeRuntimeType(r.RuntimeType) == "sing-box" {
+			return true
+		}
+	}
+	return false
+}
+
+// findPairedRuntime 查找同一 server 下指定内核类型的配对 runtime（双内核架构用）。
+func (s *DeploymentService) findPairedRuntime(ctx context.Context, rt *model.Runtime, targetType string) *model.Runtime {
+	if rt == nil {
+		return nil
+	}
+	runtimes, err := s.runtimeRepo.ListByServer(ctx, rt.ServerID)
+	if err != nil {
+		s.logger.Warn("findPairedRuntime: ListByServer failed", "server_id", rt.ServerID, "error", err)
+		return nil
+	}
+	for _, r := range runtimes {
+		if r == nil || r.ID == rt.ID {
+			continue
+		}
+		if normalizeRuntimeType(r.RuntimeType) == targetType {
+			return r
+		}
+	}
+	return nil
+}
+
+// RuntimeOwnsConfigVersion 校验指定 version_no 的配置版本是否属于给定 runtime 作用域。
+// 双内核架构防串台：辅内核 xray runtime 的独立配置版本不得被 sing-box 主内核 agent 拉取
+// （payload 按全局 version_no 存储，必须校验版本归属，防止 xray 配置泄漏到 sing-box agent）。
+func (s *DeploymentService) RuntimeOwnsConfigVersion(ctx context.Context, runtimeID uuid.UUID, versionNo int64) (bool, error) {
+	cv, err := s.deploymentRepo.GetConfigVersionByVersionNo(ctx, model.ScopeTypeRuntime, runtimeID, versionNo)
+	if err != nil {
+		return false, err
+	}
+	return cv != nil, nil
+}
+
+// finishRuntimeConfigDispatch 收口新配置版本创建后的下发决策（B-收口）。
+// 双内核架构下，辅内核 xray runtime 的新版本只作面板存档，不独立推给 agent：
+// 而是刷新配对 sing-box 主 runtime，使最新 xray 配置经 _xray_config 嵌入主配置统一下发，
+// 避免 agent（主内核 sing-box）拉取到 xray 形态配置触发校验失败（unknown field "api"）。
+func (s *DeploymentService) finishRuntimeConfigDispatch(ctx context.Context, rt *model.Runtime, runtimeID uuid.UUID, allNodes []*model.Node, cv *model.ConfigVersion) {
+	if s.isAuxiliaryXrayRuntime(ctx, rt) {
+		s.logger.Info("GetRuntimeConfig: standalone xray config archived, refreshing paired sing-box runtime for embedded delivery",
+			"xray_runtime_id", runtimeID, "xray_version", cv.VersionNo)
+		if sbRT := s.findPairedRuntime(ctx, rt, "sing-box"); sbRT != nil {
+			if _, err := s.GetRuntimeConfig(ctx, sbRT.ID, ""); err != nil {
+				s.logger.Warn("GetRuntimeConfig: paired sing-box refresh failed (xray change will sync on next sing-box refresh)",
+					"singbox_runtime_id", sbRT.ID, "xray_version", cv.VersionNo, "error", err)
+			}
+		}
+		return
+	}
+	// B-收口：状态流转（lpv→pending→push→pushed/failed）收口到 dispatchAndPush
+	s.dispatchAndPush(ctx, runtimeID, allNodes, cv)
+}
+
 // pushConfigToRuntime P0-7: 查找 runtime 关联的 server，主动推送配置到 agent。
 // 返回推送错误（agent 仍可通过心跳兜底拉取），调用方据此标记 dispatch status。
 func (s *DeploymentService) pushConfigToRuntime(ctx context.Context, runtimeID uuid.UUID, cv *model.ConfigVersion) error {
@@ -1341,6 +1417,15 @@ func (s *DeploymentService) pushConfigToRuntime(ctx context.Context, runtimeID u
 	if err != nil || server == nil {
 		s.logger.Warn("pushConfig: server not found", "server_id", rt.ServerID, "error", err)
 		return fmt.Errorf("server not found: %w", err)
+	}
+	// 双内核架构（P2 翻转）：辅内核 xray runtime 的配置绝不能独立推送给 node-agent。
+	// agent 主内核为 sing-box，xray 配置只能通过 _xray_config 嵌入 sing-box 主配置下发。
+	// 若将独立 xray 配置推给 agent，agent 会拉取到 xray 形态配置（顶层 api/stats/policy）
+	// 并触发 sing-box 校验失败（"api: json: unknown field \"api\""），随后 LKG 回滚。
+	if s.isAuxiliaryXrayRuntime(ctx, rt) {
+		s.logger.Info("pushConfig: skipping standalone push for auxiliary xray runtime (delivered via _xray_config in sing-box config)",
+			"runtime_id", runtimeID, "server_code", server.Code, "version", cv.VersionNo)
+		return nil
 	}
 	// P5: Agent 版本强约束 — 旧 Agent 无法处理 _xray_config（P2 内核翻转）
 	if agentVer, ok := server.Metadata["agent_version"].(string); ok && agentVer != "" {

@@ -957,6 +957,22 @@ func (a *Agent) applyConfig(ctx context.Context, targetVersion string, currentVe
 		a.fetchedViaPayload = true
 	}
 
+	// 双内核防串台（纵深防御）：sing-box 主内核 agent 绝不能应用 xray 形态配置。
+	// xray 配置的顶层 api/stats/policy 字段是 sing-box 不认识的字段；若独立 xray 配置
+	// 因上游缺陷被推给 sing-box agent，此处提前拒绝并给出明确错误（而非晦涩的
+	// "api: json: unknown field \"api\"" 校验失败），避免 LKG 回滚与误报。
+	if a.cfg.RuntimeType == "sing-box" {
+		if _, hasAPI := configMap["api"]; hasAPI {
+			keys := make([]string, 0, len(configMap))
+			for k := range configMap {
+				keys = append(keys, k)
+			}
+			errMsg = "rejected xray-shaped config on sing-box primary runtime (standalone xray config must travel via _xray_config)"
+			a.logger.Error(errMsg, "version", targetVersion, "top_level_keys", keys)
+			return
+		}
+	}
+
 	// 签名校验：基于下载下来的原始内容计算hash（在任何字段删除/审计注入之前）。
 	// 历史上曾因服务端ContentJSON map被原地污染导致hash永久不一致，将阻断部署。
 	// 对Payload加密通道：AES-GCM已提供认证加密，篡改会在解密阶段失败，此处仅做warn记录。

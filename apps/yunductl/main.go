@@ -399,7 +399,13 @@ func main() {
 		var status map[string]interface{}
 		if err := json.Unmarshal(body, &status); err == nil {
 			fmt.Print("Runtime status... ")
-			if running, ok := status["running"].(bool); ok && running {
+			running := false
+			if r, ok := status["running"].(bool); ok {
+				running = r
+			} else if rs, ok := status["runtime_state"].(string); ok {
+				running = rs == "running"
+			}
+			if running {
 				fmt.Println("OK (running)")
 			} else {
 				fmt.Println("WARN (not running)")

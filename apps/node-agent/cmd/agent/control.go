@@ -96,14 +96,23 @@ func (a *Agent) ctrlStatus(w http.ResponseWriter, r *http.Request) {
 	if running {
 		runtimeState = "running"
 	}
+	runtimeVersion := ""
+	if status != nil && status.Version != "" {
+		runtimeVersion = status.Version
+	}
+	// 同时输出 yunductl 期望的 running/agent_version/runtime_version 字段
+	// 与兼容旧版的 runtime_state 字段，避免 yunductl health 误报 "not running"。
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"version":        AgentVersion,
-		"config_version": a.currentVersion,
-		"runtime_state":  runtimeState,
-		"runtime_type":   a.cfg.RuntimeType,
-		"use_native":     a.useNative,
-		"channel":        a.cm.GetHealthStatus().ActiveChannel,
+		"version":         AgentVersion,
+		"agent_version":   AgentVersion,
+		"runtime_version": runtimeVersion,
+		"config_version":  a.currentVersion,
+		"runtime_type":    a.cfg.RuntimeType,
+		"running":         running,
+		"runtime_state":   runtimeState,
+		"use_native":      a.useNative,
+		"channel":         a.cm.GetHealthStatus().ActiveChannel,
 	})
 }
 
@@ -164,7 +173,7 @@ func (a *Agent) ctrlRestart(w http.ResponseWriter, r *http.Request) {
 func (a *Agent) ctrlDiag(w http.ResponseWriter, r *http.Request) {
 	xrayAPI := a.xrayAPIEndpoint()
 	diag := map[string]interface{}{
-		"xray_grpc":      xrayAPI,
+		"xray_grpc":       xrayAPI,
 		"xray_grpc_alive": testDialTCP(xrayAPI),
 		"runtime_type":    a.cfg.RuntimeType,
 		"config_dir":      a.cfg.ConfigDir,

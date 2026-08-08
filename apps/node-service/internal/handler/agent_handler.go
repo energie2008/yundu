@@ -458,6 +458,28 @@ func (h *AgentHandler) FetchPayload(c *gin.Context) {
 		return
 	}
 
+	// 双内核架构防串台：Payload 按全局 version_no 存储，必须校验该版本属于当前 agent 的 runtime 作用域，
+	// 否则辅内核 xray runtime 的独立配置版本（顶层 api/stats/policy）可能被 sing-box 主内核 agent 拉走，
+	// 导致 sing-box 校验失败（unknown field "api"）。能解析出 runtime 时强制校验归属；
+	// 解析失败（如旧 agent 未带 X-Runtime-Ref）时保持全局查询兼容。
+	if serverSrv, serr := h.serverService.GetServerByCode(c.Request.Context(), serverCode); serr == nil && serverSrv != nil {
+		runtimeRef := c.GetHeader("X-Runtime-Ref")
+		var runtimeRefPtr *string
+		if runtimeRef != "" {
+			runtimeRefPtr = &runtimeRef
+		}
+		if rt, rterr := h.runtimeService.GetRuntimeByServerAndProvider(c.Request.Context(), serverSrv.ID, model.RuntimeProviderNodeAgent, runtimeRefPtr); rterr == nil && rt != nil {
+			owned, oerr := h.deploymentService.RuntimeOwnsConfigVersion(c.Request.Context(), rt.ID, versionNo)
+			if oerr != nil || !owned {
+				h.logger.Warn("fetch-payload: version not owned by agent runtime, rejecting cross-runtime fetch",
+					"server_code", serverCode, "version_no", versionNo,
+					"runtime_id", rt.ID, "runtime_type", rt.RuntimeType)
+				server.NotFound(c, "config version not found for this runtime")
+				return
+			}
+		}
+	}
+
 	manifest, err := h.deploymentService.GetPayloadManifest(c.Request.Context(), versionNo)
 	if err != nil {
 		h.logger.Error("fetch-payload: GetPayloadManifest failed",
