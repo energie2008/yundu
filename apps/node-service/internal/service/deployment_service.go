@@ -603,6 +603,18 @@ func (s *DeploymentService) Deploy(ctx context.Context, adminID uuid.UUID, req *
 		return nil, nil, ErrInvalidScopeType
 	}
 
+	// 双内核架构纪律（防事故回归）：辅内核 xray runtime 不是独立发布/推送目标。
+	// 其配置只能经 _xray_config 嵌入 sing-box 主配置统一下发；直接对 xray runtime 发布
+	// 会导致推送被跳过、batch 卡 pending，且概念上误导运维（曾致 sing-box 校验失败事故）。
+	scopeRuntimeID := req.ScopeID
+	if req.ScopeType == model.ScopeTypeNode && len(nodes) > 0 && nodes[0] != nil {
+		scopeRuntimeID = nodes[0].RuntimeID
+	}
+	if scopeRT, rerr := s.runtimeRepo.GetByID(ctx, scopeRuntimeID); rerr == nil && scopeRT != nil && s.isAuxiliaryXrayRuntime(ctx, scopeRT) {
+		return nil, nil, fmt.Errorf("%w: 双内核架构下辅内核 xray runtime(%s) 不独立发布：配置随 sing-box 主配置经 _xray_config 下发，请对配对 sing-box runtime 执行发布/刷新",
+			ErrAuxiliaryXrayRuntimeNotDeployable, scopeRT.RuntimeType)
+	}
+
 	oldVersion, err := s.deploymentRepo.GetLatestConfigVersion(ctx, req.ScopeType, req.ScopeID)
 	if err != nil {
 		return nil, nil, err
@@ -1325,20 +1337,14 @@ func (s *DeploymentService) GetRuntimeConfig(ctx context.Context, runtimeID uuid
 	return cv, nil
 }
 
-// isAuxiliaryXrayRuntime 判断指定 runtime 是否为双内核架构下的辅内核 xray runtime。
-// 双内核服务器（P2 翻转）上同时存在 sing-box（主内核）与 xray（辅内核）两个 runtime；
-// 辅内核 xray 的配置必须通过 _xray_config 嵌入 sing-box 主配置下发，绝不能以独立配置推给 agent
-// （agent 主内核为 sing-box，收到 xray 形态配置会触发 sing-box 校验失败，如 unknown field "api"）。
-func (s *DeploymentService) isAuxiliaryXrayRuntime(ctx context.Context, rt *model.Runtime) bool {
+// isAuxiliaryXrayRuntimeOnServer 纯函数判定：给定 server 的全部 runtimes 与目标 runtime，
+// 判断目标是否为双内核架构下的辅内核 xray runtime（同 server 存在 sing-box 配对 runtime）。
+// 抽成纯函数便于单元测试，防止"独立 xray 配置被推给 sing-box agent"类事故回归。
+func isAuxiliaryXrayRuntimeOnServer(allRuntimes []*model.Runtime, rt *model.Runtime) bool {
 	if rt == nil || !isXrayRuntime(rt.RuntimeType) {
 		return false
 	}
-	runtimes, err := s.runtimeRepo.ListByServer(ctx, rt.ServerID)
-	if err != nil {
-		s.logger.Warn("isAuxiliaryXrayRuntime: ListByServer failed", "server_id", rt.ServerID, "error", err)
-		return false
-	}
-	for _, r := range runtimes {
+	for _, r := range allRuntimes {
 		if r == nil || r.ID == rt.ID {
 			continue
 		}
@@ -1347,6 +1353,22 @@ func (s *DeploymentService) isAuxiliaryXrayRuntime(ctx context.Context, rt *mode
 		}
 	}
 	return false
+}
+
+// isAuxiliaryXrayRuntime 判断指定 runtime 是否为双内核架构下的辅内核 xray runtime。
+// 双内核服务器（P2 翻转）上同时存在 sing-box（主内核）与 xray（辅内核）两个 runtime；
+// 辅内核 xray 的配置必须通过 _xray_config 嵌入 sing-box 主配置下发，绝不能以独立配置推给 agent
+// （agent 主内核为 sing-box，收到 xray 形态配置会触发 sing-box 校验失败，如 unknown field "api"）。
+func (s *DeploymentService) isAuxiliaryXrayRuntime(ctx context.Context, rt *model.Runtime) bool {
+	if rt == nil {
+		return false
+	}
+	runtimes, err := s.runtimeRepo.ListByServer(ctx, rt.ServerID)
+	if err != nil {
+		s.logger.Warn("isAuxiliaryXrayRuntime: ListByServer failed", "server_id", rt.ServerID, "error", err)
+		return false
+	}
+	return isAuxiliaryXrayRuntimeOnServer(runtimes, rt)
 }
 
 // findPairedRuntime 查找同一 server 下指定内核类型的配对 runtime（双内核架构用）。
@@ -1387,6 +1409,7 @@ func (s *DeploymentService) RuntimeOwnsConfigVersion(ctx context.Context, runtim
 // 避免 agent（主内核 sing-box）拉取到 xray 形态配置触发校验失败（unknown field "api"）。
 func (s *DeploymentService) finishRuntimeConfigDispatch(ctx context.Context, rt *model.Runtime, runtimeID uuid.UUID, allNodes []*model.Node, cv *model.ConfigVersion) {
 	if s.isAuxiliaryXrayRuntime(ctx, rt) {
+		metrics.DualKernelXrayArchivedTotal.WithLabelValues(runtimeID.String()).Inc()
 		s.logger.Info("GetRuntimeConfig: standalone xray config archived, refreshing paired sing-box runtime for embedded delivery",
 			"xray_runtime_id", runtimeID, "xray_version", cv.VersionNo)
 		if sbRT := s.findPairedRuntime(ctx, rt, "sing-box"); sbRT != nil {
@@ -1423,6 +1446,7 @@ func (s *DeploymentService) pushConfigToRuntime(ctx context.Context, runtimeID u
 	// 若将独立 xray 配置推给 agent，agent 会拉取到 xray 形态配置（顶层 api/stats/policy）
 	// 并触发 sing-box 校验失败（"api: json: unknown field \"api\""），随后 LKG 回滚。
 	if s.isAuxiliaryXrayRuntime(ctx, rt) {
+		metrics.DualKernelStandaloneXraySkippedTotal.WithLabelValues(server.Code, "auxiliary_xray").Inc()
 		s.logger.Info("pushConfig: skipping standalone push for auxiliary xray runtime (delivered via _xray_config in sing-box config)",
 			"runtime_id", runtimeID, "server_code", server.Code, "version", cv.VersionNo)
 		return nil
@@ -4336,6 +4360,8 @@ func MapDeploymentErrorToCode(err error) (config.ErrorCode, string) {
 	case errors.Is(err, ErrTargetNotFound):
 		return config.CodeNotFound, err.Error()
 	case errors.Is(err, ErrInvalidScopeType):
+		return config.CodeBadRequest, err.Error()
+	case errors.Is(err, ErrAuxiliaryXrayRuntimeNotDeployable):
 		return config.CodeBadRequest, err.Error()
 	case errors.Is(err, ErrDeploymentRunning):
 		return config.CodeConflict, err.Error()

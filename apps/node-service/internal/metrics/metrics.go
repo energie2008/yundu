@@ -69,6 +69,27 @@ var (
 		Name: "nodeservice_config_render_hash_churn_total",
 		Help: "Total config render hash churn events (input unchanged but hash changed).",
 	}, []string{"runtime_id"})
+
+	// DualKernelStandaloneXraySkippedTotal 双内核架构下被拦截的辅内核 xray 独立推送次数。
+	// 事故复发检测：稳定态应为 0，>0 说明仍有路径试图把独立 xray 配置推给 sing-box agent
+	// （曾致 VPS206 "unknown field api" 校验失败事故）。
+	DualKernelStandaloneXraySkippedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "nodeservice_dual_kernel_xray_standalone_skipped_total",
+		Help: "Standalone xray config pushes skipped for auxiliary xray runtime on dual-kernel servers (steady state 0).",
+	}, []string{"server_code", "reason"})
+
+	// DualKernelCrossRuntimePayloadRejectedTotal 跨 runtime 拉取 payload 被拒绝次数
+	// （FetchPayload 按 X-Runtime-Ref 做版本归属校验，防辅内核 xray 配置泄漏给 sing-box agent）。
+	DualKernelCrossRuntimePayloadRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "nodeservice_dual_kernel_cross_runtime_payload_rejected_total",
+		Help: "Payload fetch rejected due to version not owned by requesting agent runtime (cross-runtime leak guard).",
+	}, []string{"server_code"})
+
+	// DualKernelXrayArchivedTotal 辅内核 xray 独立配置版本仅存档（不推送）次数。
+	DualKernelXrayArchivedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "nodeservice_dual_kernel_xray_archived_total",
+		Help: "Auxiliary xray runtime config versions archived without standalone push (delivered embedded in sing-box config).",
+	}, []string{"runtime_id"})
 )
 
 // ChannelStateValue 将通道状态字符串映射为数值，用于 Gauge 指标

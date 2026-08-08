@@ -33,4 +33,7 @@ var (
 	ErrPreflightValidation = errors.New("preflight validation failed")
 	// ErrPayloadNotFound P3-1: 加密 Payload Manifest 不存在
 	ErrPayloadNotFound = errors.New("payload manifest not found")
+	// ErrAuxiliaryXrayRuntimeNotDeployable 双内核架构下辅内核 xray runtime 不是独立发布目标：
+	// 其配置只能经 _xray_config 嵌入 sing-box 主配置统一下发（防 xray/sing-box 串台事故回归）。
+	ErrAuxiliaryXrayRuntimeNotDeployable = errors.New("auxiliary xray runtime is not a deployable scope (dual-kernel; delivered via _xray_config)")
 )

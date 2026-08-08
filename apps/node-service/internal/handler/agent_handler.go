@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/airport-panel/config/server"
+	"github.com/airport-panel/node-service/internal/metrics"
 	"github.com/airport-panel/node-service/internal/middleware"
 	"github.com/airport-panel/node-service/internal/model"
 	"github.com/airport-panel/node-service/internal/pkg"
@@ -471,6 +472,7 @@ func (h *AgentHandler) FetchPayload(c *gin.Context) {
 		if rt, rterr := h.runtimeService.GetRuntimeByServerAndProvider(c.Request.Context(), serverSrv.ID, model.RuntimeProviderNodeAgent, runtimeRefPtr); rterr == nil && rt != nil {
 			owned, oerr := h.deploymentService.RuntimeOwnsConfigVersion(c.Request.Context(), rt.ID, versionNo)
 			if oerr != nil || !owned {
+				metrics.DualKernelCrossRuntimePayloadRejectedTotal.WithLabelValues(serverCode).Inc()
 				h.logger.Warn("fetch-payload: version not owned by agent runtime, rejecting cross-runtime fetch",
 					"server_code", serverCode, "version_no", versionNo,
 					"runtime_id", rt.ID, "runtime_type", rt.RuntimeType)
