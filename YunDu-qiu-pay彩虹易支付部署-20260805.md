@@ -97,3 +97,21 @@ qiu-pay 的支付宝凭证其实是有效的（credential_status=verified，余�
 - **已部署**：identity-service（备份 `.bak.amtfix.*`）+ user-web（备份 `7.tiktokplay.na.am.bak.20260816233022`）。
 - **运维要点**：该模式下用户手动输错金额（如付 6.00 而非 6.01）仍会导致无法自动确认，
   需在 qiu-pay 后台（100.tiktokplay.na.am）手动核对到账并补单；根治方案仍是换当面付动态码网关。
+
+## 十、余额净差污染事故与人工补单流程（2026-08-17）
+
+- **现象**：订单 P202608162337382967 用户实付 ¥6.01（支付宝已到账），订单卡 expired 未激活。
+- **根因**：余额检测按「当前余额 − 下单时基准余额 = 订单金额」匹配，但收款支付宝账户是
+  **活跃使用的个人账户**——本单基准 9.09，期间账户另有 ~8 元转出，净差 -1.99，
+  6.01 进账被流出对冲，永远无法匹配。加上订单 1 小时过期，双重卡死。
+  这是账单轮询模式的根本缺陷：账户任何无关收支都会污染匹配（前夜 2.41 差值残留同因）。
+- **人工补单流程（已验证）**：
+  1. YunDu DB 把 expired 翻回 pending（`UPDATE payment_orders SET status='pending' WHERE order_no=... AND status='expired'`）；
+  2. 用商户密钥计算 MD5 签名，模拟易支付回调 POST `/api/v1/payment/notify/alipay`
+     （pid/type/out_trade_no/trade_no/money/trade_status=TRADE_SUCCESS/sign/sign_type），
+     走官方链路 MarkPaidIfPending + activateOrder，订阅自动激活；
+  3. qiu-pay SQLite 该单置 status=1（paid）。
+- **运维建议**：
+  1. 收款账户专户专用（绝不混用个人收支），可大幅降低污染概率；
+  2. 出现"支付宝已收款但订单不动"→ 按上述补单流程处理（或直接找用户核对金额后补单）；
+  3. 根治：换支持当面付动态码的网关，摆脱余额轮询。
