@@ -104,9 +104,9 @@ func (g *EpayGateway) Name() string {
 	return "epay"
 }
 
-// epaySign 彩虹易支付 MD5 签名：
-// 参数按 ASCII 排序，sign/sign_type/空值不参与，末尾拼接商户密钥。
-func epaySign(params map[string]string, key string) string {
+// epaySignContent 构造待签名字符串：非空参数剔除 sign/sign_type 后按 key ASCII
+// 升序拼接为 k=v&k=v（值不做 URL 编码）。V1 MD5 与 V2 RSA 共用此规则。
+func epaySignContent(params map[string]string) string {
 	keys := make([]string, 0, len(params))
 	for k, v := range params {
 		if k == "sign" || k == "sign_type" || v == "" {
@@ -124,8 +124,13 @@ func epaySign(params map[string]string, key string) string {
 		sb.WriteString("=")
 		sb.WriteString(params[k])
 	}
-	sb.WriteString(key)
-	sum := md5.Sum([]byte(sb.String()))
+	return sb.String()
+}
+
+// epaySign 彩虹易支付 MD5 签名：
+// 参数按 ASCII 排序，sign/sign_type/空值不参与，末尾拼接商户密钥。
+func epaySign(params map[string]string, key string) string {
+	sum := md5.Sum([]byte(epaySignContent(params) + key))
 	return hex.EncodeToString(sum[:])
 }
 

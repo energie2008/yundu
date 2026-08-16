@@ -34,17 +34,36 @@ const EVM_NETWORK_OPTIONS = [
   { key: 'arbitrum', label: 'Arbitrum One' },
 ]
 
-interface EpayConfig {
-  pid?: string
-  key?: string
-  gateway_url?: string
+// FiatChannel 第三方法币易支付渠道（可随时添加/更换：第三方易支付稳定性差、常需换平台）
+interface FiatChannel {
+  id: string
+  name: string
+  protocol: string          // v1（彩虹标准 MD5）| v2（RSA，api/pay/* 端点）
+  sign_type?: string        // v2 下：RSA（默认）| MD5（V2 平台的 V1 兼容端点）
+  gateway_url: string
+  pid: string
+  md5_key?: string
+  merchant_private_key?: string
+  platform_public_key?: string
   pay_type?: string
   notify_url?: string
   return_url?: string
   mapi_path?: string
   submit_path?: string
   query_path?: string
-  key_configured?: boolean
+  method?: string
+  device?: string
+  // 只读展示字段（后端脱敏，不回传密钥）
+  configured?: boolean
+  md5_key_configured?: boolean
+  private_key_configured?: boolean
+  platform_key_set?: boolean
+}
+
+interface FiatChannelsResponse {
+  channels: FiatChannel[]
+  alipay_channel: string
+  wechat_channel: string
 }
 
 interface PaymentMethod {
@@ -59,8 +78,9 @@ interface PaymentMethod {
   api_key_configured?: boolean
   api_key?: string
   networks?: string[]
-  epay?: EpayConfig
-  epay_configured?: boolean
+  channel_id?: string
+  channel_name?: string
+  channel_configured?: boolean
   rpc_nodes?: string[]
   available?: boolean
   unavailable_reason?: string
@@ -94,6 +114,16 @@ export default function Payments() {
     retry: false,
   })
 
+  // 法币渠道池（第三方易支付可随时添加/更换）
+  const { data: fiatData, isLoading: fiatLoading } = useQuery<FiatChannelsResponse>({
+    queryKey: ['fiat-channels'],
+    queryFn: async () => {
+      return api.get<FiatChannelsResponse>(`${EP.PAYMENT_METHODS}/fiat-channels`)
+    },
+    retry: false,
+  })
+  const channels = fiatData?.channels ?? []
+
   const updateRate = useMutation({
     mutationFn: async (rate: number) => {
       return api.put(EP.PAYMENT_EXCHANGE_RATE, { usdt_to_cny: rate })
@@ -114,7 +144,6 @@ export default function Payments() {
         network: config.network,
         api_key: config.api_key,
         networks: config.networks,
-        epay: config.epay,
       })
     },
     onSuccess: () => {
@@ -122,6 +151,77 @@ export default function Payments() {
       setEditMethod(null)
     },
   })
+
+  // 渠道编辑状态：null=列表态，对象=编辑态（含 isNew 标记）
+  const [editingChannel, setEditingChannel] = useState<Partial<FiatChannel> & { isNew?: boolean } | null>(null)
+  const [channelError, setChannelError] = useState('')
+
+  const saveChannels = useMutation({
+    mutationFn: async (payload: { channels: FiatChannel[]; alipay_channel: string; wechat_channel: string }) => {
+      return api.put(`${EP.PAYMENT_METHODS}/fiat-channels`, payload)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['fiat-channels'] })
+      queryClient.invalidateQueries({ queryKey: ['payment-methods'] })
+      setEditingChannel(null)
+      setChannelError('')
+    },
+    onError: (e: Error) => {
+      setChannelError(e.message || '保存失败')
+    },
+  })
+
+  const setChannelField = (field: keyof FiatChannel, value: string) => {
+    setEditingChannel((prev) => ({ ...(prev || {}), [field]: value }))
+  }
+
+  // 保存单个渠道编辑：合并进渠道列表 + 保留当前绑定
+  const handleSaveChannel = () => {
+    if (!editingChannel) return
+    const id = (editingChannel.id || '').trim()
+    const name = (editingChannel.name || '').trim()
+    const gatewayURL = (editingChannel.gateway_url || '').trim()
+    const pid = (editingChannel.pid || '').trim()
+    if (!id || !name || !gatewayURL || !pid) {
+      setChannelError('渠道ID、名称、接口地址、商户ID 均必填')
+      return
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+      setChannelError('渠道ID 只能包含字母、数字、下划线、连字符')
+      return
+    }
+    const others = channels.filter((c) => c.id !== id)
+    const next: FiatChannel = {
+      ...(editingChannel as FiatChannel),
+      id, name, gateway_url: gatewayURL.replace(/\/+$/, ''), pid,
+      protocol: editingChannel.protocol || 'v1',
+      sign_type: editingChannel.protocol === 'v2' ? (editingChannel.sign_type || 'RSA') : '',
+    }
+    const list = [...others, next].sort((a, b) => a.id.localeCompare(b.id))
+    saveChannels.mutate({
+      channels: list,
+      alipay_channel: fiatData?.alipay_channel && list.some((c) => c.id === fiatData.alipay_channel) ? fiatData.alipay_channel : (list[0]?.id || ''),
+      wechat_channel: fiatData?.wechat_channel && list.some((c) => c.id === fiatData.wechat_channel) ? fiatData.wechat_channel : (list[0]?.id || ''),
+    })
+  }
+
+  const handleDeleteChannel = (ch: FiatChannel) => {
+    if (!window.confirm(`确定删除渠道「${ch.name || ch.id}」吗？绑定该渠道的支付方式将回退到第一个可用渠道。`)) return
+    const list = channels.filter((c) => c.id !== ch.id)
+    saveChannels.mutate({
+      channels: list,
+      alipay_channel: fiatData?.alipay_channel === ch.id ? (list[0]?.id || '') : (fiatData?.alipay_channel || ''),
+      wechat_channel: fiatData?.wechat_channel === ch.id ? (list[0]?.id || '') : (fiatData?.wechat_channel || ''),
+    })
+  }
+
+  const handleBindChannel = (method: 'alipay' | 'wechat', channelID: string) => {
+    saveChannels.mutate({
+      channels,
+      alipay_channel: method === 'alipay' ? channelID : (fiatData?.alipay_channel || ''),
+      wechat_channel: method === 'wechat' ? channelID : (fiatData?.wechat_channel || ''),
+    })
+  }
 
   const toggleMethod = useMutation({
     mutationFn: async (method: string) => {
@@ -147,7 +247,6 @@ export default function Payments() {
       enabled: m.enabled,
       network: m.network,
       networks: m.networks,
-      epay: m.epay,
     })
   }
 
@@ -161,9 +260,6 @@ export default function Payments() {
     if (config.api_key === '') {
       delete config.api_key
     }
-    if (config.epay?.key === '') {
-      delete config.epay.key
-    }
     updateMethod.mutate({ method: editMethod, config })
   }
 
@@ -172,13 +268,6 @@ export default function Payments() {
     setEditForm({
       ...editForm,
       networks: cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key],
-    })
-  }
-
-  const setEpayField = (field: keyof EpayConfig, value: string) => {
-    setEditForm({
-      ...editForm,
-      epay: { ...(editForm.epay || {}), [field]: value },
     })
   }
 
@@ -250,6 +339,272 @@ export default function Payments() {
         </CardContent>
       </Card>
 
+      {/* 法币渠道池卡片：第三方易支付可随时添加/更换 */}
+      <Card style={{ background: ADMIN_CARD, borderColor: ADMIN_BORDER }}>
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center bg-indigo-900/30">
+                <CreditCard className="w-5 h-5 text-indigo-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold" style={{ color: ADMIN_TEXT }}>法币支付渠道（第三方易支付）</h3>
+                <p className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
+                  第三方易支付平台稳定性参差，可在此维护多个渠道随时换绑；支持 V1（MD5）与 V2（RSA/MD5）两种协议
+                </p>
+              </div>
+            </div>
+            {editingChannel?.isNew !== true && !editingChannel && (
+              <Button size="sm" onClick={() => { setChannelError(''); setEditingChannel({ isNew: true, protocol: 'v1', sign_type: 'RSA', pay_type: 'alipay' }) }}>
+                添加渠道
+              </Button>
+            )}
+          </div>
+
+          {editingChannel ? (
+            <div className="rounded-lg p-4 space-y-3" style={{ background: ADMIN_INPUT_BG, border: `1px solid ${ADMIN_INPUT_BORDER}` }}>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>渠道ID（唯一标识）</label>
+                  <Input
+                    value={editingChannel.id || ''}
+                    onChange={(e) => setChannelField('id', e.target.value)}
+                    placeholder="如 ifz / qiupay"
+                    disabled={!editingChannel.isNew}
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>渠道名称</label>
+                  <Input
+                    value={editingChannel.name || ''}
+                    onChange={(e) => setChannelField('name', e.target.value)}
+                    placeholder="如 ifz V2 易支付"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>协议版本</label>
+                  <select
+                    value={editingChannel.protocol || 'v1'}
+                    onChange={(e) => setChannelField('protocol', e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border text-sm"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  >
+                    <option value="v1">V1 彩虹标准（MD5，mapi.php）</option>
+                    <option value="v2">V2（api/pay/*，RSA 或 MD5）</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>签名方式{editingChannel.protocol === 'v2' ? '' : '（仅 V2 可选）'}</label>
+                  <select
+                    value={editingChannel.sign_type || 'RSA'}
+                    onChange={(e) => setChannelField('sign_type', e.target.value)}
+                    disabled={editingChannel.protocol !== 'v2'}
+                    className="w-full px-3 py-2 rounded-lg border text-sm"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  >
+                    <option value="RSA">RSA（SHA256WithRSA）</option>
+                    <option value="MD5">MD5（V2 平台 V1 端点兼容）</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>接口地址（gateway_url）</label>
+                  <Input
+                    value={editingChannel.gateway_url || ''}
+                    onChange={(e) => setChannelField('gateway_url', e.target.value)}
+                    placeholder="https://pay.example.com 或 https://xx/xpay/epay/"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>商户ID (pid)</label>
+                  <Input
+                    value={editingChannel.pid || ''}
+                    onChange={(e) => setChannelField('pid', e.target.value)}
+                    placeholder="1001"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  />
+                </div>
+              </div>
+
+              {/* 密钥组：v1/v2-md5 用 MD5 密钥；v2-rsa 用商户私钥+平台公钥 */}
+              {(editingChannel.protocol !== 'v2' || (editingChannel.sign_type || 'RSA') === 'MD5') && (
+                <div className="space-y-1">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
+                    MD5 商户密钥 {editingChannel.md5_key_configured && !editingChannel.isNew ? '（已配置，留空保持不变）' : ''}
+                  </label>
+                  <Input
+                    type="password"
+                    value={editingChannel.md5_key || ''}
+                    onChange={(e) => setChannelField('md5_key', e.target.value)}
+                    placeholder="留空保持不变"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  />
+                </div>
+              )}
+              {editingChannel.protocol === 'v2' && (editingChannel.sign_type || 'RSA') === 'RSA' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
+                      商户私钥（PKCS#8）{editingChannel.private_key_configured && !editingChannel.isNew ? '（已配置，留空保持不变）' : ''}
+                    </label>
+                    <textarea
+                      value={editingChannel.merchant_private_key || ''}
+                      onChange={(e) => setChannelField('merchant_private_key', e.target.value)}
+                      rows={3}
+                      placeholder="MIIEvQ...（粘贴带/不带 PEM 头尾均可）"
+                      style={{ width: '100%', background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT, borderRadius: 8, padding: 8, fontSize: 11, fontFamily: 'monospace' }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
+                      平台公钥（X.509）{editingChannel.platform_key_set && !editingChannel.isNew ? '（已配置，留空保持不变）' : ''}
+                    </label>
+                    <textarea
+                      value={editingChannel.platform_public_key || ''}
+                      onChange={(e) => setChannelField('platform_public_key', e.target.value)}
+                      rows={3}
+                      placeholder="MIIBIjAN...（粘贴带/不带 PEM 头尾均可）"
+                      style={{ width: '100%', background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT, borderRadius: 8, padding: 8, fontSize: 11, fontFamily: 'monospace' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>下单类型</label>
+                  <select
+                    value={editingChannel.pay_type || 'alipay'}
+                    onChange={(e) => setChannelField('pay_type', e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border text-sm"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  >
+                    <option value="alipay">支付宝 alipay</option>
+                    <option value="wxpay">微信 wxpay</option>
+                  </select>
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>通知地址（留空自动按面板补齐）</label>
+                  <Input
+                    value={editingChannel.notify_url || ''}
+                    onChange={(e) => setChannelField('notify_url', e.target.value)}
+                    placeholder="自动：https://面板/api/v1/payment/notify/{method}"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>回跳地址（留空自动）</label>
+                  <Input
+                    value={editingChannel.return_url || ''}
+                    onChange={(e) => setChannelField('return_url', e.target.value)}
+                    placeholder="自动：用户订单列表"
+                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                  />
+                </div>
+              </div>
+
+              {editingChannel.protocol === 'v2' && (editingChannel.sign_type || 'RSA') === 'RSA' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>接口类型 method（web 自适应/仅跳转）</label>
+                    <select
+                      value={editingChannel.method || 'web'}
+                      onChange={(e) => setChannelField('method', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border text-sm"
+                      style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                    >
+                      <option value="web">web（自适应二维码/跳转）</option>
+                      <option value="jump">jump（仅跳转链接）</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>设备类型 device</label>
+                    <select
+                      value={editingChannel.device || 'pc'}
+                      onChange={(e) => setChannelField('device', e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border text-sm"
+                      style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                    >
+                      <option value="pc">pc</option>
+                      <option value="mobile">mobile</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {editingChannel.protocol === 'v1' && (
+                <div className="rounded-lg p-3" style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.18)' }}>
+                  <p className="text-xs font-medium mb-2" style={{ color: '#60a5fa' }}>接口路径（高级，默认彩虹标准，换平台一般无需改）</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>JSON下单 (mapi)</label>
+                      <Input value={editingChannel.mapi_path || 'mapi.php'} onChange={(e) => setChannelField('mapi_path', e.target.value)} placeholder="mapi.php" style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>表单下单 (submit)</label>
+                      <Input value={editingChannel.submit_path || 'submit.php'} onChange={(e) => setChannelField('submit_path', e.target.value)} placeholder="submit.php" style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>查单 (query)</label>
+                      <Input value={editingChannel.query_path || 'api.php'} onChange={(e) => setChannelField('query_path', e.target.value)} placeholder="api.php" style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {channelError && <p className="text-xs" style={{ color: '#f87171' }}>{channelError}</p>}
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={handleSaveChannel} disabled={saveChannels.isPending}>
+                  <Save className="w-4 h-4 mr-1" /> {saveChannels.isPending ? '保存中...' : '保存渠道'}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setEditingChannel(null); setChannelError('') }}>取消</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {fiatLoading ? (
+                <Skeleton className="h-16 w-full" />
+              ) : channels.length === 0 ? (
+                <p className="text-sm py-3" style={{ color: ADMIN_TEXT_MUTED }}>暂无渠道，点击「添加渠道」接入第一个第三方易支付</p>
+              ) : (
+                channels.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: ADMIN_INPUT_BG, border: `1px solid ${ADMIN_INPUT_BORDER}` }}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium" style={{ color: ADMIN_TEXT }}>{c.name || c.id}</span>
+                        <span className="text-xs font-mono" style={{ color: ADMIN_TEXT_MUTED }}>{c.id}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {c.protocol === 'v2' ? `V2/${c.sign_type || 'RSA'}` : 'V1/MD5'}
+                        </Badge>
+                        <Badge variant="outline" className={c.configured ? 'bg-green-900/50 text-green-300 border-green-800/50' : 'bg-amber-900/50 text-amber-300 border-amber-800/50'}>
+                          {c.configured ? '已配置' : '配置不完整'}
+                        </Badge>
+                        {fiatData?.alipay_channel === c.id && <Badge variant="outline" className="bg-blue-900/50 text-blue-300 border-blue-800/50 text-xs">支付宝</Badge>}
+                        {fiatData?.wechat_channel === c.id && <Badge variant="outline" className="bg-emerald-900/50 text-emerald-300 border-emerald-800/50 text-xs">微信</Badge>}
+                      </div>
+                      <p className="text-xs mt-1 truncate font-mono" style={{ color: ADMIN_TEXT_MUTED }}>{c.gateway_url} · pid {c.pid}</p>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                      <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => { setChannelError(''); setEditingChannel({ ...c, md5_key: '', merchant_private_key: '', platform_public_key: '' }) }}>
+                        编辑
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-red-400 hover:text-red-300" onClick={() => handleDeleteChannel(c)}>
+                        删除
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {isLoading ? (
         <Card style={{ background: ADMIN_CARD, borderColor: ADMIN_BORDER }}>
           <CardContent className="p-6">
@@ -286,9 +641,9 @@ export default function Payments() {
                     已启用但未配置收款地址，用户端不会显示该支付方式。
                   </div>
                 )}
-                {(m.enabled && (m.method === 'wechat' || m.method === 'alipay') && !m.epay_configured) && (
+                {(m.enabled && (m.method === 'wechat' || m.method === 'alipay') && !m.channel_configured) && (
                   <div className="rounded-lg p-2.5 mb-3 text-xs" style={{ background: 'rgba(205,92,77,0.08)', border: '1px solid rgba(205,92,77,0.25)', color: '#cd5c4d' }}>
-                    已启用但易支付未配置（需商户ID + 密钥 + 网关地址），用户端不会显示该支付方式。
+                    已启用但绑定的渠道未配置完整，用户端不会显示该支付方式。
                   </div>
                 )}
                 {m.method === 'usdt_bep20' && (
@@ -394,111 +749,28 @@ export default function Payments() {
                       </>
                     )}
                     {(m.method === 'wechat' || m.method === 'alipay') && (
-                      <>
+                      <div className="rounded-lg p-3 space-y-2" style={{ background: ADMIN_INPUT_BG, border: `1px solid ${ADMIN_INPUT_BORDER}` }}>
+                        <p className="text-xs font-medium" style={{ color: ADMIN_TEXT_MUTED }}>
+                          当前渠道：{m.channel_name ? `${m.channel_name}（${m.channel_id}）` : '未绑定'} {m.channel_configured ? '✓ 已配置' : '⚠ 配置不完整'}
+                        </p>
                         <div className="space-y-1">
-                          <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
-                            易支付商户状态：{m.epay_configured ? '已配置' : '未配置'}
-                          </label>
-                          <div className="rounded-lg p-3 space-y-3" style={{ background: ADMIN_INPUT_BG, border: `1px solid ${ADMIN_INPUT_BORDER}` }}>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>商户ID (pid)</label>
-                                <Input
-                                  value={editForm.epay?.pid || ''}
-                                  onChange={(e) => setEpayField('pid', e.target.value)}
-                                  placeholder="1001"
-                                  style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>
-                                  商户密钥 (key) {editForm.epay?.key_configured ? '（已配置）' : ''}
-                                </label>
-                                <Input
-                                  type="password"
-                                  value={editForm.epay?.key || ''}
-                                  onChange={(e) => setEpayField('key', e.target.value)}
-                                  placeholder="留空保持不变"
-                                  style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                                />
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>易支付网关地址</label>
-                              <Input
-                                value={editForm.epay?.gateway_url || ''}
-                                onChange={(e) => setEpayField('gateway_url', e.target.value)}
-                                placeholder="https://pay.example.com"
-                                style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>下单类型</label>
-                                <select
-                                  value={editForm.epay?.pay_type || (m.method === 'wechat' ? 'wxpay' : 'alipay')}
-                                  onChange={(e) => setEpayField('pay_type', e.target.value)}
-                                  className="w-full px-3 py-2 rounded-lg border text-sm"
-                                  style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                                >
-                                  <option value="alipay">支付宝 alipay</option>
-                                  <option value="wxpay">微信 wxpay</option>
-                                </select>
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>通知地址 (notify_url)</label>
-                                <Input
-                                  value={editForm.epay?.notify_url || ''}
-                                  onChange={(e) => setEpayField('notify_url', e.target.value)}
-                                  placeholder="https://6.tiktokplay.na.am/api/v1/payment/notify/alipay"
-                                  style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                                />
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>回跳地址 (return_url)</label>
-                              <Input
-                                value={editForm.epay?.return_url || ''}
-                                onChange={(e) => setEpayField('return_url', e.target.value)}
-                                placeholder="https://7.tiktokplay.na.am/dashboard/orders"
-                                style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                              />
-                            </div>
-                            <div className="rounded-lg p-3" style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.18)' }}>
-                              <p className="text-xs font-medium mb-2" style={{ color: '#60a5fa' }}>接口路径（高级，默认兼容彩虹易支付标准，换第三方一般无需改）</p>
-                              <div className="grid grid-cols-3 gap-2">
-                                <div className="space-y-1">
-                                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>JSON下单 (mapi)</label>
-                                  <Input
-                                    value={editForm.epay?.mapi_path || 'mapi.php'}
-                                    onChange={(e) => setEpayField('mapi_path', e.target.value)}
-                                    placeholder="mapi.php"
-                                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>表单下单 (submit)</label>
-                                  <Input
-                                    value={editForm.epay?.submit_path || 'submit.php'}
-                                    onChange={(e) => setEpayField('submit_path', e.target.value)}
-                                    placeholder="submit.php"
-                                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>查单 (query)</label>
-                                  <Input
-                                    value={editForm.epay?.query_path || 'api.php'}
-                                    onChange={(e) => setEpayField('query_path', e.target.value)}
-                                    placeholder="api.php"
-                                    style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
+                          <label className="text-xs" style={{ color: ADMIN_TEXT_MUTED }}>切换渠道（第三方易支付出问题时可随时换绑）</label>
+                          <select
+                            value={m.channel_id || ''}
+                            onChange={(e) => handleBindChannel(m.method as 'alipay' | 'wechat', e.target.value)}
+                            disabled={saveChannels.isPending || channels.length === 0}
+                            className="w-full px-3 py-2 rounded-lg border text-sm"
+                            style={{ background: ADMIN_CARD, borderColor: ADMIN_INPUT_BORDER, color: ADMIN_TEXT }}
+                          >
+                            {channels.length === 0 && <option value="">暂无渠道（请在下方渠道管理添加）</option>}
+                            {channels.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}（{c.id}·{c.protocol}{c.protocol === 'v2' ? `/${c.sign_type}` : ''}）{c.configured ? '' : ' ⚠未配置完整'}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                      </>
+                      </div>
                     )}
                     {saveError && (
                       <p className="text-xs" style={{ color: '#f87171' }}>{saveError}</p>
@@ -541,15 +813,15 @@ export default function Payments() {
                     {(m.method === 'wechat' || m.method === 'alipay') && (
                       <>
                         <div className="flex items-center justify-between text-sm">
-                          <span style={{ color: ADMIN_TEXT_MUTED }}>易支付商户</span>
-                          <span style={{ color: m.epay_configured ? '#26a17b' : ADMIN_TEXT_SECONDARY }}>
-                            {m.epay_configured ? `已配置 (PID ${m.epay?.pid})` : '未配置'}
+                          <span style={{ color: ADMIN_TEXT_MUTED }}>绑定渠道</span>
+                          <span style={{ color: m.channel_configured ? '#26a17b' : ADMIN_TEXT_SECONDARY }}>
+                            {m.channel_name ? `${m.channel_name}${m.channel_configured ? '' : '（配置不完整）'}` : '未绑定'}
                           </span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
-                          <span style={{ color: ADMIN_TEXT_MUTED }}>网关地址</span>
+                          <span style={{ color: ADMIN_TEXT_MUTED }}>渠道ID</span>
                           <span className="text-xs font-mono" style={{ color: ADMIN_TEXT_SECONDARY }}>
-                            {m.epay?.gateway_url || '-'}
+                            {m.channel_id || '-'}
                           </span>
                         </div>
                       </>

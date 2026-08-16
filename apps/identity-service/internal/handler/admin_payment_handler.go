@@ -30,6 +30,8 @@ func (h *AdminPaymentHandler) RegisterRoutesWithGroup(rg *gin.RouterGroup) {
 		payments.GET("", h.ListPaymentMethods)
 		payments.GET("/exchange-rate", h.GetExchangeRate)
 		payments.PUT("/exchange-rate", h.UpdateExchangeRate)
+		payments.GET("/fiat-channels", h.ListFiatChannels)
+		payments.PUT("/fiat-channels", h.UpdateFiatChannels)
 		payments.GET("/:method", h.GetPaymentMethod)
 		payments.PUT("/:method", h.UpdatePaymentMethod)
 		payments.POST("/:method/toggle", h.TogglePaymentMethod)
@@ -44,6 +46,9 @@ func (h *AdminPaymentHandler) ListPaymentMethods(c *gin.Context) {
 	bep20 := h.paymentSvc.GetBEP20Config()
 	wechat := h.paymentSvc.GetWechatConfig()
 	alipay := h.paymentSvc.GetAlipayConfig()
+	channels := h.paymentSvc.GetFiatChannels()
+	alipayCh := channels.FindChannel(channels.AlipayChannel)
+	wechatCh := channels.FindChannel(channels.WechatChannel)
 
 	server.OK(c, gin.H{
 		"methods": []gin.H{
@@ -85,22 +90,24 @@ func (h *AdminPaymentHandler) ListPaymentMethods(c *gin.Context) {
 				"available":        true,
 			},
 			{
-				"method":          "wechat",
-				"name":            "微信支付",
-				"enabled":         wechat.Enabled,
-				"auto_activate":   wechat.AutoActivate,
-				"currency":        "CNY",
-				"epay":            epayConfigMap(wechat.Epay),
-				"epay_configured": wechat.Epay.Configured(),
+				"method":             "wechat",
+				"name":               "微信支付",
+				"enabled":            wechat.Enabled,
+				"auto_activate":      wechat.AutoActivate,
+				"currency":           "CNY",
+				"channel_id":         channels.WechatChannel,
+				"channel_name":       channelDisplayName(wechatCh),
+				"channel_configured": wechatCh != nil && wechatCh.Configured(),
 			},
 			{
-				"method":          "alipay",
-				"name":            "支付宝",
-				"enabled":         alipay.Enabled,
-				"auto_activate":   alipay.AutoActivate,
-				"currency":        "CNY",
-				"epay":            epayConfigMap(alipay.Epay),
-				"epay_configured": alipay.Epay.Configured(),
+				"method":             "alipay",
+				"name":               "支付宝",
+				"enabled":            alipay.Enabled,
+				"auto_activate":      alipay.AutoActivate,
+				"currency":           "CNY",
+				"channel_id":         channels.AlipayChannel,
+				"channel_name":       channelDisplayName(alipayCh),
+				"channel_configured": alipayCh != nil && alipayCh.Configured(),
 			},
 		},
 	})
@@ -386,43 +393,219 @@ func (h *AdminPaymentHandler) getMethodConfig(method string) map[string]interfac
 		}
 	case "wechat":
 		cfg := h.paymentSvc.GetWechatConfig()
+		channels := h.paymentSvc.GetFiatChannels()
+		bound := channels.FindChannel(channels.WechatChannel)
 		return map[string]interface{}{
 			"method":             "wechat",
 			"name":               "微信支付",
 			"enabled":            cfg.Enabled,
 			"auto_activate":      cfg.AutoActivate,
 			"order_expiry_hours": cfg.OrderExpiryHours,
-			"epay":               epayConfigMap(cfg.Epay),
-			"epay_configured":    cfg.Epay.Configured(),
+			"channel_id":         channels.WechatChannel,
+			"channel_name":       channelDisplayName(bound),
+			"channel_configured": bound != nil && bound.Configured(),
 		}
 	case "alipay":
 		cfg := h.paymentSvc.GetAlipayConfig()
+		channels := h.paymentSvc.GetFiatChannels()
+		bound := channels.FindChannel(channels.AlipayChannel)
 		return map[string]interface{}{
 			"method":             "alipay",
 			"name":               "支付宝",
 			"enabled":            cfg.Enabled,
 			"auto_activate":      cfg.AutoActivate,
 			"order_expiry_hours": cfg.OrderExpiryHours,
-			"epay":               epayConfigMap(cfg.Epay),
-			"epay_configured":    cfg.Epay.Configured(),
+			"channel_id":         channels.AlipayChannel,
+			"channel_name":       channelDisplayName(bound),
+			"channel_configured": bound != nil && bound.Configured(),
 		}
 	default:
 		return nil
 	}
 }
 
-func epayConfigMap(cfg service.EpayConfig) map[string]interface{} {
-	return map[string]interface{}{
-		"pid":            cfg.Pid,
-		"gateway_url":    cfg.GatewayURL,
-		"pay_type":       cfg.PayType,
-		"notify_url":     cfg.NotifyURL,
-		"return_url":     cfg.ReturnURL,
-		"mapi_path":      cfg.MapiPath,
-		"submit_path":    cfg.SubmitPath,
-		"query_path":     cfg.QueryPath,
-		"key_configured": cfg.Key != "",
+func channelDisplayName(ch *service.FiatChannel) string {
+	if ch == nil {
+		return ""
 	}
+	return ch.Name
+}
+
+// normalizeKeyInput 密钥输入容错：去 PEM 头尾与空白（后台可能粘贴带换行的整段密钥）。
+func normalizeKeyInput(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "-----BEGIN PRIVATE KEY-----", "")
+	s = strings.ReplaceAll(s, "-----END PRIVATE KEY-----", "")
+	s = strings.ReplaceAll(s, "-----BEGIN PUBLIC KEY-----", "")
+	s = strings.ReplaceAll(s, "-----END PUBLIC KEY-----", "")
+	s = strings.Join(strings.Fields(s), "")
+	return s
+}
+
+// FiatChannelPayload 渠道池读写载荷（密钥字段脱敏展示；保存时空值=保持不变）。
+type FiatChannelPayload struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Protocol           string `json:"protocol"`
+	SignType           string `json:"sign_type,omitempty"`
+	GatewayURL         string `json:"gateway_url"`
+	Pid                string `json:"pid"`
+	MD5Key             string `json:"md5_key,omitempty"`
+	MerchantPrivateKey string `json:"merchant_private_key,omitempty"`
+	PlatformPublicKey  string `json:"platform_public_key,omitempty"`
+	PayType            string `json:"pay_type,omitempty"`
+	NotifyURL          string `json:"notify_url,omitempty"`
+	ReturnURL          string `json:"return_url,omitempty"`
+	MapiPath           string `json:"mapi_path,omitempty"`
+	SubmitPath         string `json:"submit_path,omitempty"`
+	QueryPath          string `json:"query_path,omitempty"`
+	Method             string `json:"method,omitempty"`
+	Device             string `json:"device,omitempty"`
+}
+
+// ListFiatChannels GET /admin/payment-methods/fiat-channels
+// 渠道池列表 + alipay/wechat 绑定（密钥脱敏，只返回是否已配置标记）。
+func (h *AdminPaymentHandler) ListFiatChannels(c *gin.Context) {
+	channels := h.paymentSvc.GetFiatChannels()
+	out := make([]gin.H, 0, len(channels.Channels))
+	for i := range channels.Channels {
+		ch := channels.Channels[i]
+		out = append(out, gin.H{
+			"id":                     ch.ID,
+			"name":                   ch.Name,
+			"protocol":               ch.ProtocolName(),
+			"sign_type":              ch.SignModeName(),
+			"gateway_url":            ch.GatewayURL,
+			"pid":                    ch.Pid,
+			"pay_type":               ch.PayType,
+			"notify_url":             ch.NotifyURL,
+			"return_url":             ch.ReturnURL,
+			"mapi_path":              ch.MapiPath,
+			"submit_path":            ch.SubmitPath,
+			"query_path":             ch.QueryPath,
+			"method":                 ch.Method,
+			"device":                 ch.Device,
+			"configured":             ch.Configured(),
+			"md5_key_configured":     ch.MD5Key != "",
+			"private_key_configured": strings.TrimSpace(ch.MerchantPrivateKey) != "",
+			"platform_key_set":       strings.TrimSpace(ch.PlatformPublicKey) != "",
+		})
+	}
+	server.OK(c, gin.H{
+		"channels":        out,
+		"alipay_channel":  channels.AlipayChannel,
+		"wechat_channel":  channels.WechatChannel,
+	})
+}
+
+// UpdateFiatChannelsRequest PUT /admin/payment-methods/fiat-channels
+// 整体保存渠道池与绑定。密钥字段（md5_key/merchant_private_key/platform_public_key）
+// 传空字符串表示保持已存值不变；绑定必须指向存在的渠道 ID。
+type UpdateFiatChannelsRequest struct {
+	Channels       []FiatChannelPayload `json:"channels" binding:"required"`
+	AlipayChannel  string               `json:"alipay_channel"`
+	WechatChannel  string               `json:"wechat_channel"`
+}
+
+func (h *AdminPaymentHandler) UpdateFiatChannels(c *gin.Context) {
+	var req UpdateFiatChannelsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		server.ValidationError(c, err.Error())
+		return
+	}
+
+	// 基础校验：ID 唯一非空、协议合法
+	ids := map[string]bool{}
+	for i := range req.Channels {
+		ch := &req.Channels[i]
+		ch.ID = strings.TrimSpace(ch.ID)
+		ch.Name = strings.TrimSpace(ch.Name)
+		ch.GatewayURL = strings.TrimRight(strings.TrimSpace(ch.GatewayURL), "/")
+		if ch.ID == "" {
+			server.ValidationError(c, "channel id required")
+			return
+		}
+		if ids[ch.ID] {
+			server.ValidationError(c, "duplicate channel id: "+ch.ID)
+			return
+		}
+		ids[ch.ID] = true
+		p := strings.ToLower(strings.TrimSpace(ch.Protocol))
+		if p != "v1" && p != "v2" {
+			server.ValidationError(c, "protocol must be v1 or v2")
+			return
+		}
+		ch.MerchantPrivateKey = normalizeKeyInput(ch.MerchantPrivateKey)
+		ch.PlatformPublicKey = normalizeKeyInput(ch.PlatformPublicKey)
+	}
+
+	cur := h.paymentSvc.GetFiatChannels()
+	curByID := map[string]service.FiatChannel{}
+	for _, ch := range cur.Channels {
+		curByID[ch.ID] = ch
+	}
+
+	channels := make([]service.FiatChannel, 0, len(req.Channels))
+	for _, p := range req.Channels {
+		ch := service.FiatChannel{
+			ID:                 p.ID,
+			Name:               p.Name,
+			Protocol:           strings.ToLower(strings.TrimSpace(p.Protocol)),
+			SignType:           strings.ToUpper(strings.TrimSpace(p.SignType)),
+			GatewayURL:         p.GatewayURL,
+			Pid:                strings.TrimSpace(p.Pid),
+			PayType:            strings.TrimSpace(p.PayType),
+			NotifyURL:          strings.TrimSpace(p.NotifyURL),
+			ReturnURL:          strings.TrimSpace(p.ReturnURL),
+			MapiPath:           strings.TrimSpace(p.MapiPath),
+			SubmitPath:         strings.TrimSpace(p.SubmitPath),
+			QueryPath:          strings.TrimSpace(p.QueryPath),
+			Method:             strings.TrimSpace(p.Method),
+			Device:             strings.TrimSpace(p.Device),
+			MerchantPrivateKey: p.MerchantPrivateKey,
+			PlatformPublicKey:  p.PlatformPublicKey,
+			MD5Key:             strings.TrimSpace(p.MD5Key),
+		}
+		// 密钥空值 = 保持原值（编辑脱敏表单时不覆盖）
+		if old, ok := curByID[ch.ID]; ok {
+			if ch.MD5Key == "" {
+				ch.MD5Key = old.MD5Key
+			}
+			if ch.MerchantPrivateKey == "" {
+				ch.MerchantPrivateKey = old.MerchantPrivateKey
+			}
+			if ch.PlatformPublicKey == "" {
+				ch.PlatformPublicKey = old.PlatformPublicKey
+			}
+		}
+		channels = append(channels, ch)
+	}
+
+	cfg := service.FiatChannelsConfig{
+		Channels:      channels,
+		AlipayChannel: strings.TrimSpace(req.AlipayChannel),
+		WechatChannel: strings.TrimSpace(req.WechatChannel),
+	}
+	if len(cfg.Channels) > 0 {
+		if !ids[cfg.AlipayChannel] {
+			cfg.AlipayChannel = cfg.Channels[0].ID
+		}
+		if !ids[cfg.WechatChannel] {
+			cfg.WechatChannel = cfg.Channels[0].ID
+		}
+	} else {
+		cfg.AlipayChannel = ""
+		cfg.WechatChannel = ""
+	}
+
+	adminID := getAdminIDFromContext(c)
+	desc := "法币易支付渠道池（第三方可随时更换）"
+	if _, err := h.settingRepo.SetByGroupKey(c.Request.Context(), "payment", "fiat_channels", cfg, false, &desc, &adminID); err != nil {
+		server.InternalError(c, "failed to save fiat channels")
+		return
+	}
+	h.paymentSvc.SetFiatChannels(cfg)
+	server.OK(c, gin.H{"updated": true, "alipay_channel": cfg.AlipayChannel, "wechat_channel": cfg.WechatChannel})
 }
 
 // GetExchangeRate 获取 USDT 到 CNY 汇率配置

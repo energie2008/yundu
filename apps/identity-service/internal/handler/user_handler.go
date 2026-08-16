@@ -351,7 +351,9 @@ func (h *UserHandler) CreateOrder(c *gin.Context) {
 		return
 	}
 
-	order, err := h.paymentSvc.CreateOrder(c.Request.Context(), userID, req)
+	// V2 易支付统一下单 clientip 必填：把客户端 IP 注入 ctx 供网关读取
+	ctx := service.WithClientIP(c.Request.Context(), c.ClientIP())
+	order, err := h.paymentSvc.CreateOrder(ctx, userID, req)
 	if err != nil {
 		code, msg := service.MapErrorToCode(err)
 		server.Fail(c, code, msg)
@@ -446,11 +448,16 @@ func (h *UserHandler) ListPaymentMethods(c *gin.Context) {
 	}
 	// USDT 通用提示：用户端结算界面展示（请勿选错网络 / 手续费极低 / 优惠码见公告）
 	const usdtHint = "请勿选错网络，USDT手续费极低真实可用，优惠码见系统公告"
-	// 支付宝/微信仅在易支付真实配置（pid+key+网关）后才对用户开放，避免“显示启用但无法支付”；
+	// 支付宝/微信仅在绑定的法币渠道真实配置后才对用户开放，避免“显示启用但无法支付”；
 	// BEP20(BSC) 因公共 RPC 无法查询 USDT 日志（日志量超限）无法自动到账，按 08-02 设计停用，不再展示给用户。
+	channels := h.paymentSvc.GetFiatChannels()
+	channelBound := func(channelID string) bool {
+		ch := channels.FindChannel(channelID)
+		return ch != nil && ch.Configured()
+	}
 	methods := []paymentMethod{
-		{Method: model.PaymentMethodAlipay, Name: "支付宝", Currency: "CNY", Enabled: alipay.Enabled && alipay.Epay.Configured(), Fiat: true},
-		{Method: model.PaymentMethodWechat, Name: "微信支付", Currency: "CNY", Enabled: wechat.Enabled && wechat.Epay.Configured(), Fiat: true},
+		{Method: model.PaymentMethodAlipay, Name: "支付宝", Currency: "CNY", Enabled: alipay.Enabled && channelBound(channels.AlipayChannel), Fiat: true},
+		{Method: model.PaymentMethodWechat, Name: "微信支付", Currency: "CNY", Enabled: wechat.Enabled && channelBound(channels.WechatChannel), Fiat: true},
 		{Method: model.PaymentMethodUSDTTRC20, Name: "USDT-TRC20", Currency: "USDT", Enabled: trc20.Enabled && trc20.Address != "", Fiat: false, Network: "tron", Hint: usdtHint},
 		{Method: model.PaymentMethodUSDTBEP20, Name: "USDT-BEP20", Currency: "USDT", Enabled: bep20.Enabled && bep20.Address != "", Fiat: false, Network: "bsc", Hint: usdtHint},
 		{Method: model.PaymentMethodUSDTERC20, Name: "USDT", Currency: "USDT", Enabled: erc20.Enabled && erc20.Address != "" && len(erc20.EnabledNetworks()) > 0, Fiat: false, Network: erc20.Network, Networks: erc20.EnabledNetworks(), Hint: usdtHint},

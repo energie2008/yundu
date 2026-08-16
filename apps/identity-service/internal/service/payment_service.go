@@ -143,12 +143,14 @@ type WechatConfig struct {
 	Enabled          bool `json:"enabled"`
 	OrderExpiryHours int  `json:"order_expiry_hours"`
 	AutoActivate     bool `json:"auto_activate"`
-	// 以下字段为后续对接真实接口预留，当前框架模式不使用
-	MchID     string     `json:"mch_id,omitempty"`
-	APIKey    string     `json:"api_key,omitempty"`
-	AppID     string     `json:"app_id,omitempty"`
-	NotifyURL string     `json:"notify_url,omitempty"`
-	Epay      EpayConfig `json:"epay,omitempty"`
+	// 以下字段为后续对接真实接口预留，当前框架模式不使用。
+	// 法币渠道已迁移到渠道池（FiatChannel，system_settings: payment/fiat_channels），
+	// 保留 Epay 字段仅作为 legacy 配置来源（首次读取时合成为默认渠道）。
+	MchID     string      `json:"mch_id,omitempty"`
+	APIKey    string      `json:"api_key,omitempty"`
+	AppID     string      `json:"app_id,omitempty"`
+	NotifyURL string      `json:"notify_url,omitempty"`
+	Epay      EpayConfig  `json:"epay,omitempty"`
 }
 
 // AlipayConfig 支付宝支付配置（框架预留，暂不对接真实接口）
@@ -156,7 +158,8 @@ type AlipayConfig struct {
 	Enabled          bool `json:"enabled"`
 	OrderExpiryHours int  `json:"order_expiry_hours"`
 	AutoActivate     bool `json:"auto_activate"`
-	// 以下字段为后续对接真实接口预留，当前框架模式不使用
+	// 以下字段为后续对接真实接口预留，当前框架模式不使用。
+	// 法币渠道已迁移到渠道池（FiatChannel），保留 Epay 字段仅作 legacy 来源。
 	AppID      string     `json:"app_id,omitempty"`
 	PrivateKey string     `json:"private_key,omitempty"`
 	NotifyURL  string     `json:"notify_url,omitempty"`
@@ -185,6 +188,7 @@ type PaymentService struct {
 	bep20Cfg          BEP20Config
 	wechatCfg         WechatConfig
 	alipayCfg         AlipayConfig
+	fiatChannels      FiatChannelsConfig
 	cfgMu             sync.RWMutex
 	lastCommissionRun time.Time
 	exchangeRate      float64
@@ -235,6 +239,7 @@ func NewPaymentService(
 	svc.bep20Cfg = svc.loadBEP20Config()
 	svc.wechatCfg = svc.loadWechatConfig()
 	svc.alipayCfg = svc.loadAlipayConfig()
+	svc.fiatChannels = svc.loadFiatChannels()
 	svc.exchangeRate = svc.loadExchangeRate()
 	return svc
 }
@@ -467,8 +472,24 @@ func (s *PaymentService) ReloadConfigs() {
 	s.bep20Cfg = s.loadBEP20Config()
 	s.wechatCfg = s.loadWechatConfig()
 	s.alipayCfg = s.loadAlipayConfig()
+	s.fiatChannels = s.loadFiatChannels()
 	s.exchangeRate = s.loadExchangeRate()
 	s.cfgMu.Unlock()
+}
+
+// loadFiatChannels 从 system_settings 读取法币渠道池（payment/fiat_channels）。
+// 未配置时返回空结构（读取路径会合成 legacy 渠道）。
+func (s *PaymentService) loadFiatChannels() FiatChannelsConfig {
+	data, err := s.settingRepo.GetJSON(context.Background(), "payment", "fiat_channels")
+	if err != nil || len(data) == 0 {
+		return FiatChannelsConfig{}
+	}
+	var cfg FiatChannelsConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		s.log.Warn("loadFiatChannels parse failed, fallback to legacy synthesis", "error", err)
+		return FiatChannelsConfig{}
+	}
+	return cfg
 }
 
 // loadExchangeRate 从 system_settings 读取 USDT 到 CNY 汇率，默认 7.2
@@ -812,37 +833,212 @@ func defaultEpayReturnURL(cur string) string {
 	return base + "/api/v1/user/orders"
 }
 
-func (s *PaymentService) epayGatewayFor(method string) (*EpayGateway, error) {
+// FiatChannel 第三方法币易支付渠道（可随时添加/更换）。
+// 第三方易支付平台稳定性参差、常需更换：换平台只需新增渠道并改 alipay/wechat 绑定，
+// 全部字段（接口地址/商户ID/密钥组/接口路径）均可变，零代码切换。
+type FiatChannel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Protocol 协议族：v1（彩虹标准 MD5：submit.php/mapi.php/api.php）/ v2（api/pay/* + RSA）
+	Protocol string `json:"protocol"`
+	// SignType v2 协议下的签名方式：RSA（默认）/ MD5（V2 平台的 V1 兼容端点）
+	SignType string `json:"sign_type,omitempty"`
+	// GatewayURL 接口地址（如 https://pay.ifz.cc 或 https://xx/xpay/epay/）
+	GatewayURL string `json:"gateway_url"`
+	Pid        string `json:"pid"`
+	MD5Key     string `json:"md5_key,omitempty"`           // v1 / v2-md5 模式商户密钥
+	MerchantPrivateKey string `json:"merchant_private_key,omitempty"` // v2-rsa PKCS#8 base64
+	PlatformPublicKey  string `json:"platform_public_key,omitempty"`  // v2-rsa X.509 base64
+	PayType    string `json:"pay_type,omitempty"`  // alipay / wxpay（留空按绑定方式）
+	NotifyURL  string `json:"notify_url,omitempty"`
+	ReturnURL  string `json:"return_url,omitempty"`
+	// v1 接口路径（默认彩虹标准）
+	MapiPath   string `json:"mapi_path,omitempty"`
+	SubmitPath string `json:"submit_path,omitempty"`
+	QueryPath  string `json:"query_path,omitempty"`
+	// v2 下单参数
+	Method string `json:"method,omitempty"` // web(默认)/jump
+	Device string `json:"device,omitempty"` // pc(默认)/mobile
+}
+
+// Configured 渠道配置完整性：按协议/签名方式要求对应密钥组齐全。
+func (c FiatChannel) Configured() bool {
+	switch c.protocol() {
+	case "v2":
+		if c.signMode() == "MD5" {
+			return c.Pid != "" && c.GatewayURL != "" && c.MD5Key != ""
+		}
+		return c.Pid != "" && c.GatewayURL != "" &&
+			strings.TrimSpace(c.MerchantPrivateKey) != "" && strings.TrimSpace(c.PlatformPublicKey) != ""
+	default: // v1
+		return c.Pid != "" && c.GatewayURL != "" && c.MD5Key != ""
+	}
+}
+
+func (c FiatChannel) protocol() string {
+	p := strings.ToLower(strings.TrimSpace(c.Protocol))
+	if p == "v2" {
+		return "v2"
+	}
+	return "v1"
+}
+
+// ProtocolName 协议展示名（v1/v2），供后台展示。
+func (c FiatChannel) ProtocolName() string { return c.protocol() }
+
+func (c FiatChannel) signMode() string {
+	if strings.EqualFold(c.SignType, "MD5") {
+		return "MD5"
+	}
+	return "RSA"
+}
+
+// SignModeName 签名方式展示名（RSA/MD5），供后台展示。
+func (c FiatChannel) SignModeName() string { return c.signMode() }
+
+// FiatChannelsConfig 渠道池 + alipay/wechat 绑定（system_settings: payment/fiat_channels）。
+type FiatChannelsConfig struct {
+	Channels       []FiatChannel `json:"channels"`
+	AlipayChannel  string        `json:"alipay_channel"`
+	WechatChannel  string        `json:"wechat_channel"`
+}
+
+// FindChannel 按 ID 查找渠道。
+func (f *FiatChannelsConfig) FindChannel(id string) *FiatChannel {
+	for i := range f.Channels {
+		if f.Channels[i].ID == id {
+			return &f.Channels[i]
+		}
+	}
+	return nil
+}
+
+// GetFiatChannels 读取渠道池。未配置过时，把 legacy 的 alipay/wechat Epay 配置
+// 合成为默认渠道（内存合成不落库，运营首次保存渠道池后以库为准）。
+func (s *PaymentService) GetFiatChannels() FiatChannelsConfig {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.fiatChannelsSnapshot()
+}
+
+// fiatChannelsSnapshot 读取渠道池并做 legacy 合成（需持有 cfgMu）。
+func (s *PaymentService) fiatChannelsSnapshot() FiatChannelsConfig {
+	cfg := s.fiatChannels
+	legacy := false
+	if len(cfg.Channels) == 0 {
+		legacy = true
+		// legacy 迁移：alipay/wechat 各自的 Epay 配置合成默认渠道
+		alipayEpay := s.alipayCfg.Epay
+		wechatEpay := s.wechatCfg.Epay
+		sameEpay := alipayEpay.Pid == wechatEpay.Pid && alipayEpay.GatewayURL == wechatEpay.GatewayURL
+		if alipayEpay.Configured() {
+			cfg.Channels = append(cfg.Channels, channelFromLegacyEpay("default", "默认渠道（自动迁移）", alipayEpay))
+			cfg.AlipayChannel = "default"
+			if sameEpay {
+				cfg.WechatChannel = "default"
+			}
+		}
+		if wechatEpay.Configured() && !sameEpay {
+			cfg.Channels = append(cfg.Channels, channelFromLegacyEpay("default-wechat", "默认渠道-微信（自动迁移）", wechatEpay))
+			cfg.WechatChannel = "default-wechat"
+		}
+	}
+	_ = legacy
+	// 绑定缺失时回退第一个可用渠道
+	if cfg.FindChannel(cfg.AlipayChannel) == nil && len(cfg.Channels) > 0 {
+		cfg.AlipayChannel = cfg.Channels[0].ID
+	}
+	if cfg.FindChannel(cfg.WechatChannel) == nil && len(cfg.Channels) > 0 {
+		cfg.WechatChannel = cfg.Channels[0].ID
+	}
+	return cfg
+}
+
+// channelFromLegacyEpay 把 legacy EpayConfig 转为 V1 协议渠道。
+func channelFromLegacyEpay(id, name string, e EpayConfig) FiatChannel {
+	return FiatChannel{
+		ID:         id,
+		Name:       name,
+		Protocol:   "v1",
+		GatewayURL: e.GatewayURL,
+		Pid:        e.Pid,
+		MD5Key:     e.Key,
+		PayType:    e.PayType,
+		NotifyURL:  e.NotifyURL,
+		ReturnURL:  e.ReturnURL,
+		MapiPath:   e.MapiPath,
+		SubmitPath: e.SubmitPath,
+		QueryPath:  e.QueryPath,
+	}
+}
+
+// SetFiatChannels 保存渠道池（后台渠道管理调用），随后热加载。
+func (s *PaymentService) SetFiatChannels(cfg FiatChannelsConfig) {
+	s.cfgMu.Lock()
+	s.fiatChannels = cfg
+	s.cfgMu.Unlock()
+}
+
+// epayGatewayFor 按支付方式当前绑定的渠道构造网关（渠道池模式）。
+func (s *PaymentService) epayGatewayFor(method string) (PayGateway, error) {
 	switch method {
 	case model.PaymentMethodWechat:
-		cfg := s.GetWechatConfig()
-		if !cfg.Epay.Configured() {
-			return nil, fmt.Errorf("epay gateway not configured for wechat")
+		cfg := s.GetFiatChannels()
+		ch := cfg.FindChannel(cfg.WechatChannel)
+		if ch == nil {
+			return nil, fmt.Errorf("no fiat channel bound for wechat")
 		}
-		payType := cfg.Epay.PayType
-		if payType == "" {
-			payType = "wxpay"
-		}
-		epay := cfg.Epay
-		epay.NotifyURL = defaultEpayNotifyURL(epay.NotifyURL, "wechat")
-		epay.ReturnURL = defaultEpayReturnURL(epay.ReturnURL)
-		return NewEpayGateway(s.log, s.httpClient, epay, payType), nil
+		return s.buildChannelGateway(ch, "wechat", "wxpay")
 	case model.PaymentMethodAlipay:
-		cfg := s.GetAlipayConfig()
-		if !cfg.Epay.Configured() {
-			return nil, fmt.Errorf("epay gateway not configured for alipay")
+		cfg := s.GetFiatChannels()
+		ch := cfg.FindChannel(cfg.AlipayChannel)
+		if ch == nil {
+			return nil, fmt.Errorf("no fiat channel bound for alipay")
 		}
-		payType := cfg.Epay.PayType
-		if payType == "" {
-			payType = "alipay"
-		}
-		epay := cfg.Epay
-		epay.NotifyURL = defaultEpayNotifyURL(epay.NotifyURL, "alipay")
-		epay.ReturnURL = defaultEpayReturnURL(epay.ReturnURL)
-		return NewEpayGateway(s.log, s.httpClient, epay, payType), nil
+		return s.buildChannelGateway(ch, "alipay", "alipay")
 	default:
 		return nil, fmt.Errorf("unsupported epay method: %s", method)
 	}
+}
+
+// buildChannelGateway 按渠道协议构造网关实例：
+// v1 → EpayGateway（彩虹标准 MD5）；v2+RSA → EpayV2Gateway；v2+MD5 → 同平台 V1 端点。
+func (s *PaymentService) buildChannelGateway(ch *FiatChannel, method, defaultPayType string) (PayGateway, error) {
+	if !ch.Configured() {
+		return nil, fmt.Errorf("fiat channel %s(%s) not fully configured", ch.ID, ch.Name)
+	}
+	payType := ch.PayType
+	if payType == "" {
+		payType = defaultPayType
+	}
+	notifyURL := defaultEpayNotifyURL(ch.NotifyURL, method)
+	returnURL := defaultEpayReturnURL(ch.ReturnURL)
+	if ch.protocol() == "v2" && ch.signMode() == "RSA" {
+		return NewEpayV2Gateway(s.log, s.httpClient, EpayV2Config{
+			Pid:                ch.Pid,
+			GatewayURL:         strings.TrimRight(ch.GatewayURL, "/"),
+			SignType:           "RSA",
+			MerchantPrivateKey: ch.MerchantPrivateKey,
+			PlatformPublicKey:  ch.PlatformPublicKey,
+			PayType:            payType,
+			NotifyURL:          notifyURL,
+			ReturnURL:          returnURL,
+			Method:             ch.Method,
+			Device:             ch.Device,
+		}, payType), nil
+	}
+	// v1 / v2-md5：彩虹标准端点 + MD5 签名
+	return NewEpayGateway(s.log, s.httpClient, EpayConfig{
+		Pid:        ch.Pid,
+		Key:        ch.MD5Key,
+		GatewayURL: ch.GatewayURL,
+		PayType:    payType,
+		NotifyURL:  notifyURL,
+		ReturnURL:  returnURL,
+		MapiPath:   ch.MapiPath,
+		SubmitPath: ch.SubmitPath,
+		QueryPath:  ch.QueryPath,
+	}, payType), nil
 }
 
 func (s *PaymentService) epayAutoActivate(method string) bool {
