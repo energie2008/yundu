@@ -872,6 +872,17 @@ func (s *PaymentService) createEpayPayment(ctx context.Context, order *model.Pay
 	order.GatewayTradeNo = pay.TradeNo
 	order.PaymentURI = pay.URL
 	order.PayAddress = pay.QRCode
+	// 免签约网关（qiu-pay）对同金额并发订单做尾数调整（6.00→6.01）用于余额轮询精确匹配，
+	// 用户必须按调整后金额支付才能自动确认。以网关返回金额为准更新实付金额，
+	// 否则前端展示原金额、用户按原金额付款后余额检测永远匹配不上（付款成功订单卡死）。
+	if pay.Money > 0 && math.Abs(pay.Money-order.FinalAmount) > 0.0001 {
+		adjusted := math.Round(pay.Money*100) / 100
+		if err := s.paymentOrderRepo.UpdateFinalAmount(ctx, order.ID, adjusted); err != nil {
+			return fmt.Errorf("save epay adjusted amount: %w", err)
+		}
+		order.FinalAmount = adjusted
+		s.log.Info("epay adjusted pay amount", "order_no", order.OrderNo, "final_amount", adjusted)
+	}
 	if err := s.paymentOrderRepo.UpdateGatewayInfo(ctx, order.ID, order.Gateway, pay.TradeNo, pay.URL, pay.QRCode); err != nil {
 		return fmt.Errorf("save epay gateway info: %w", err)
 	}

@@ -424,7 +424,7 @@ export default function OrderDetail() {
           )}
 
           <p className="text-xs mt-3 text-center" style={{ color: 'var(--muted-foreground)' }}>
-            请打开支付宝/微信扫一扫，扫描上方二维码完成付款；支付成功后系统将自动确认并激活您的订阅。
+            请打开支付宝/微信扫一扫，扫描上方二维码，并按上方「应付金额」<strong>精确到分</strong>输入付款金额（如 ¥6.01 请勿付成 ¥6.00），金额不符将无法自动确认到账；支付成功后系统将自动确认并激活您的订阅。
           </p>
 
           <button

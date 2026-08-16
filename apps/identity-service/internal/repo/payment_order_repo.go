@@ -60,6 +60,13 @@ func (r *PaymentOrderRepo) UpdateGatewayInfo(ctx context.Context, id uuid.UUID, 
 	return err
 }
 
+// UpdateFinalAmount 写入网关调整后的实付金额（免签约网关尾数调整，如 6.00→6.01）。
+func (r *PaymentOrderRepo) UpdateFinalAmount(ctx context.Context, id uuid.UUID, amount float64) error {
+	query := `UPDATE payment_orders SET final_amount = $2, updated_at = now() WHERE id = $1 AND status = 'pending'`
+	_, err := r.pool.Exec(ctx, query, id, amount)
+	return err
+}
+
 func (r *PaymentOrderRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.PaymentOrder, error) {
 	query := `SELECT ` + paymentOrderColumns + ` FROM payment_orders WHERE id = $1`
 	o := &model.PaymentOrder{}

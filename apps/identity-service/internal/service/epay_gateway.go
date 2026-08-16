@@ -66,6 +66,9 @@ type GatewayPayment struct {
 	URL     string
 	QRCode  string
 	TradeNo string
+	// Money 网关要求用户实际支付的金额（可能经网关尾数调整，如 6.00→6.01）。
+	// 0 表示网关未返回金额，沿用订单原金额。
+	Money float64
 }
 
 // GatewayNotify 网关异步回调解析结果。
@@ -179,11 +182,15 @@ func (g *EpayGateway) createPaymentMapi(form url.Values) (*GatewayPayment, error
 		QRCode   string `json:"qrcode"`
 		URL      string `json:"url"`
 		Redirect string `json:"redirect"`
+		// qiu-pay 等免签约网关会做金额尾数调整（同金额并发订单 6.00→6.01），
+		// mapi 返回调整后的 money（字符串或数字，两种平台都有）。
+		Money    any    `json:"money"`
 		Data     *struct {
 			TradeNo  string `json:"trade_no"`
 			QRCode   string `json:"qrcode"`
 			URL      string `json:"url"`
 			Redirect string `json:"redirect"`
+			Money    any    `json:"money"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rawBody, &result); err != nil {
@@ -214,11 +221,36 @@ func (g *EpayGateway) createPaymentMapi(form url.Values) (*GatewayPayment, error
 	if qrCode == "" && result.Data != nil {
 		qrCode = result.Data.QRCode
 	}
+	money := epayMoneyToFloat(result.Money)
+	if money == 0 && result.Data != nil {
+		money = epayMoneyToFloat(result.Data.Money)
+	}
 	success := result.Code == 1 || (tradeNo != "" && (payURL != "" || qrCode != ""))
 	if !success {
 		return nil, fmt.Errorf("epay create payment failed: code=%d msg=%s", result.Code, msg)
 	}
-	return &GatewayPayment{URL: payURL, QRCode: qrCode, TradeNo: tradeNo}, nil
+	return &GatewayPayment{URL: payURL, QRCode: qrCode, TradeNo: tradeNo, Money: money}, nil
+}
+
+// epayMoneyToFloat 兼容 money 字段的字符串（qiu-pay）与数字两种 JSON 形态。
+func epayMoneyToFloat(v any) float64 {
+	switch x := v.(type) {
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		if err != nil {
+			return 0
+		}
+		return f
+	case float64:
+		return x
+	case json.Number:
+		f, err := x.Float64()
+		if err != nil {
+			return 0
+		}
+		return f
+	}
+	return 0
 }
 
 // epayNonJSONError 标记“mapi 返回了非 JSON 内容”，可触发 submit 回退。
