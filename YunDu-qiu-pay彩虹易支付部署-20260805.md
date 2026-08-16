@@ -138,3 +138,46 @@ qiu-pay 的支付宝凭证其实是有效的（credential_status=verified，余�
 2. 用渠道"编辑"核对配置完整性标记（已配置=密钥组齐全）；
 3. 支付宝/微信卡片 → 切换渠道下拉 → 选中新渠道即生效；
 4. 旧渠道保留在池中可随时切回，确认废弃后再删除。
+
+## 十二、ifz V2 渠道接入存档（2026-08-17）
+
+### 当前状态：等平台域名审核
+
+- **已完成**：域名 `7.tiktokplay.na.am` 已提交 pay.ifz.cc 商户后台授权支付域名，**平台审核中**。
+- **实测留档**：审核通过前下单仍被拦（`该域名不可发起支付，原因：域名没过白`）；
+  RSA 签名本身已被平台接受（商户信息查询 code=0，下单到达业务校验层）。
+
+### 渠道完整信息（密钥原件在本机 `v2版易支付.txt`，已 .gitignore 勿入库）
+
+| 项 | 值 |
+|---|---|
+| 渠道ID | ifz |
+| 协议 | v2 / RSA（SHA256WithRSA） |
+| 接口地址 | https://pay.ifz.cc |
+| 商户ID (pid) | 1034 |
+| V1 MD5 密钥 | YllPdx3UrzT0YLPwu73r7UXd3DWZR3p7（txt 内"V1版本"，当前未用） |
+| 商户私钥 | txt 内标"商户公钥"的 MIIEvQ… 实为 PKCS#8 私钥（平台生成时的标注误导） |
+| 平台公钥 | txt 内 MIIBIjAN…（X.509，用于响应/回调验签） |
+| 下单类型 | alipay |
+| notify_url | https://7.tiktokplay.na.am/api/v1/payment/notify/alipay |
+| return_url | https://7.tiktokplay.na.am/dashboard/orders |
+| 生产存储 | system_settings: payment/fiat_channels → channels[id=ifz] |
+
+### 审核通过后的启用步骤（3 步，零代码）
+
+1. 复测下单：`cd apps/identity-service && source <( creds env ) && go test ./internal/service/ -run TestEpayV2LiveCreate -v`
+   （ creds 取 v2版易支付.txt 的 EPAYV2_GATEWAY/PID/PRIV/PUB 四个环境变量），返回 `live create OK: trade_no=...` 即通过；
+2. 管理面板 → 支付配置 → 支付宝卡片 → 切换渠道 → 选 **ifz V2 易支付**；
+3. 用户面板实测一笔小额订单（≥1元，平台最低限额），确认自动到账激活后，qiu-pay 渠道可退役（保留在池中随时切回）。
+
+### 渠道池速查（换任何第三方易支付的 SOP）
+
+```
+管理面板 → 支付配置 → 法币支付渠道：
+① 添加渠道（v1=彩虹MD5 / v2=RSA，按平台文档填 接口地址/pid/密钥组）
+② 状态显示"已配置"= 密钥组齐全
+③ 支付宝/微信卡片 → 切换渠道 → 选中新渠道（立即生效，无需重启）
+④ 旧渠道保留可切回；换绑前确保无在途法币订单
+```
+
+V2 平台特殊注意：支付域名需在平台商户后台授权（域名白名单）；订单最低金额以平台为准（ifz 为 1 元）。
