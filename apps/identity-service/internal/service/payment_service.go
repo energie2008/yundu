@@ -712,8 +712,15 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID uuid.UUID, req 
 	}
 	if model.IsFiatPayment(order.PaymentMethod) {
 		if err := s.createEpayPayment(ctx, order); err != nil {
-			// 网关不可用时取消订单，避免产生无支付入口的死单
-			_, _ = s.paymentOrderRepo.UpdateStatus(ctx, order.ID, model.PaymentStatusCanceled, nil, nil, nil)
+			// 网关不可用时取消订单，避免产生无支付入口的死单。
+			// 取消必须用独立后台 context：epay httpClient 15s 超时期间，请求 ctx 可能已被
+			// api-gateway 上游超时或客户端断开而取消，复用会让取消更新静默失败，
+			// 订单残留 pending（2026-08-16 生产事故：qiu-pay 挂死产生 5 笔死单）。
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if _, uerr := s.paymentOrderRepo.UpdateStatus(cancelCtx, order.ID, model.PaymentStatusCanceled, nil, nil, nil); uerr != nil {
+				s.log.Warn("cancel order after epay gateway failure", "order_no", order.OrderNo, "error", uerr.Error())
+			}
+			cancel()
 			return nil, err
 		}
 	} else {
