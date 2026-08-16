@@ -13,11 +13,12 @@ import (
 	"time"
 
 	"github.com/airport-panel/node-agent/internal/client"
+	"github.com/airport-panel/node-agent/internal/sysmetrics"
 	"github.com/airport-panel/node-agent/internal/upgrader"
 	pb "github.com/airport-panel/proto/agent/v1"
 )
 
-func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus, runtimeVersion string, pid int, onlineUsers int) (*pb.HeartbeatAck, error) {
+func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus, runtimeVersion string, pid int, onlineUsers int, load *pb.ServerLoad) (*pb.HeartbeatAck, error) {
 	configVersionNum := int64(0)
 	if currentVersion != "" {
 		if v, err := strconv.ParseInt(currentVersion, 10, 64); err == nil {
@@ -55,7 +56,12 @@ func (a *Agent) sendHeartbeat(ctx context.Context, currentVersion, runtimeStatus
 		chanState = pb.ChannelState_CHANNEL_STATE_UNKNOWN
 	}
 
-	load := collectServerLoad()
+	// 系统指标由 sendHeartbeatOnce 统一采样一次后传入：
+	// CPU/网络速率基于两次采样差值计算，同一次心跳内重复采样
+	// 会导致差值窗口≈0、速率恒为 0，因此必须避免双重采集。
+	if load == nil {
+		load = collectServerLoad()
+	}
 
 	// P2-I: 通过 Heartbeat.nodes 承载服务器级聚合在线人数。
 	// proto 的 ChannelHealth 没有 online_users 字段，而 NodeStatus.online_users 已存在，
@@ -297,6 +303,7 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 			"network_out_kbps": httpLoad.NetworkOutKbps,
 			"uptime_seconds":   httpLoad.UptimeSeconds,
 			"load_1":           httpLoad.Load_1,
+			"tcp_connections":  httpLoad.TcpConnections,
 			"goroutines":       httpLoad.Goroutines,
 		},
 	}
@@ -304,7 +311,7 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 	var hbResp *pb.HeartbeatAck
 	var extraActions []pb.HeartbeatAction
 	if a.channelsAvailable {
-		resp, err := a.sendHeartbeat(ctx, a.currentVersion, runtimeStatusStr, runtimeVersionStr, pid, onlineUsers)
+		resp, err := a.sendHeartbeat(ctx, a.currentVersion, runtimeStatusStr, runtimeVersionStr, pid, onlineUsers, httpLoad)
 		if err != nil {
 			a.logger.Warn("protobuf heartbeat failed, using HTTP fallback", "error", err)
 			fallbackResp, fbErr := a.httpClient.Heartbeat(ctx, hbReq)
@@ -344,10 +351,16 @@ func (a *Agent) sendHeartbeatOnce(ctx context.Context) {
 	}
 }
 
-// collectServerLoad 收集服务器系统负载指标（CPU/内存/磁盘/网络/uptime/loadavg/goroutines）
-// 纯标准库实现，读取 /proc 文件系统，不依赖外部包
+// collectServerLoad 收集服务器系统负载指标（CPU/内存/磁盘/网络/uptime/loadavg/TCP连接/goroutines）
+// 纯标准库实现，读取 /proc 文件系统，不依赖外部包。
+//
+// CPU 使用率与网络速率参考 Komari agent 的差值算法（komari-monitor/komari-agent）：
+// CPU 用 /proc/stat 两次采样差值计算真实使用率（gopsutil cpu.Percent 同思路），
+// 网络速率用 /proc/net/dev 网卡累计字节差值 / 采样间隔（Komari NetworkSpeed 同思路）。
+// 采样基线由 sysmetrics.Sampler 进程级状态保持，首次采样无基线时 CPU 回退 loadavg 近似、网络速率为 0。
 func collectServerLoad() *pb.ServerLoad {
 	load := &pb.ServerLoad{}
+	now := time.Now()
 
 	// 读取 /proc/loadavg 获取系统负载
 	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
@@ -360,7 +373,7 @@ func collectServerLoad() *pb.ServerLoad {
 			load.Load_1 = load1
 			load.Load_5 = load5
 			load.Load_15 = load15
-			// 近似 CPU 使用率: load1 / CPU 核心数 * 100
+			// 近似 CPU 使用率（仅首次采样无差值基线时的回退值）: load1 / CPU 核心数 * 100
 			numCPU := float32(runtime.NumCPU())
 			if numCPU > 0 {
 				cpuPct := load1 * 100 / numCPU
@@ -369,6 +382,13 @@ func collectServerLoad() *pb.ServerLoad {
 				}
 				load.CpuPercent = cpuPct
 			}
+		}
+	}
+
+	// 真实 CPU 使用率：/proc/stat 聚合计数差值（(total-idle)/total）
+	if total, idle, ok := sysmetrics.ReadCPUSamples(); ok {
+		if pct, ok := serverLoadSampler.CPUPercentFromDelta(total, idle, now); ok {
+			load.CpuPercent = pct
 		}
 	}
 
@@ -406,6 +426,13 @@ func collectServerLoad() *pb.ServerLoad {
 		}
 	}
 
+	// 网络收发速率（KB/s）：/proc/net/dev 物理网卡累计字节差值 / 采样间隔
+	if rx, tx, ok := sysmetrics.ReadNetDevTotals(); ok {
+		inKBps, outKBps := serverLoadSampler.NetRatesFromDelta(rx, tx, now)
+		load.NetworkInKbps = inKBps
+		load.NetworkOutKbps = outKBps
+	}
+
 	// uptime（秒）
 	if data, err := os.ReadFile("/proc/uptime"); err == nil {
 		var uptime float64
@@ -413,8 +440,16 @@ func collectServerLoad() *pb.ServerLoad {
 		load.UptimeSeconds = int64(uptime)
 	}
 
+	// TCP 连接数（ESTABLISHED）
+	load.TcpConnections = sysmetrics.ReadTCPEstablished()
+
 	// goroutines
 	load.Goroutines = int64(runtime.NumGoroutine())
 
 	return load
 }
+
+// serverLoadSampler 进程级采样基线，供 collectServerLoad 差值计算使用。
+var serverLoadSampler sysmetrics.Sampler
+
+// readCPUSamples 等采集函数与差值采样器已抽至 internal/sysmetrics 包（跨平台可单测）。
