@@ -37,7 +37,7 @@ jobs:
         run: ( cd packages/subscription && go test ./... )
 
       - name: Test node-agent core packages
-        run: ( cd apps/node-agent && go test ./internal/hotdiff/... ./internal/pipeline/... ./internal/validator/... ./internal/warp/... )
+        run: ( cd apps/node-agent && go test ./internal/hotdiff/... ./internal/pipeline/... ./internal/validator/... ./internal/warp/... ./internal/sysmetrics/... )
 
       - name: Check doc file:line references
         run: bash scripts/check_doc_refs.sh

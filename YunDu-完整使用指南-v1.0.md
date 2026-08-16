@@ -568,7 +568,7 @@ node-agent --standalone --standalone-config=/etc/yundu/standalone.json
 
 ### 5.3 配置下发与版本同步
 
-**面板侧决策**（`agent_handler.go:184-199`）:
+**面板侧决策**（`apps/node-service/internal/handler/agent_handler.go:184-199`）:
 1. Agent 心跳上报 `config_version_current`（当前已应用版本号）
 2. 面板对比 `currentVersion != targetVersion.VersionNo`
 3. 不相等 → 心跳响应携带 `action=RELOAD`

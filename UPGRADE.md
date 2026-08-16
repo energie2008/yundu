@@ -245,9 +245,9 @@ go build -tags "with_utls,with_wireguard,with_gvisor,with_quic,with_grpc,with_cl
 | 可能的变更 | 涉及文件 | 修复方式 |
 |-----------|---------|---------|
 | `box.Options` 结构体字段变化 | `native_singbox.go` | 对照新版本调整字段 |
-| `box.Box.Router().AppendTracker()` 签名变化 | `native_singbox.go:159,188` | 调整方法调用 |
-| `option.Options.UnmarshalJSONContext()` 签名变化 | `native_singbox.go:125` | 调整方法调用 |
-| `include.Context()` 返回值类型变化 | `native_singbox.go:121` | 调整类型断言 |
+| `box.Box.Router().AppendTracker()` 签名变化 | `apps/node-agent/internal/runtime/native_singbox.go:159,188` | 调整方法调用 |
+| `option.Options.UnmarshalJSONContext()` 签名变化 | `apps/node-agent/internal/runtime/native_singbox.go:125` | 调整方法调用 |
+| `include.Context()` 返回值类型变化 | `apps/node-agent/internal/runtime/native_singbox.go:121` | 调整类型断言 |
 
 ### 4.4 灰度部署
 
