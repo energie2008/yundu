@@ -426,7 +426,7 @@ func TestEpayV2LiveCreate(t *testing.T) {
 		SignType:           "RSA",
 		MerchantPrivateKey: privB64,
 		PlatformPublicKey:  pubB64,
-		NotifyURL:          "https://6.tiktokplay.na.am/api/v1/payment/notify/alipay",
+		NotifyURL:          "https://7.tiktokplay.na.am/api/v1/payment/notify/alipay",
 	}, "alipay")
 	order := &model.PaymentOrder{
 		OrderNo:     "TESTV2" + strconv.FormatInt(time.Now().UnixNano()%1000000, 10),

@@ -129,7 +129,7 @@ qiu-pay 的支付宝凭证其实是有效的（credential_status=verified，余�
 - 旧 alipay/wechat epay 配置自动迁移为默认渠道（未配置渠道池时内存合成）。
 
 **ifz V2 渠道（商户 1034）**：已添加至渠道池（未绑定，当前仍走 qiu-pay）。RSA 签名/商户信息
-查询/下单签名均已实测通过；**待运营在 pay.ifz.cc 商户后台把支付域名 `tiktokplay.na.am` 加入
+查询/下单签名均已实测通过；**待运营在 pay.ifz.cc 商户后台把支付域名 `7.tiktokplay.na.am`（用户面板域名）加入
 白名单**（平台报"域名没过白"），之后在支付配置页把支付宝绑定切到 ifz 即可启用。
 配置与密钥存于本机 `v2版易支付.txt`（已加 .gitignore，勿入库）。
 
