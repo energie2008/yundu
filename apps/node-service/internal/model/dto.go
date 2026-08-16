@@ -271,7 +271,11 @@ func NewServerDetailResponse(s *Server, agentToken, panelURL string) ServerDetai
 	return ServerDetailResponse{
 		ServerResponse: NewServerResponse(s),
 		AgentToken:     agentToken,
-		InstallCmd:     fmt.Sprintf("curl -sSL %s/install-node-agent.sh | bash -s -- --panel-url=%s --server-code=%s --agent-token=%s", panelURL, panelURL, s.Code, agentToken),
+		// 安装命令指向 GitHub 仓库的一键脚本（面板自身不提供 /install-node-agent.sh）。
+		// --runtime=sing-box 必须显式携带：P2 内核翻转后 sing-box 是主内核，
+		// agent 以 xray 为主内核启动会导致 sing-box 节点配置无法加载。
+		// server 身份由 --token 关联（Bootstrap 按注册 token 定位 server），无需 server code。
+		InstallCmd: fmt.Sprintf("curl -fsSL https://github.com/energie2008/yundu/raw/main/install.sh | bash -s -- agent --token=%s --endpoint=%s --runtime=sing-box", agentToken, panelURL),
 	}
 }
 
