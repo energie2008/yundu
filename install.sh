@@ -4,6 +4,7 @@
 # 用法:
 #   1. 安装 node-agent（节点端，部署在 VPS 节点上）:
 #      curl -fsSL https://github.com/energie2008/yundu/raw/main/install.sh | bash -s -- agent --token=AGENT_TOKEN --endpoint=https://panel.example.com
+#      （P2 内核翻转后默认 --runtime=sing-box，如需 xray 主内核才需显式 --runtime=xray）
 #
 #   2. 安装面板（控制端，部署在面板服务器上）:
 #      curl -fsSL https://github.com/energie2008/yundu/raw/main/install.sh | bash -s -- panel
@@ -235,7 +236,10 @@ setup_direct_node_firewall() {
 cmd_agent() {
     local token=""
     local endpoint=""
-    local runtime="xray"
+    # P2 内核翻转：sing-box 为主内核（承载 AnyTLS/VLESS WS/Hysteria2/TUIC，
+    # xray 仅作 XHTTP/REALITY 辅内核内嵌）。默认值曾是 xray（旧遗留），
+    # 以 xray 为主内核启动会导致 sing-box 节点配置无法加载。
+    local runtime="sing-box"
     local version="latest"
     local disable_grpc="0"
 
