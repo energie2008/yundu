@@ -1068,9 +1068,15 @@ func (s *PaymentService) createEpayPayment(ctx context.Context, order *model.Pay
 	order.GatewayTradeNo = pay.TradeNo
 	order.PaymentURI = pay.URL
 	order.PayAddress = pay.QRCode
-	// 免签约网关（qiu-pay）对同金额并发订单做尾数调整（6.00→6.01）用于余额轮询精确匹配，
+	// 免输金额 scheme 优先：qiu-pay 账单检测模式下二维码内容用 alipays:// scheme，
+	// 支付宝扫码直达转账页、金额自动预填（含扰动尾数），杜绝手输金额错误导致的卡单。
+	// 静态收款码（pay.QRCode）作为降级：scheme 为空或支付宝 APP 不支持时仍可手输付款。
+	if pay.AlipayScheme != "" {
+		order.PayAddress = pay.AlipayScheme
+	}
+	// 免签约网关（qiu-pay）对同金额并发订单做尾数调整（6.00→6.01）用于账单检测精确匹配，
 	// 用户必须按调整后金额支付才能自动确认。以网关返回金额为准更新实付金额，
-	// 否则前端展示原金额、用户按原金额付款后余额检测永远匹配不上（付款成功订单卡死）。
+	// 否则前端展示原金额、用户按原金额付款后账单检测永远匹配不上（付款成功订单卡死）。
 	if pay.Money > 0 && math.Abs(pay.Money-order.FinalAmount) > 0.0001 {
 		adjusted := math.Round(pay.Money*100) / 100
 		if err := s.paymentOrderRepo.UpdateFinalAmount(ctx, order.ID, adjusted); err != nil {
@@ -1079,7 +1085,7 @@ func (s *PaymentService) createEpayPayment(ctx context.Context, order *model.Pay
 		order.FinalAmount = adjusted
 		s.log.Info("epay adjusted pay amount", "order_no", order.OrderNo, "final_amount", adjusted)
 	}
-	if err := s.paymentOrderRepo.UpdateGatewayInfo(ctx, order.ID, order.Gateway, pay.TradeNo, pay.URL, pay.QRCode); err != nil {
+	if err := s.paymentOrderRepo.UpdateGatewayInfo(ctx, order.ID, order.Gateway, pay.TradeNo, order.PaymentURI, order.PayAddress); err != nil {
 		return fmt.Errorf("save epay gateway info: %w", err)
 	}
 	return nil

@@ -191,6 +191,8 @@ export default function OrderDetail() {
   // 收款码：若是图片文件 URL（如平台上传的收款码图片）则直接显示图片；
   // 否则（如 qr.alipay.com 收款码链接）应渲染为二维码，用支付宝/微信扫一扫支付。
   const payAddrIsImage = typeof order.pay_address === 'string' && /\.(png|jpe?g|gif|webp|bmp)(\?|#|$)/i.test(order.pay_address)
+  // qiu-pay 免输金额模式：pay_address 为 alipays:// scheme，扫码直达转账页并自动预填金额
+  const payAddrIsScheme = typeof order.pay_address === 'string' && order.pay_address.startsWith('alipays://')
   const methodIconKey = paymentMethod || (isTRC20 ? 'usdt_trc20' : isBEP20 ? 'usdt_bep20' : isERC20 ? 'usdt_erc20' : 'usdt_trc20')
 
   return (
@@ -378,11 +380,16 @@ export default function OrderDetail() {
           </div>
 
           {order.pay_address && (
-            <div className="rounded-xl p-4 flex justify-center mb-5" style={{ background: 'var(--muted)' }}>
+            <div className="rounded-xl p-4 flex flex-col items-center gap-2 mb-1" style={{ background: 'var(--muted)' }}>
               {payAddrIsImage ? (
                 <img src={order.pay_address} alt="收款二维码" className="rounded-lg" style={{ width: 200, height: 200, objectFit: 'contain' }} />
               ) : (
                 <QRCode value={order.pay_address} size={180} logo={order.payment_method === 'wechat' ? 'wechat' : 'alipay'} />
+              )}
+              {payAddrIsScheme && (
+                <p className="text-xs font-medium" style={{ color: 'var(--primary)' }}>
+                  金额已自动填入，请核对为 ¥{order.final_amount?.toFixed(2) ?? order.amount_usdt?.toFixed(2)} 后再付款
+                </p>
               )}
             </div>
           )}
@@ -424,7 +431,11 @@ export default function OrderDetail() {
           )}
 
           <p className="text-xs mt-3 text-center" style={{ color: 'var(--muted-foreground)' }}>
-            请打开支付宝/微信扫一扫，扫描上方二维码，并按上方「应付金额」<strong>精确到分</strong>输入付款金额（如 ¥6.01 请勿付成 ¥6.00），金额不符将无法自动确认到账；支付成功后系统将自动确认并激活您的订阅。
+            {payAddrIsScheme ? (
+              <>请使用<strong>支付宝 APP</strong> 扫一扫扫描上方二维码，将自动打开转账页面并已填好金额，确认付款即可；支付成功后系统将自动确认并激活您的订阅。若扫码后无法打开，请点击上方「去支付」使用备用收款码。</>
+            ) : (
+              <>请打开支付宝/微信扫一扫，扫描上方二维码，并按上方「应付金额」<strong>精确到分</strong>输入付款金额（如 ¥6.01 请勿付成 ¥6.00），金额不符将无法自动确认到账；支付成功后系统将自动确认并激活您的订阅。</>
+            )}
           </p>
 
           <button

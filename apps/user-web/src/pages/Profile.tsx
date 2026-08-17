@@ -6,7 +6,8 @@ import { Mail, Calendar, LogOut, Key, Loader2, Check, Shield, Eye, EyeOff, User,
 import { Button, Input, Tabs, TabsList, TabsTrigger, TabsContent, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, Select } from '@airport/ui'
 import { useToast } from '@/lib/toast'
 import { api } from '@/lib/api'
-import { EP, UserDetailResponse, SubscriptionTokenResponse, NotificationPreferences, WithdrawResponse, adaptUser, adaptSubscriptionToken, formatDateTime, formatCNY, formatUSDT } from '@/lib/endpoints'
+import { EP, UserDetailResponse, SubscriptionTokenResponse, NotificationPreferences, WithdrawResponse, adaptUser, adaptSubscriptionToken, formatDateTime, formatCNY } from '@/lib/endpoints'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/lib/auth'
 
 const passwordSchema = z
@@ -81,6 +82,7 @@ function getWithdrawMethodLabel(method: string): string {
 }
 
 export default function Profile() {
+  const navigate = useNavigate()
   const { user, logout } = useAuthStore()
   const { toast } = useToast()
   const queryClient = useQueryClient()
@@ -91,12 +93,6 @@ export default function Profile() {
   const [activeTab, setActiveTab] = useState('profile')
   const [showResetDialog, setShowResetDialog] = useState(false)
   const [resetting, setResetting] = useState(false)
-  const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false)
-  const [withdrawMethod, setWithdrawMethod] = useState('alipay')
-  const [withdrawAmount, setWithdrawAmount] = useState('')
-  const [withdrawAccount, setWithdrawAccount] = useState('')
-  const [withdrawRealName, setWithdrawRealName] = useState('')
-  const [withdrawing, setWithdrawing] = useState(false)
   const [preferencesLoaded, setPreferencesLoaded] = useState(false)
   const [savingPrefs, setSavingPrefs] = useState(false)
   const [notifyExpiry, setNotifyExpiry] = useState(true)
@@ -234,44 +230,6 @@ export default function Profile() {
     }
   }
 
-  const handleWithdraw = async () => {
-    const amount = parseFloat(withdrawAmount)
-    if (!withdrawAccount.trim()) {
-      toast({ title: '请填写收款账户', variant: 'destructive' })
-      return
-    }
-    if (withdrawMethod === 'alipay' && !withdrawRealName.trim()) {
-      toast({ title: '请填写真实姓名', variant: 'destructive' })
-      return
-    }
-    if (isNaN(amount) || amount <= 0) {
-      toast({ title: '请输入有效金额', variant: 'destructive' })
-      return
-    }
-
-    setWithdrawing(true)
-    try {
-      await api.post(EP.COMMISSION_WITHDRAW, {
-        method: withdrawMethod,
-        amount,
-        account: withdrawAccount.trim(),
-        real_name: withdrawMethod === 'alipay' ? withdrawRealName.trim() : undefined,
-      })
-      toast({ title: '提现申请已提交', description: '请等待审核', variant: 'success' })
-      setWithdrawDialogOpen(false)
-      setWithdrawAmount('')
-      setWithdrawAccount('')
-      setWithdrawRealName('')
-      queryClient.invalidateQueries({ queryKey: ['commission-withdrawals'] })
-      queryClient.invalidateQueries({ queryKey: ['profile'] })
-      queryClient.invalidateQueries({ queryKey: ['me'] })
-    } catch (e: any) {
-      toast({ title: '提现失败', description: e.message, variant: 'destructive' })
-    } finally {
-      setWithdrawing(false)
-    }
-  }
-
   const displayUser = profile || user
   const balance = displayUser?.balance ?? 0
   const commissionBalance = displayUser?.commission_balance ?? 0
@@ -335,7 +293,7 @@ export default function Profile() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
             <InfoCard icon={Wallet} label="账户余额" value={formatCNY(balance)} />
-            <InfoCard icon={Banknote} label="佣金余额" value={`${formatUSDT(commissionBalance)} USDT`} valueColor="var(--success)" />
+            <InfoCard icon={Banknote} label="佣金余额" value={formatCNY(commissionBalance)} valueColor="var(--success)" />
           </div>
 
           <div className="xboard-card p-5 mb-5">
@@ -390,17 +348,16 @@ export default function Profile() {
               <Button
                 className="h-9 px-4 text-white border-0 text-sm shadow-sm"
                 style={{ background: 'var(--primary)' }}
-                onClick={() => setWithdrawDialogOpen(true)}
-                disabled={commissionBalance <= 0}
+                onClick={() => navigate('/dashboard/invite')}
                 onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
                 onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
               >
                 <Wallet className="w-4 h-4 mr-1.5" />
-                申请提现
+                前往邀请返利页提现
               </Button>
             </div>
             <p className="text-sm mb-2" style={{ color: 'var(--muted-foreground)' }}>
-              邀请好友获得的佣金可在此提现，支持支付宝和USDT-TRC20。
+              邀请好友获得的佣金（人民币）请前往邀请返利页申请提现。
             </p>
 
             {withdrawals.length > 0 && (
@@ -416,7 +373,7 @@ export default function Profile() {
                       <div key={w.id} className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: 'var(--muted)' }}>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{formatUSDT(w.amount)} USDT</span>
+                            <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{formatCNY(w.amount)}</span>
                             <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--card)', color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}>
                               {getWithdrawMethodLabel(w.method)}
                             </span>
@@ -643,83 +600,6 @@ export default function Profile() {
               ) : (
                 '确认重置'
               )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={withdrawDialogOpen} onOpenChange={setWithdrawDialogOpen}>
-        <DialogContent className="xboard-card w-[calc(100vw-2rem)] max-w-md" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-          <DialogHeader>
-            <DialogTitle style={{ color: 'var(--foreground)' }}>申请佣金提现</DialogTitle>
-            <DialogDescription style={{ color: 'var(--muted-foreground)' }}>
-              当前可提现余额：{formatUSDT(commissionBalance)} USDT
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <div>
-              <label className="text-sm mb-1.5 block" style={{ color: 'var(--muted-foreground)' }}>提现方式</label>
-              <Select
-                value={withdrawMethod}
-                onChange={(e) => setWithdrawMethod(e.target.value)}
-                style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-              >
-                <option value="alipay">支付宝</option>
-                <option value="usdt_trc20">USDT-TRC20</option>
-              </Select>
-            </div>
-            <div>
-              <label className="text-sm mb-1.5 block" style={{ color: 'var(--muted-foreground)' }}>提现金额 (USDT)</label>
-              <Input
-                type="number"
-                placeholder="请输入金额"
-                value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-                style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
-              />
-            </div>
-            <div>
-              <label className="text-sm mb-1.5 block" style={{ color: 'var(--muted-foreground)' }}>
-                {withdrawMethod === 'alipay' ? '支付宝账号' : 'USDT钱包地址 (TRC20)'}
-              </label>
-              <Input
-                placeholder={withdrawMethod === 'alipay' ? '请输入支付宝账号' : '请输入TRC20钱包地址'}
-                value={withdrawAccount}
-                onChange={(e) => setWithdrawAccount(e.target.value)}
-                style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
-              />
-            </div>
-            {withdrawMethod === 'alipay' && (
-              <div>
-                <label className="text-sm mb-1.5 block" style={{ color: 'var(--muted-foreground)' }}>真实姓名</label>
-                <Input
-                  placeholder="请输入支付宝实名"
-                  value={withdrawRealName}
-                  onChange={(e) => setWithdrawRealName(e.target.value)}
-                  style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
-                />
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              className="h-10"
-              style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)', backgroundColor: 'transparent' }}
-              onClick={() => setWithdrawDialogOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              className="h-10 text-white border-0 shadow-sm"
-              style={{ background: 'var(--primary)' }}
-              onClick={handleWithdraw}
-              disabled={withdrawing}
-              onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
-              onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-            >
-              {withdrawing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-              提交申请
             </Button>
           </DialogFooter>
         </DialogContent>

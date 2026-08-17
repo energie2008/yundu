@@ -181,3 +181,57 @@ qiu-pay 的支付宝凭证其实是有效的（credential_status=verified，余�
 ```
 
 V2 平台特殊注意：支付域名需在平台商户后台授权（域名白名单）；订单最低金额以平台为准（ifz 为 1 元）。
+
+## 十三、自建彩虹易支付 200 平台：完成状态与待办（2026-08-17）
+
+> 平台：`https://200.tiktokplay.na.am`（lopinx/epay，彩虹 v3.0.7 开源二开版）
+> 部署：VPS190 宝塔 nginx(8445) + PHP-FPM 7.4 + MySQL 5.7（库 epay，表前缀 pay_）
+> 定位：聚合场景③——YunDu 只绑一个渠道，四方轮换在它后台做；安装实录见 `0817易支付200安装.txt`，凭据见 `200易支付凭据.txt`（均已 .gitignore 勿入库）
+
+### 已完成
+
+**平台安装（阶段0-2）**
+- 磁盘清理（91%→80%，8.1G 可用）；CF 200 域名橙云 + LE 证书（DNS-01，至 2026-11-14）
+- **443/8445 分流坑（重要）**：VPS190 的 443 被 nginx stream 层 ssl_preread 按 SNI 分流占用，
+  tiktokplay 系域名 TLS 流量实际进 HTTP 层 **8445**。新站点 vhost 必须 `listen 8445 ssl http2` +
+  `port_in_redirect off`（否则目录 301 带 :8445 端口）。曾因误写 listen 443 导致"200 打开的是 100 的内容"
+- 安装向导完成（128 条 SQL 全成功），install 目录已删（404）；默认 admin/123456 已改强随机
+- MySQL 独立用户 epay@localhost（密码存 /root/.epay_db_creds 与凭据文件）
+
+**商户与对接（阶段3-4）**
+- 商户 uid=1000（yundu），登录邮箱 energie2008@gmail.com；V1 MD5 密钥已实测：
+  mapi.php 下单（code=1 + trade_no + **payurl** 收银台链接）、api.php 查单均通过
+- 支付域名白名单：7.tiktokplay.na.am、6.tiktokplay.na.am（pay_domain_forbid=1 强制开启，复测下单不受影响）
+- **YunDu 侧代码适配（已部署 identity-service，备份 .bak.epay200.*）**：该 fork mapi 必填
+  `clientip`（参与 MD5 签名，ctx 注入用户真实 IP）+ 成功响应支付链接字段是 `payurl`（非标准 url/redirect）
+- 渠道池注册 **epay200**（协议 v1 / https://200.tiktokplay.na.am / pid 1000 / 显式 notify=7域名），
+  **未切绑定**——当前 alipay/wechat 仍绑 ifz，等上游通道就绪后一键切换
+
+**文档与防护（阶段5）**
+- 开发文档修复：fork 的 doc.html 及目录树静态页缺失（全 404），nginx 加映射到 `?doc=` 路由，
+  18 个链接全通；`/doc_old.html`（V1 协议完整文档）建根入口接出
+- 看门狗 `/opt/yundu/scripts/epay200-watchdog.sh`（每分钟探活，失败重启 php-fpm-74，5min 冷却）
+- 平台 cron 每分钟 `/cron.php?key=755350`（SNI 本机回环，订单过期/结算依赖）
+
+**ifz 对标功能开启（商户面板已实测可用）**
+对照 pay.ifz.cc 商户后台逐模块盘点后开启（配置在 pay_config，注意**直改后必须 `DELETE FROM pay_cache`**）：
+- 授权域名（菜单+强制白名单）、邀请返现（1%，上限=订单手续费）、购买会员（group_buy）
+- 保证金（菜单开，强制额度暂 0——定额度时需给商户 1000 豁免或充值，否则会挡 YunDu 下单）
+- 申请提现（settle_open=3 自动+手动，D+1，最低 30 元）、聚合收款 onecode、余额充值
+- 注册/开户费 5 元（reg_pay_uid=1000 收到自己商户）原本已配
+
+### 未完成（按优先级）
+
+1. **上游支付通道（商用前置，最关键）**：平台无资金通道，需在 /admin/ 接入支付宝当面付官方
+   （需资质）或监控版个人码（vmq/alipaycode，多码轮询）等；配好后 YunDu 支付宝卡片切换 epay200 即启用
+2. **交易投诉模块**：ifz 有而 200 缺（菜单模板在、user/complain.php 页面被开源版剥离）；
+   依赖微信支付投诉 API + 支付宝 RiskGO，无官方通道无数据源——接官方渠道时一并补页面
+3. **购买会员上架组**：页面已开但用户组列表空，需后台"用户组管理"建 VIP 组（定价+费率，运营决策）
+4. **商户进件**：代码在（后台"开启商户后台进件功能"），需微信服务商/支付宝 ISV 资质
+5. 保证金强制额度决策；实名认证（需阿里云密钥）；TOTP/后台入口改名（后台已是强随机密码）
+6. YunDu 切换绑定 epay200 + 实测一笔（等 1 完成后）
+
+### 商用合规提醒（再次明确）
+
+用个人收款码替他人收款抽成 = 四方支付/二清，无支付牌照属非法经营，投诉/冻结风险最终落在
+平台收款账户上；保证金+D+1+手动结算是三道闸。合法路径：资质 + 服务商进件直清模式。

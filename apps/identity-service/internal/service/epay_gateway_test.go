@@ -99,6 +99,35 @@ func TestEpayCreatePayment(t *testing.T) {
 	}
 }
 
+func TestEpayCreatePaymentAlipayScheme(t *testing.T) {
+	scheme := "alipays://platformapi/startapp?appId=20000028&bizData=%7B%22u%22%3A%222088001234567890%22%2C%22a%22%3A%226.01%22%7D"
+	server := newEpayMock(t,
+		`{"code":1,"msg":"ok","trade_no":"T2","qrcode":"https://qr.alipay.com/static","money":"6.01","alipay_scheme":"`+scheme+`"}`,
+		`{}`,
+	)
+	defer server.Close()
+	gw := testEpayGateway(server.URL, "alipay")
+
+	order := &model.PaymentOrder{OrderNo: "P202608170001", PlanName: "轻量-66G-月付", FinalAmount: 6}
+	pay, err := gw.CreatePayment(context.Background(), order)
+	if err != nil {
+		t.Fatalf("create payment: %v", err)
+	}
+	if pay.AlipayScheme != scheme {
+		t.Fatalf("alipay scheme not parsed: %+v", pay)
+	}
+	if pay.Money != 6.01 {
+		t.Fatalf("adjusted money not parsed: %v", pay.Money)
+	}
+	// 免输金额模式下 mapi 无跳转 URL，应兜底构造 qiu-pay 自有收银台链接
+	if pay.URL != server.URL+"/v1/pay/T2" {
+		t.Fatalf("expected cashier fallback URL, got %q", pay.URL)
+	}
+	if pay.QRCode != "https://qr.alipay.com/static" {
+		t.Fatalf("static qrcode lost: %+v", pay)
+	}
+}
+
 func TestEpayQueryOrderPaid(t *testing.T) {
 	server := newEpayMock(t, `{}`,
 		`{"code":1,"msg":"ok","data":{"trade_no":"T1","out_trade_no":"P202608020001","status":1}}`,

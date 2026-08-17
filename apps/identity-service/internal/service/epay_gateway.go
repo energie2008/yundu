@@ -69,6 +69,9 @@ type GatewayPayment struct {
 	// Money 网关要求用户实际支付的金额（可能经网关尾数调整，如 6.00→6.01）。
 	// 0 表示网关未返回金额，沿用订单原金额。
 	Money float64
+	// AlipayScheme qiu-pay 免输金额 scheme（alipays://platformapi/startapp?...），
+	// 扫码直达转账页并预填收款 PID 与扰动后金额；为空表示网关未启用该模式。
+	AlipayScheme string
 }
 
 // GatewayNotify 网关异步回调解析结果。
@@ -150,7 +153,10 @@ func (g *EpayGateway) CreatePayment(ctx context.Context, order *model.PaymentOrd
 		"return_url":   g.cfg.ReturnURL,
 		"name":         truncateUTF8(order.PlanName, 32),
 		"money":        strconv.FormatFloat(order.FinalAmount, 'f', 2, 64),
-		"sign_type":    "MD5",
+		// 部分彩虹 fork（如 lopinx/epay）mapi 下单 clientip 必填（风控/地区限制/IP 限次依据），
+		// 参与签名，取下单用户真实 IP（handler 经 WithClientIP 注入，缺省 127.0.0.1）。
+		"clientip":  clientIPFrom(ctx),
+		"sign_type": "MD5",
 	}
 	params["sign"] = epaySign(params, g.cfg.Key)
 
@@ -187,15 +193,22 @@ func (g *EpayGateway) createPaymentMapi(form url.Values) (*GatewayPayment, error
 		QRCode   string `json:"qrcode"`
 		URL      string `json:"url"`
 		Redirect string `json:"redirect"`
+		// lopinx/epay 等彩虹 fork mapi 成功返回支付链接字段为 payurl（非标准 url/redirect）。
+		PayURL string `json:"payurl"`
 		// qiu-pay 等免签约网关会做金额尾数调整（同金额并发订单 6.00→6.01），
 		// mapi 返回调整后的 money（字符串或数字，两种平台都有）。
-		Money    any    `json:"money"`
-		Data     *struct {
-			TradeNo  string `json:"trade_no"`
-			QRCode   string `json:"qrcode"`
-			URL      string `json:"url"`
-			Redirect string `json:"redirect"`
-			Money    any    `json:"money"`
+		Money any `json:"money"`
+		// qiu-pay 免输金额模式：凭证配置收款 PID 后返回 alipays:// scheme，
+		// 扫码直达转账页并预填金额，替代"扫静态码手输金额"。
+		AlipayScheme string `json:"alipay_scheme"`
+		Data         *struct {
+			TradeNo     string `json:"trade_no"`
+			QRCode      string `json:"qrcode"`
+			URL         string `json:"url"`
+			Redirect    string `json:"redirect"`
+			PayURL      string `json:"payurl"`
+			Money       any    `json:"money"`
+			AlipayScheme string `json:"alipay_scheme"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rawBody, &result); err != nil {
@@ -222,9 +235,19 @@ func (g *EpayGateway) createPaymentMapi(form url.Values) (*GatewayPayment, error
 	if payURL == "" && result.Data != nil {
 		payURL = result.Data.Redirect
 	}
+	if payURL == "" {
+		payURL = result.PayURL
+	}
+	if payURL == "" && result.Data != nil {
+		payURL = result.Data.PayURL
+	}
 	qrCode := result.QRCode
 	if qrCode == "" && result.Data != nil {
 		qrCode = result.Data.QRCode
+	}
+	alipayScheme := result.AlipayScheme
+	if alipayScheme == "" && result.Data != nil {
+		alipayScheme = result.Data.AlipayScheme
 	}
 	money := epayMoneyToFloat(result.Money)
 	if money == 0 && result.Data != nil {
@@ -234,7 +257,13 @@ func (g *EpayGateway) createPaymentMapi(form url.Values) (*GatewayPayment, error
 	if !success {
 		return nil, fmt.Errorf("epay create payment failed: code=%d msg=%s", result.Code, msg)
 	}
-	return &GatewayPayment{URL: payURL, QRCode: qrCode, TradeNo: tradeNo, Money: money}, nil
+	// 免输金额模式下 mapi 无跳转 URL：qiu-pay 自有收银台固定为 /v1/pay/{trade_no}，
+	// 作为"去支付"按钮的兜底跳转（页面内含静态收款码降级）。scheme 仅 qiu-pay 返回，
+	// 不会误伤其他彩虹协议平台。
+	if payURL == "" && alipayScheme != "" && tradeNo != "" {
+		payURL = strings.TrimRight(g.cfg.GatewayURL, "/") + "/v1/pay/" + tradeNo
+	}
+	return &GatewayPayment{URL: payURL, QRCode: qrCode, TradeNo: tradeNo, Money: money, AlipayScheme: alipayScheme}, nil
 }
 
 // epayMoneyToFloat 兼容 money 字段的字符串（qiu-pay）与数字两种 JSON 形态。
